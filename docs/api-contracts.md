@@ -1,20 +1,19 @@
 # API Contracts
 
-**Project:** github.com/andygeiss/mcp
+**Project:** mcp
 **Generated:** 2026-04-05
 
-## Overview
+## Transport
 
-The MCP server exposes a JSON-RPC 2.0 interface over stdin/stdout. All communication is newline-delimited JSON objects. No HTTP, no WebSocket, no LSP framing.
+- **Protocol:** JSON-RPC 2.0 over stdin/stdout
+- **Framing:** Newline-delimited JSON objects (one JSON object per line)
+- **MCP Version:** `2024-11-05`
 
-**MCP Protocol Version:** `2024-11-05`
-**JSON-RPC Version:** `2.0`
+## Methods
 
-## Protocol Methods
+### `initialize` (Request)
 
-### initialize
-
-Initiates the MCP handshake. Must be the first request (after optional `ping`).
+Initiates the MCP handshake. Must be the first request. Transitions server from **uninitialized** to **initializing**.
 
 **Request:**
 ```json
@@ -40,23 +39,19 @@ Initiates the MCP handshake. Must be the first request (after optional `ping`).
     "protocolVersion": "2024-11-05",
     "serverInfo": {
       "name": "mcp",
-      "version": "dev"
+      "version": "<version>"
     }
   }
 }
 ```
 
-**State transition:** uninitialized -> initializing
-
 **Error conditions:**
-- Duplicate `initialize` -> `-32600` ("already initialized")
-- After `notifications/initialized` -> `-32600` ("already initialized")
+- Already initialized: `-32600` ("already initialized")
+- Sent during initializing state: `-32600` ("already initialized")
 
----
+### `notifications/initialized` (Notification)
 
-### notifications/initialized
-
-Client notification confirming initialization is complete. No response sent (notifications never receive responses).
+Client confirms initialization is complete. Transitions server from **initializing** to **ready**. No response is sent (notifications never receive responses).
 
 **Request:**
 ```json
@@ -66,22 +61,17 @@ Client notification confirming initialization is complete. No response sent (not
 }
 ```
 
-**State transition:** initializing -> ready
+### `ping` (Request)
 
-**Behavior in other states:** Silently ignored.
-
----
-
-### ping
-
-Health check. Works in any state (uninitialized, initializing, ready).
+Health check. Works in any server state.
 
 **Request:**
 ```json
 {
   "jsonrpc": "2.0",
   "id": 2,
-  "method": "ping"
+  "method": "ping",
+  "params": {}
 }
 ```
 
@@ -94,18 +84,17 @@ Health check. Works in any state (uninitialized, initializing, ready).
 }
 ```
 
----
+### `tools/list` (Request)
 
-### tools/list
-
-Returns all registered tools in alphabetical order.
+Returns all registered tools with their input schemas. Tools are always returned in alphabetical order.
 
 **Request:**
 ```json
 {
   "jsonrpc": "2.0",
   "id": 3,
-  "method": "tools/list"
+  "method": "tools/list",
+  "params": {}
 }
 ```
 
@@ -118,31 +107,15 @@ Returns all registered tools in alphabetical order.
     "tools": [
       {
         "name": "search",
-        "description": "Search files for a pattern",
+        "description": "Searches files for a pattern",
         "inputSchema": {
           "type": "object",
           "properties": {
-            "caseSensitive": {
-              "type": "boolean",
-              "description": "Case-sensitive search (default: false)"
-            },
-            "extensions": {
-              "type": "array",
-              "items": { "type": "string" },
-              "description": "File extensions to include (e.g. [\".go\", \".md\"])"
-            },
-            "maxResults": {
-              "type": "integer",
-              "description": "Maximum results to return (default: 100)"
-            },
-            "path": {
-              "type": "string",
-              "description": "Directory to search"
-            },
-            "pattern": {
-              "type": "string",
-              "description": "Regex pattern to search for"
-            }
+            "caseSensitive": { "type": "boolean", "description": "Whether the search is case-sensitive" },
+            "extensions": { "type": "array", "items": { "type": "string" }, "description": "File extensions to include (e.g. .go, .md)" },
+            "maxResults": { "type": "integer", "description": "Maximum number of results to return" },
+            "path": { "type": "string", "description": "Root directory to search in" },
+            "pattern": { "type": "string", "description": "The search pattern (regex supported)" }
           },
           "required": ["path", "pattern"]
         }
@@ -152,11 +125,9 @@ Returns all registered tools in alphabetical order.
 }
 ```
 
----
+### `tools/call` (Request)
 
-### tools/call
-
-Invokes a registered tool by name.
+Invokes a registered tool by name with the given arguments.
 
 **Request:**
 ```json
@@ -167,8 +138,10 @@ Invokes a registered tool by name.
   "params": {
     "name": "search",
     "arguments": {
-      "path": "/path/to/project",
-      "pattern": "func main"
+      "pattern": "func main",
+      "path": ".",
+      "extensions": [".go"],
+      "maxResults": 10
     }
   }
 }
@@ -183,127 +156,125 @@ Invokes a registered tool by name.
     "content": [
       {
         "type": "text",
-        "text": "cmd/mcp/main.go:10: func main() {"
+        "text": "cmd/mcp/main.go:16: func main() {"
       }
     ]
   }
 }
 ```
 
-**Error Response (unknown tool):**
+**Tool-level Error Response** (invalid arguments, tool logic errors):
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 4,
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "invalid pattern: error parsing regexp: ..."
+      }
+    ],
+    "isError": true
+  }
+}
+```
+
+**Protocol-level Error Response** (unknown tool):
 ```json
 {
   "jsonrpc": "2.0",
   "id": 4,
   "error": {
     "code": -32602,
-    "message": "unknown tool: nonexistent"
+    "message": "unknown tool: nonexistent (available: search)"
   }
 }
 ```
 
-**Handler timeout:**
-- Default: 30 seconds
-- Returns `-32603` with `timingDiag` data including elapsed time and configured timeout
-
-**Handler panic:**
-- Returns `-32603` with `panicDiag` data including panic value, tool name, and stack trace logged to stderr
-
----
-
-## Error Responses
-
-### Parse Error (-32700)
-
-Malformed JSON, oversized message (>4 MB), or batch array.
-
+**Timeout Error Response:**
 ```json
 {
   "jsonrpc": "2.0",
-  "id": null,
+  "id": 4,
   "error": {
-    "code": -32700,
-    "message": "parse error: invalid character ..."
-  }
-}
-```
-
-### Invalid Request (-32600)
-
-Bad structure, wrong JSON-RPC version, non-object params, or state violation.
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "error": {
-    "code": -32600,
-    "message": "server not initialized"
-  }
-}
-```
-
-### Method Not Found (-32601)
-
-Unknown method, `rpc.*` reserved namespace, or unsupported capability namespace.
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "error": {
-    "code": -32601,
-    "message": "unknown method: foo/bar"
-  }
-}
-```
-
-For `prompts/*` and `resources/*` namespaces, the error includes guidance data:
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "error": {
-    "code": -32601,
-    "message": "unsupported capability namespace: prompts",
+    "code": -32603,
+    "message": "tool \"search\" execution timed out",
     "data": {
-      "namespace": "prompts",
-      "hint": "This server does not support the prompts capability"
+      "toolName": "search",
+      "elapsedMs": 30001,
+      "timeoutMs": 30000
     }
   }
 }
 ```
 
-### Invalid Params (-32602)
-
-Wrong parameter types, missing required fields, or unknown tool name.
-
+**Panic Error Response:**
 ```json
 {
   "jsonrpc": "2.0",
-  "id": 1,
+  "id": 4,
   "error": {
-    "code": -32602,
-    "message": "unknown tool: nonexistent"
+    "code": -32603,
+    "message": "internal error: tool \"search\" panicked",
+    "data": {
+      "toolName": "search",
+      "panicValue": "<panic message>"
+    }
   }
 }
 ```
 
-### Internal Error (-32603)
+## Registered Tools
 
-Handler panic or unexpected internal failure. Includes diagnostic data.
+### `search`
+
+Searches files under a root directory for lines matching a pattern (regex supported).
+
+**Input Schema:**
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | Yes | Root directory to search in |
+| `pattern` | string | Yes | Search pattern (regex supported) |
+| `caseSensitive` | boolean | No | Whether the search is case-sensitive (default: false) |
+| `extensions` | string[] | No | File extensions to include (e.g., `.go`, `.md`) |
+| `maxResults` | integer | No | Maximum number of results (default: 100) |
+
+**Security constraints:**
+- Path must be within the working directory (no escape via symlinks)
+- Path traversal (`..`) rejected
+- Null bytes in path or pattern rejected
+- Input length limit: 4096 characters
+- Binary files skipped (null byte detection in first 512 bytes)
+- Files over 1MB skipped
+- Maximum directory depth: 20 levels
+- Symlinks opened with `O_NOFOLLOW` on Unix
+
+**Output format:** One match per line: `<relative-path>:<line-number>: <line-content>`
+
+## Error Codes Reference
+
+| Code | Name | Description |
+|---|---|---|
+| `-32700` | Parse Error | Malformed JSON, batch arrays, message exceeds 4MB |
+| `-32600` | Invalid Request | Wrong JSON-RPC version, empty method, non-object params, server not initialized, already initialized |
+| `-32601` | Method Not Found | Unknown method, `rpc.*` reserved methods, unsupported capabilities |
+| `-32602` | Invalid Params | Wrong types, missing fields, unknown/empty tool name |
+| `-32603` | Internal Error | Handler panics, timeouts, context cancellation, marshal failures |
+
+## Unsupported Capability Response
+
+Methods under `prompts/` and `resources/` namespaces return `-32601` with guidance data:
 
 ```json
 {
-  "jsonrpc": "2.0",
-  "id": 1,
   "error": {
-    "code": -32603,
-    "message": "tool panic: search: runtime error: index out of range",
+    "code": -32601,
+    "message": "method not found: resources/list",
     "data": {
-      "tool": "search",
-      "panic": "runtime error: index out of range"
+      "hint": "this server supports tools only; use tools/list and tools/call",
+      "supportedCapabilities": ["tools"]
     }
   }
 }
@@ -312,40 +283,14 @@ Handler panic or unexpected internal failure. Includes diagnostic data.
 ## Protocol Behaviors
 
 | Behavior | Implementation |
-|----------|----------------|
-| Framing | Newline-delimited JSON objects |
-| Batch requests | Rejected with `-32700` |
+|---|---|
 | Missing `params` | Normalized to `{}` |
-| Null `params` | Normalized to `{}` |
-| Request `id` | Preserved as `json.RawMessage`, echoed exactly |
-| String `id` | Preserved with quotes |
-| Number `id` | Preserved as raw JSON number |
-| Null `id` | Preserved as literal `null` |
-| Notifications (no `id`) | Never responded to |
-| Unknown notifications | Silently ignored -- no response, no log |
-| EOF | Clean shutdown (exit 0) |
-| Truncated JSON + EOF | Clean shutdown (exit 0) |
-| Decode errors (non-EOF) | Fatal (exit 1) |
-| Message size limit | 4 MB per message |
-
-## Registered Tools
-
-### search
-
-Recursive file content search with regex pattern matching.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `path` | string | yes | -- | Directory to search |
-| `pattern` | string | yes | -- | Regex pattern to search for |
-| `caseSensitive` | boolean | no | false | Case-sensitive search |
-| `extensions` | string[] | no | all | File extensions to include |
-| `maxResults` | integer | no | 100 | Maximum results to return |
-
-**Security features:**
-- Path must be within current working directory
-- Symlink resolution with validation (no directory traversal)
-- `O_NOFOLLOW` flag on Unix to prevent symlink attacks
-- Binary file detection (null byte check in first 512 bytes)
-- 1 MB file size limit
-- Context-aware cancellation
+| `null` params | Normalized to `{}` |
+| Missing `arguments` in tools/call | Normalized to `{}` |
+| `null` arguments in tools/call | Normalized to `{}` |
+| Notification (no `id`) | Never responded to |
+| Unknown notification | Silently ignored |
+| String `id` | Preserved and echoed exactly |
+| Number `id` | Preserved and echoed exactly |
+| `null` `id` | Preserved and echoed exactly |
+| Request validation failure on notification | Silently dropped (no response) |

@@ -1,189 +1,141 @@
 # Architecture
 
-**Project:** github.com/andygeiss/mcp
+**Project:** mcp
 **Generated:** 2026-04-05
 
 ## Executive Summary
 
-The MCP server is a single-binary Go application that implements the Model Context Protocol over stdin/stdout using JSON-RPC 2.0. The architecture is intentionally flat: four internal packages with a strict one-way dependency graph, no external dependencies, and no abstraction ahead of need.
+The MCP server is a single Go binary (`cmd/mcp/`) that implements the Model Context Protocol over stdin/stdout using JSON-RPC 2.0. The architecture is intentionally flat -- no hexagonal layers, no bounded contexts, no dependency injection frameworks. Complexity is added only when the code demands it.
 
 ## Architecture Pattern
 
-**Sequential message loop** with a three-state lifecycle state machine. No goroutine pools, no worker queues. One message decoded, dispatched, responded, repeat. Tool handlers run with timeout and panic recovery via a dedicated goroutine per call.
-
-## Package Structure and Dependency Graph
+**Sequential dispatch loop** -- the server reads one JSON-RPC message at a time from stdin, dispatches it to the appropriate handler, and writes the response to stdout. There are no goroutine pools for request handling; concurrency exists only within individual tool handler execution (timeout/panic recovery).
 
 ```
-cmd/mcp/main.go
-    |
-    v
-internal/server/
-    |         \
-    v          v
-internal/     internal/
-protocol/     tools/
-               |
-               v
-          internal/
-          protocol/
+stdin -> json.Decoder -> Decode -> Validate -> Dispatch -> Encode -> json.Encoder -> stdout
+                                                  |
+                                            State Machine
+                                         (uninitialized ->
+                                          initializing ->
+                                              ready)
 ```
 
-**Rules enforced by tests (claudemd_test.go):**
-- `protocol/` has zero dependencies on other internal packages
-- `tools/` may import `protocol/` but never `server/`
-- `assert/` is test-only (never imported by non-test files)
+## Package Structure and Dependency Direction
+
+```
+cmd/mcp/           -> internal/server/ -> internal/protocol/
+                   -> internal/tools/  -> internal/protocol/
+
+cmd/init/          (standalone, self-deleting template rewriter)
+
+internal/pkg/assert/  (test-only, zero internal dependencies)
+```
+
+### Package Responsibilities
+
+| Package | Responsibility |
+|---|---|
+| `cmd/mcp/` | Wiring only: parse flags, inject `os.Stdin`/`os.Stdout`/`os.Stderr`, register tools, call `server.Run`, `os.Exit` |
+| `cmd/init/` | Template rewriter for consumers who fork/clone the repo. Rewrites module paths, renames binary dir, self-deletes. Not part of normal builds. |
+| `internal/protocol/` | JSON-RPC 2.0 types (`Request`, `Response`, `Error`, `CodeError`), codec (`Decode`, `Validate`, `Encode`), and protocol constants. Zero internal dependencies. |
+| `internal/server/` | MCP server lifecycle: initialization state machine, method dispatch, tool call execution with timeout/panic recovery, per-message size enforcement via counting reader. |
+| `internal/tools/` | Tool registry, reflection-based schema derivation from struct tags, individual tool handler implementations (currently: `search`), input validation. |
+| `internal/pkg/assert/` | Lightweight generic test assertion helper (`assert.That`). Test-only. |
 
 ## Initialization State Machine
 
 Three states: **uninitialized** -> **initializing** -> **ready**.
 
-```
-                    initialize
-  [uninitialized] ────────────> [initializing]
-        |                            |
-        | ping (always OK)           | notifications/initialized
-        |                            |
-        v                            v
-  [uninitialized]              [ready]
-                                     |
-                                     | All methods available
-                                     v
-                               [ready]
-```
+| State | Allowed Methods | Rejected With |
+|---|---|---|
+| **Uninitialized** | `initialize`, `ping` | `-32600` ("server not initialized") |
+| **Initializing** | `ping` | `-32600` ("server initializing, awaiting notifications/initialized") |
+| **Ready** | All methods | -- |
 
-| State | Allowed | Rejected with |
-|-------|---------|---------------|
-| Uninitialized | `initialize`, `ping` | `-32600` ("server not initialized") |
-| Initializing | `ping` | `-32600` ("server not initialized") |
-| Ready | All methods | -- |
-
-- `initialize` -> respond with capabilities, transition to initializing. Duplicate -> `-32600`.
-- `notifications/initialized` in initializing -> transition to ready. Other states -> silently ignore.
+- `initialize` -> respond with capabilities, transition to **initializing**. Duplicate -> `-32600` ("already initialized").
+- `notifications/initialized` in **initializing** -> transition to **ready**. Other states -> silently ignore.
 - `ping` always works in any state.
 - Unknown notifications are silently ignored -- never respond, never log.
 
-## Transport Layer
+## Transport Constraints
 
-| Stream | Purpose | Implementation |
-|--------|---------|----------------|
-| stdin | JSON-RPC requests | Persistent `json.NewDecoder`, no `bufio.Scanner` |
-| stdout | JSON-RPC responses only | `json.NewEncoder`, every byte is valid JSON-RPC |
-| stderr | Diagnostics | `slog.JSONHandler` exclusively |
+| Channel | Purpose | Rules |
+|---|---|---|
+| **stdin** | JSON-RPC requests | Persistent `json.NewDecoder`. No `bufio.Scanner`. |
+| **stdout** | JSON-RPC responses only | Every byte must be a valid JSON-RPC message. No logs, no debug output. |
+| **stderr** | Structured diagnostics | `slog.JSONHandler` exclusively. `snake_case` log keys. |
 
-**I/O injection:** Constructors accept `io.Reader`/`io.Writer` -- not `*os.File` -- so tests inject `bytes.Buffer`.
+- **I/O injection**: Constructors accept `io.Reader`/`io.Writer` (not `*os.File`) so tests inject `bytes.Buffer`.
+- **EOF handling**: `io.EOF` / `io.ErrUnexpectedEOF` -> clean shutdown (exit 0). All other decode errors -> fatal (exit 1).
+- **Signals**: `SIGINT`/`SIGTERM` via `signal.NotifyContext` cancel the server context for graceful shutdown.
 
-**EOF handling:** `io.EOF` / `io.ErrUnexpectedEOF` -> clean shutdown (exit 0). All other decode errors -> fatal (exit 1).
+## Per-Message Size Enforcement
 
-**Size limits:** Per-message via `countingReader` (4 MB limit). Not cumulative -- counter resets between messages.
+The `countingReader` wraps stdin and tracks bytes read since the last reset. When the 4MB limit is exceeded, the server sends a `-32700` (parse error) response and exits fatally. The counter resets before each `Decode` call.
 
-**Signals:** `SIGINT`/`SIGTERM` cancel the server context for graceful shutdown. No drain -- exit promptly.
+| Limit | Value | Scope |
+|---|---|---|
+| Max message size | 4 MB | Per incoming JSON-RPC message |
+| Max result size | 1 MB | Per tool call response body |
 
-## JSON-RPC 2.0 Protocol
+## Tool Handler Dispatch
+
+Tool calls are dispatched in a goroutine with:
+
+1. **Panic recovery** -- catches panics, logs stack trace to stderr, returns `-32603` with structured `panicDiag` data (tool name, panic value -- no stack in wire response).
+2. **Handler timeout** -- `context.WithTimeout` (default 30s, configurable via `WithHandlerTimeout`).
+3. **Safety margin** -- a backup timer (default 1s) that fires if the handler ignores context cancellation entirely.
+4. **Context cancellation** -- parent context cancellation propagates to the handler.
+
+All error responses include structured `Error.Data` with timing diagnostics (`elapsedMs`, `timeoutMs`, `toolName`).
+
+## Tool Schema Derivation
+
+Tool input schemas are generated automatically from Go struct field tags via reflection (`tools/schema.go`):
+
+- `json:"fieldName"` -> property name
+- `json:"fieldName,omitempty"` -> optional (not in `required`)
+- `description:"..."` tag -> property description
+- Go types map to JSON Schema: `string` -> `"string"`, `int*` -> `"integer"`, `float*` -> `"number"`, `bool` -> `"boolean"`, `[]T` -> `"array"`, `map[string]T` -> `"object"` with `additionalProperties`, structs -> nested `"object"`
+
+## Method Routing (Ready State)
+
+| Method Pattern | Handler |
+|---|---|
+| `tools/list` | Returns all registered tools (alphabetically sorted) |
+| `tools/call` | Dispatches to named tool handler with timeout/panic recovery |
+| `prompts/*` | `-32601` with guidance data (supported capabilities) |
+| `resources/*` | `-32601` with guidance data (supported capabilities) |
+| `rpc.*` | `-32601` ("reserved method") |
+| Other | `-32601` ("unknown method") |
+
+## JSON-RPC 2.0 Specifics
 
 - Newline-delimited JSON objects. No LSP framing. No batch requests (JSON array -> `-32700`).
-- `id` is `json.RawMessage` -- preserve original type, echo back exactly.
+- `id` is `json.RawMessage` -- preserve original type (string, number, null), echo back exactly.
 - A message without `id` is a notification -- never respond to it.
 - `params`: when absent or `null`, default to `{}` before unmarshaling.
-- Error `message` must be contextual (e.g., `"unknown tool: foo"`, not `"invalid params"`).
+- Error `message` fields are contextual (e.g., `"unknown tool: foo"`, not generic `"invalid params"`).
 
-### Error Codes
+## Error Code Catalog
 
-| Code | Meaning | Example |
-|------|---------|---------|
-| `-32700` | Parse error | Malformed JSON, size limit exceeded, batch array |
-| `-32600` | Invalid request | Bad structure, not initialized, already initialized |
-| `-32601` | Method not found | Unknown method, `rpc.*` reserved, unsupported namespaces |
-| `-32602` | Invalid params | Wrong types, missing fields, unknown tool name |
-| `-32603` | Internal error | Handler panic (includes panic value + stack in Data) |
+| Code | Meaning | When Used |
+|---|---|---|
+| `-32700` | Parse error | Malformed JSON, batch arrays, message size exceeded |
+| `-32600` | Invalid request | Wrong JSON-RPC version, empty method, non-object params, not initialized, already initialized |
+| `-32601` | Method not found | Unknown method, `rpc.*` reserved, unsupported capabilities (prompts/, resources/) |
+| `-32602` | Invalid params | Wrong types, missing required fields, unknown tool name, empty tool name |
+| `-32603` | Internal error | Handler panics, timeouts, context cancellation, marshal failures |
 
-### Unsupported Capability Namespaces
+## Security Measures
 
-`prompts/*` and `resources/*` methods return `-32601` with a `capabilityGuidance` data payload indicating the namespace is not supported.
+- **Input validation**: Path traversal prevention, null byte rejection, length limits (4096 chars per input string)
+- **Symlink safety**: `O_NOFOLLOW` on Unix for file opens in search tool; symlink resolution with working directory containment check
+- **Binary file detection**: Files containing null bytes in first 512 bytes are skipped
+- **No shell execution**: The search tool uses Go's `regexp` and `filepath.WalkDir`, never shells out
+- **Supply chain**: Pinned GitHub Actions by hash, Dependabot for automated updates, Cosign signing, SBOM generation
+- **Static analysis**: CodeQL weekly, 50+ golangci-lint rules, `depguard` blocks external deps and json/v2
 
-## Tool System
+## Trace Mode
 
-### Registry
-
-`tools.Registry` manages named tools with:
-- Thread-unsafe registration (done at startup)
-- Alphabetically sorted tool list (deterministic ordering)
-- Lookup by name for dispatch
-- Duplicate name detection (panics at registration)
-
-### Schema Derivation
-
-Input schemas are auto-derived from Go struct tags via reflection (`tools/schema.go`):
-- `json:"name"` tag -> property name
-- `description:"..."` tag -> property description
-- Fields without `omitempty` -> required
-- Supports: string, int, float, bool, slices, maps (string keys), nested structs, pointers
-
-### Tool Handler Execution
-
-1. Server dispatches `tools/call` to the registered handler
-2. Handler runs in a goroutine with `context.WithTimeout` (default 30s)
-3. **Panic recovery:** Panics are caught, logged with stack trace to stderr, returned as `-32603` with `panicDiag` data
-4. **Timeout:** If handler exceeds timeout, context cancels. Safety timer (default +1s) ensures the goroutine is not leaked
-5. **Cancellation:** If parent context cancels (SIGINT/SIGTERM), handler receives cancellation via context
-
-### Built-in Tools
-
-**search** -- Recursive file content search with regex:
-- Path validation (must be within working directory)
-- Symlink protection (`O_NOFOLLOW` on Unix)
-- Binary file detection (null byte check)
-- 1 MB file size limit
-- Extension filtering
-- Case-insensitive regex support
-- Context-aware cancellation
-- MaxResults limiting (default 100)
-
-## Server Core (server.go)
-
-460 lines implementing:
-- Three-state lifecycle management
-- Sequential message dispatch loop (decode -> validate -> route -> respond)
-- Method routing: `initialize`, `ping`, `tools/list`, `tools/call`
-- Notification handling: `notifications/initialized` (silently ignore unknown)
-- Error response construction with contextual messages
-- Handler timeout with safety timer
-- Panic recovery with structured diagnostics
-
-## Counting Reader (counting_reader.go)
-
-Per-message size enforcement:
-- Wraps `io.Reader`, tracks bytes since last `Reset()`
-- Returns `errMessageTooLarge` when 4 MB limit exceeded
-- Accounts for json.Decoder internal buffering (4-64 KB)
-- Reset between messages for per-message (not cumulative) enforcement
-
-## Template Rewriter (cmd/init/)
-
-One-time project initialization tool:
-1. Rewrites `go.mod` module path
-2. Replaces all import statements in `.go` files
-3. Replaces references in text files (README, Makefile, etc.)
-4. Renames `cmd/mcp/` to `cmd/<projectName>/`
-5. Runs `go mod tidy`
-6. Self-deletes `cmd/init/`
-7. Verifies zero template fingerprint remains
-
-Uses `bytes.ReplaceAll` for simplicity (not AST parsing). Path-sanitized with `filepath.Clean`. Idempotent.
-
-## Testing Strategy
-
-| Category | Approach |
-|----------|----------|
-| Unit tests | Black-box (`package foo_test`), parallel, table-driven |
-| Integration tests | `//go:build integration`, full pipeline through server |
-| Fuzz tests | Native Go fuzz for protocol decoder |
-| Benchmarks | Codec encode/decode, schema derivation |
-| I/O tests | Slow readers, partial reads, closed writers |
-| Concurrency | `testing/synctest` with virtual time (no wall-clock flakiness) |
-| Documentation | `claudemd_test.go` validates CLAUDE.md claims match tests |
-| Dependency | Tests enforce import graph rules |
-| External | OSS-Fuzz with AddressSanitizer |
-
-**Naming:** `Test_<Unit>_With_<Condition>_Should_<Outcome>`
-**Assertions:** `assert.That(t, "description", got, expected)`
-**Structure:** `// Arrange` / `// Act` / `// Assert`
+Enabled via `MCP_TRACE=1` environment variable. Logs every incoming request and outgoing response to stderr. Zero overhead when disabled (boolean check before marshaling).
