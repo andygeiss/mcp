@@ -1,0 +1,130 @@
+version: "2"
+
+run:
+  build-tags:
+    - integration
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/andygeiss/mcp
+
+linters:
+  default: none
+  enable:
+    - asciicheck
+    - bidichk
+    - copyloopvar
+    - cyclop
+    - depguard
+    - dupword
+    - durationcheck
+    - errcheck
+    - errname
+    - errorlint
+    - exhaustive
+    - fatcontext
+    - forbidigo
+    - forcetypeassert
+    - funcorder
+    - funlen
+    - gocheckcompilerdirectives
+    - gochecknoinits
+    - gocognit
+    - goconst
+    - gocritic
+    - gomoddirectives
+    - gosec
+    - govet
+    - ineffassign
+    - intrange
+    - mirror
+    - misspell
+    - modernize
+    - nestif
+    - nilerr
+    - nilnesserr
+    - nilnil
+    - nolintlint
+    - nonamedreturns
+    - paralleltest
+    - perfsprint
+    - predeclared
+    - reassign
+    - recvcheck
+    - revive
+    - sloglint
+    - staticcheck
+    - tagliatelle
+    - testpackage
+    - thelper
+    - tparallel
+    - unconvert
+    - unparam
+    - unused
+    - usestdlibvars
+    - usetesting
+    - wastedassign
+    - whitespace
+  settings:
+    cyclop:
+      max-complexity: 15
+    depguard:
+      rules:
+        no-json-v2:
+          deny:
+            - pkg: "encoding/json/v2"
+              desc: "use encoding/json (stable)"
+            - pkg: "encoding/json/jsontext"
+              desc: "use encoding/json (stable)"
+        no-old-log:
+          deny:
+            - pkg: "log$"
+              desc: "use log/slog for all logging"
+    exhaustive:
+      default-signifies-exhaustive: true
+    forbidigo:
+      forbid:
+        - pattern: '^fmt\.Print(ln|f)?$'
+          msg: "stdout is protocol-only; use fmt.Fprint with the injected io.Writer"
+        - pattern: '^(print|println)$'
+          msg: "use fmt.Fprint with the injected io.Writer"
+      analyze-types: true
+    funlen:
+      lines: 80
+      statements: 50
+    gocognit:
+      min-complexity: 20
+    goconst:
+      min-len: 3
+      min-occurrences: 3
+    nestif:
+      min-complexity: 4
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+    sloglint:
+      key-naming-case: snake
+      static-msg: true
+    tagliatelle:
+      case:
+        rules:
+          json: camel
+  exclusions:
+    generated: strict
+    rules:
+      - path: "cmd/"
+        linters:
+          - forbidigo
+      - path: "_test\\.go"
+        linters:
+          - funlen
+          - gocognit
+          - cyclop
+      - path: "_internal_test\\.go"
+        linters:
+          - testpackage

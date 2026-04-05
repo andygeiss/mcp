@@ -1,0 +1,2 @@
+go test fuzz v1
+string("{\"jsonrpc\":\"\",\"method\":\"\",\"id\":\"\",\"params\",\t\t\t\t0")
