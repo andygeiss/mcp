@@ -46,7 +46,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}
 Fork or clone this repo, then run the init tool to rewrite the module path and binary name:
 
 ```bash
-go run ./cmd/init -module github.com/yourorg/yourproject -name yourproject
+go run ./cmd/init github.com/yourorg/yourproject
 ```
 
 This rewrites all imports, renames `cmd/mcp/` to `cmd/yourproject/`, runs `go mod tidy`, and self-deletes.
