@@ -309,6 +309,78 @@ func Test_CodeError_With_NonCodeError_Should_NotMatch(t *testing.T) {
 	assert.That(t, "found", ok, false)
 }
 
+// --- Constructor tests ---
+
+func Test_ErrInternalError_Should_ReturnCorrectCode(t *testing.T) {
+	t.Parallel()
+
+	// Act
+	err := protocol.ErrInternalError("something broke")
+
+	// Assert
+	assert.That(t, "code", err.Code, protocol.InternalError)
+	assert.That(t, "message", err.Message, "something broke")
+}
+
+func Test_ErrInvalidParams_Should_ReturnCorrectCode(t *testing.T) {
+	t.Parallel()
+
+	// Act
+	err := protocol.ErrInvalidParams("missing field: name")
+
+	// Assert
+	assert.That(t, "code", err.Code, protocol.InvalidParams)
+	assert.That(t, "message", err.Message, "missing field: name")
+}
+
+func Test_ErrInvalidRequest_Should_ReturnCorrectCode(t *testing.T) {
+	t.Parallel()
+
+	// Act
+	err := protocol.ErrInvalidRequest("server not initialized")
+
+	// Assert
+	assert.That(t, "code", err.Code, protocol.InvalidRequest)
+	assert.That(t, "message", err.Message, "server not initialized")
+}
+
+func Test_ErrMethodNotFound_Should_ReturnCorrectCode(t *testing.T) {
+	t.Parallel()
+
+	// Act
+	err := protocol.ErrMethodNotFound("unknown method: foo")
+
+	// Assert
+	assert.That(t, "code", err.Code, protocol.MethodNotFound)
+	assert.That(t, "message", err.Message, "unknown method: foo")
+}
+
+func Test_ErrParseError_Should_ReturnCorrectCode(t *testing.T) {
+	t.Parallel()
+
+	// Act
+	err := protocol.ErrParseError("invalid JSON")
+
+	// Assert
+	assert.That(t, "code", err.Code, protocol.ParseError)
+	assert.That(t, "message", err.Message, "invalid JSON")
+}
+
+func Test_ErrConstructor_With_Wrapping_Should_ExtractViaErrorsAsType(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	wrapped := fmt.Errorf("context: %w", protocol.ErrInvalidParams("bad input"))
+
+	// Act
+	pe, ok := errors.AsType[*protocol.CodeError](wrapped)
+
+	// Assert
+	assert.That(t, "found", ok, true)
+	assert.That(t, "code", pe.Code, protocol.InvalidParams)
+	assert.That(t, "message", pe.Message, "bad input")
+}
+
 // --- NewErrorResponse with Data tests ---
 
 func Test_NewErrorResponse_With_Data_Should_IncludeDataField(t *testing.T) {

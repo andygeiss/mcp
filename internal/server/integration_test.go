@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -16,8 +17,27 @@ import (
 	"github.com/andygeiss/mcp/internal/tools"
 )
 
+// assertNoGoroutineLeaks verifies that goroutine count has not grown beyond
+// a small tolerance (±2 for runtime background goroutines).
+func assertNoGoroutineLeaks(t *testing.T, before int) {
+	t.Helper()
+	// Allow goroutines to settle — tool handler goroutines may still be
+	// cleaning up (deferred cancels, channel sends) immediately after Run returns.
+	for range 10 {
+		runtime.Gosched()
+		if runtime.NumGoroutine() <= before+2 {
+			return
+		}
+	}
+	after := runtime.NumGoroutine()
+	if after > before+2 {
+		t.Errorf("goroutine leak: before=%d, after=%d (tolerance: 2)", before, after)
+	}
+}
+
 func Test_Integration_With_FullPipeline_Should_CompleteSuccessfully(t *testing.T) {
 	t.Parallel()
+	goroutinesBefore := runtime.NumGoroutine()
 
 	// Arrange — full pipeline: initialize -> initialized -> tools/list -> tools/call
 	input := `{"jsonrpc":"2.0","method":"initialize","id":1,"params":{"capabilities":{}}}` + "\n" +
@@ -104,6 +124,8 @@ func Test_Integration_With_FullPipeline_Should_CompleteSuccessfully(t *testing.T
 	assert.That(t, "content count", len(callResult.Content), 1)
 	assert.That(t, "call text", callResult.Content[0].Text, "integration test")
 	assert.That(t, "call type", callResult.Content[0].Type, "text")
+
+	assertNoGoroutineLeaks(t, goroutinesBefore)
 }
 
 func Test_Integration_With_PanickingHandler_Should_RecoverAndContinue(t *testing.T) {

@@ -40,13 +40,13 @@ func Decode(dec *json.Decoder) (Request, error) {
 // must be a JSON object. Returns nil when the request is valid.
 func Validate(req Request) *CodeError {
 	if req.JSONRPC != Version {
-		return &CodeError{Code: InvalidRequest, Message: "unsupported jsonrpc version"}
+		return ErrInvalidRequest("unsupported jsonrpc version")
 	}
 	if req.Method == "" {
-		return &CodeError{Code: InvalidRequest, Message: "method is required"}
+		return ErrInvalidRequest("method is required")
 	}
 	if len(req.Params) > 0 && req.Params[0] != '{' {
-		return &CodeError{Code: InvalidRequest, Message: "params must be an object"}
+		return ErrInvalidRequest("params must be an object")
 	}
 	return nil
 }
