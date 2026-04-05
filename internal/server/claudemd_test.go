@@ -159,6 +159,9 @@ func Test_ClaudeMD_ImportGraph_Should_EnforceDependencyRules(t *testing.T) {
 	assertImport := modulePath + "pkg/assert"
 	err := filepath.WalkDir(filepath.Join(projectRoot, "internal"), func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
+			if d != nil && d.IsDir() {
+				return filepath.SkipDir
+			}
 			return walkErr
 		}
 		if d.IsDir() || strings.HasSuffix(path, "_test.go") || !strings.HasSuffix(path, ".go") {

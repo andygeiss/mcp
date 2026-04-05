@@ -10,6 +10,8 @@ on:
         default: "5m"
         type: string
 
+permissions: read-all
+
 env:
   FUZZTIME: ${{ inputs.fuzztime || '5m' }}
 
