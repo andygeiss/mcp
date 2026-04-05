@@ -1,0 +1,7 @@
+fuzzing_engines:
+  - libfuzzer
+homepage: https://github.com/andygeiss/mcp
+language: go
+main_repo: https://github.com/andygeiss/mcp
+sanitizers:
+  - address

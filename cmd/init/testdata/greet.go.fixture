@@ -1,0 +1,13 @@
+package tools
+
+import "context"
+
+// GreetInput defines the parameters for the greet tool.
+type GreetInput struct {
+	Name string `json:"name" description:"Name of the person to greet"`
+}
+
+// Greet returns a greeting message.
+func Greet(_ context.Context, input GreetInput) Result {
+	return TextResult("Hello, " + input.Name)
+}

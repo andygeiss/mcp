@@ -1,0 +1,86 @@
+PASS
+ok  	github.com/andygeiss/mcp/internal/pkg/assert	0.270s
+goos: darwin
+goarch: arm64
+pkg: github.com/andygeiss/mcp/internal/protocol
+cpu: Apple M4 Pro
+Benchmark_Decode_SingleRequest-14        	  842304	      1305 ns/op	    1536 B/op	      22 allocs/op
+Benchmark_Decode_SingleRequest-14        	  911625	      1306 ns/op	    1536 B/op	      22 allocs/op
+Benchmark_Decode_SingleRequest-14        	  930962	      1322 ns/op	    1536 B/op	      22 allocs/op
+Benchmark_Decode_SingleRequest-14        	  840220	      1315 ns/op	    1536 B/op	      22 allocs/op
+Benchmark_Decode_SingleRequest-14        	  929292	      1294 ns/op	    1536 B/op	      22 allocs/op
+Benchmark_Decode_SingleRequest-14        	  952639	      1292 ns/op	    1536 B/op	      22 allocs/op
+Benchmark_Decode_InitializeRequest-14    	  738782	      1659 ns/op	    1632 B/op	      22 allocs/op
+Benchmark_Decode_InitializeRequest-14    	  720613	      1667 ns/op	    1632 B/op	      22 allocs/op
+Benchmark_Decode_InitializeRequest-14    	  732394	      1653 ns/op	    1632 B/op	      22 allocs/op
+Benchmark_Decode_InitializeRequest-14    	  736476	      1656 ns/op	    1632 B/op	      22 allocs/op
+Benchmark_Decode_InitializeRequest-14    	  728341	      1675 ns/op	    1632 B/op	      22 allocs/op
+Benchmark_Decode_InitializeRequest-14    	  730758	      1679 ns/op	    1632 B/op	      22 allocs/op
+Benchmark_Decode_LargeParams-14          	  151363	      7885 ns/op	    5216 B/op	      23 allocs/op
+Benchmark_Decode_LargeParams-14          	  153529	      7837 ns/op	    5216 B/op	      23 allocs/op
+Benchmark_Decode_LargeParams-14          	  152212	      7846 ns/op	    5216 B/op	      23 allocs/op
+Benchmark_Decode_LargeParams-14          	  154395	      7934 ns/op	    5216 B/op	      23 allocs/op
+Benchmark_Decode_LargeParams-14          	  152236	      7848 ns/op	    5216 B/op	      23 allocs/op
+Benchmark_Decode_LargeParams-14          	  154338	      7823 ns/op	    5216 B/op	      23 allocs/op
+Benchmark_Decode_Notification-14         	 1617795	       746.9 ns/op	    1304 B/op	      15 allocs/op
+Benchmark_Decode_Notification-14         	 1618005	       741.5 ns/op	    1304 B/op	      15 allocs/op
+Benchmark_Decode_Notification-14         	 1602910	       745.9 ns/op	    1304 B/op	      15 allocs/op
+Benchmark_Decode_Notification-14         	 1617769	       739.4 ns/op	    1304 B/op	      15 allocs/op
+Benchmark_Decode_Notification-14         	 1636508	       735.4 ns/op	    1304 B/op	      15 allocs/op
+Benchmark_Decode_Notification-14         	 1624412	       742.6 ns/op	    1304 B/op	      15 allocs/op
+Benchmark_Encode_SuccessResponse-14      	 4487016	       268.7 ns/op	      80 B/op	       1 allocs/op
+Benchmark_Encode_SuccessResponse-14      	 4475629	       267.7 ns/op	      80 B/op	       1 allocs/op
+Benchmark_Encode_SuccessResponse-14      	 4492981	       266.0 ns/op	      80 B/op	       1 allocs/op
+Benchmark_Encode_SuccessResponse-14      	 4499204	       267.7 ns/op	      80 B/op	       1 allocs/op
+Benchmark_Encode_SuccessResponse-14      	 4476519	       270.2 ns/op	      80 B/op	       1 allocs/op
+Benchmark_Encode_SuccessResponse-14      	 4468800	       269.0 ns/op	      80 B/op	       1 allocs/op
+Benchmark_Encode_ErrorResponse-14        	 7048988	       169.3 ns/op	      80 B/op	       1 allocs/op
+Benchmark_Encode_ErrorResponse-14        	 7056637	       169.9 ns/op	      80 B/op	       1 allocs/op
+Benchmark_Encode_ErrorResponse-14        	 7022899	       171.0 ns/op	      80 B/op	       1 allocs/op
+Benchmark_Encode_ErrorResponse-14        	 6727579	       172.0 ns/op	      80 B/op	       1 allocs/op
+Benchmark_Encode_ErrorResponse-14        	 7066962	       169.6 ns/op	      80 B/op	       1 allocs/op
+Benchmark_Encode_ErrorResponse-14        	 7048869	       171.4 ns/op	      80 B/op	       1 allocs/op
+PASS
+ok  	github.com/andygeiss/mcp/internal/protocol	43.477s
+goos: darwin
+goarch: arm64
+pkg: github.com/andygeiss/mcp/internal/server
+cpu: Apple M4 Pro
+Benchmark_RequestResponse_EchoTool-14             	   36277	     31253 ns/op	    9630 B/op	     124 allocs/op
+Benchmark_RequestResponse_EchoTool-14             	   38958	     31141 ns/op	    9627 B/op	     124 allocs/op
+Benchmark_RequestResponse_EchoTool-14             	   39051	     30725 ns/op	    9628 B/op	     124 allocs/op
+Benchmark_RequestResponse_EchoTool-14             	   38848	     30784 ns/op	    9627 B/op	     124 allocs/op
+Benchmark_RequestResponse_EchoTool-14             	   38547	     30821 ns/op	    9627 B/op	     124 allocs/op
+Benchmark_RequestResponse_EchoTool-14             	   38866	     30922 ns/op	    9628 B/op	     124 allocs/op
+Benchmark_RequestResponse_MultipleToolCalls-14    	   14624	     81818 ns/op	   26618 B/op	     391 allocs/op
+Benchmark_RequestResponse_MultipleToolCalls-14    	   14577	     82279 ns/op	   26746 B/op	     393 allocs/op
+Benchmark_RequestResponse_MultipleToolCalls-14    	   14613	     82028 ns/op	   26771 B/op	     393 allocs/op
+Benchmark_RequestResponse_MultipleToolCalls-14    	   14754	     81272 ns/op	   26625 B/op	     391 allocs/op
+Benchmark_RequestResponse_MultipleToolCalls-14    	   14580	     82523 ns/op	   26614 B/op	     391 allocs/op
+Benchmark_RequestResponse_MultipleToolCalls-14    	   14692	     81578 ns/op	   26759 B/op	     393 allocs/op
+Benchmark_RequestResponse_PingOnly-14             	   64578	     18337 ns/op	    6745 B/op	      86 allocs/op
+Benchmark_RequestResponse_PingOnly-14             	   65058	     18435 ns/op	    6745 B/op	      86 allocs/op
+Benchmark_RequestResponse_PingOnly-14             	   64716	     18637 ns/op	    6745 B/op	      86 allocs/op
+Benchmark_RequestResponse_PingOnly-14             	   64881	     18475 ns/op	    6745 B/op	      86 allocs/op
+Benchmark_RequestResponse_PingOnly-14             	   65046	     18599 ns/op	    6745 B/op	      86 allocs/op
+Benchmark_RequestResponse_PingOnly-14             	   64347	     18696 ns/op	    6745 B/op	      86 allocs/op
+PASS
+ok  	github.com/andygeiss/mcp/internal/server	51.902s
+goos: darwin
+goarch: arm64
+pkg: github.com/andygeiss/mcp/internal/tools
+cpu: Apple M4 Pro
+Benchmark_SchemaDerivation_With_SimpleStruct-14     	 3837679	       300.8 ns/op	    1320 B/op	      10 allocs/op
+Benchmark_SchemaDerivation_With_SimpleStruct-14     	 4007848	       294.9 ns/op	    1320 B/op	      10 allocs/op
+Benchmark_SchemaDerivation_With_SimpleStruct-14     	 4050307	       293.4 ns/op	    1320 B/op	      10 allocs/op
+Benchmark_SchemaDerivation_With_SimpleStruct-14     	 4091704	       293.5 ns/op	    1320 B/op	      10 allocs/op
+Benchmark_SchemaDerivation_With_SimpleStruct-14     	 4058152	       296.2 ns/op	    1320 B/op	      10 allocs/op
+Benchmark_SchemaDerivation_With_SimpleStruct-14     	 4093891	       298.5 ns/op	    1320 B/op	      10 allocs/op
+Benchmark_SchemaDerivation_With_ComplexStruct-14    	 1646342	       727.4 ns/op	    1544 B/op	      13 allocs/op
+Benchmark_SchemaDerivation_With_ComplexStruct-14    	 1649954	       727.6 ns/op	    1544 B/op	      13 allocs/op
+Benchmark_SchemaDerivation_With_ComplexStruct-14    	 1654431	       724.2 ns/op	    1544 B/op	      13 allocs/op
+Benchmark_SchemaDerivation_With_ComplexStruct-14    	 1656118	       727.4 ns/op	    1544 B/op	      13 allocs/op
+Benchmark_SchemaDerivation_With_ComplexStruct-14    	 1652772	       726.2 ns/op	    1544 B/op	      13 allocs/op
+Benchmark_SchemaDerivation_With_ComplexStruct-14    	 1658782	       725.7 ns/op	    1544 B/op	      13 allocs/op
+PASS
+ok  	github.com/andygeiss/mcp/internal/tools	14.687s

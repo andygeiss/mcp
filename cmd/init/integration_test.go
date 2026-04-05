@@ -1,0 +1,107 @@
+//go:build integration
+
+package main
+
+import (
+	"bytes"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/andygeiss/mcp/internal/assert"
+)
+
+func Test_Integration_With_FullInit_Should_ProduceWorkingProject(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — copy project to temp dir (exclude .git and _bmad-output)
+	srcDir, err := filepath.Abs("../..")
+	assert.That(t, "abs error", err, nil)
+
+	tmpDir := t.TempDir()
+	projectDir := filepath.Join(tmpDir, "project")
+
+	err = copyDir(srcDir, projectDir)
+	assert.That(t, "copy error", err, nil)
+
+	newModule := "github.com/test-org/test-tool"
+
+	// Act — run init
+	cmd := exec.Command("go", "run", "./cmd/init", newModule)
+	cmd.Dir = projectDir
+	cmd.Env = os.Environ()
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatalf("init failed: %v\nstderr: %s", err, stderr.String())
+	}
+
+	// Assert — go mod tidy already ran as part of init, verify go.mod is correct
+	goMod, err := readFile(filepath.Join(projectDir, "go.mod"))
+	assert.That(t, "read go.mod", err, nil)
+	if !bytes.Contains(goMod, []byte("module "+newModule)) {
+		t.Fatalf("go.mod does not contain new module path: %s", goMod)
+	}
+
+	// Assert — go test passes
+	testCmd := exec.Command("go", "test", "-race", "./...")
+	testCmd.Dir = projectDir
+	testCmd.Env = os.Environ()
+	testOut, err := testCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go test failed: %v\noutput: %s", err, testOut)
+	}
+
+	// Assert — cmd/test-tool/ exists
+	_, err = os.Stat(filepath.Join(projectDir, "cmd", "test-tool", "main.go"))
+	assert.That(t, "new binary dir exists", err, nil)
+
+	// Assert — cmd/mcp/ does not exist
+	_, err = os.Stat(filepath.Join(projectDir, "cmd", "mcp"))
+	assert.That(t, "old binary dir gone", os.IsNotExist(err), true)
+
+	// Assert — cmd/init/ was removed (self-cleanup)
+	_, err = os.Stat(filepath.Join(projectDir, "cmd", "init"))
+	assert.That(t, "init dir gone", os.IsNotExist(err), true)
+
+	// Assert — zero fingerprint
+	err = verifyZeroFingerprint(projectDir)
+	assert.That(t, "zero fingerprint", err, nil)
+}
+
+// copyDir copies a directory recursively, skipping .git and _bmad-output.
+func copyDir(src, dst string) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+
+		// Skip directories that should not be copied.
+		if info.IsDir() {
+			base := filepath.Base(rel)
+			if base == ".git" || base == "_bmad-output" || base == "_bmad" || base == ".claude" {
+				return filepath.SkipDir
+			}
+			return os.MkdirAll(filepath.Join(dst, rel), info.Mode())
+		}
+
+		// Skip binary files and large files.
+		if strings.HasSuffix(path, ".exe") || strings.HasSuffix(path, ".test") {
+			return nil
+		}
+
+		data, readErr := readFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		return writeFile(filepath.Join(dst, rel), data)
+	})
+}

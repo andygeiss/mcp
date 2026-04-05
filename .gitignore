@@ -1,0 +1,21 @@
+# Go build output
+/mcp
+
+# Test artifacts
+*.test
+coverage.out
+
+# Fuzz corpora and cache
+testdata/fuzz/
+
+# BMad workflow
+_bmad/
+_bmad-output/
+
+# Claude Code local config
+.claude/
+
+# macOS
+.DS_Store
+._*
+
