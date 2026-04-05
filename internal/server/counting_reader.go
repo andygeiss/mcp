@@ -12,7 +12,10 @@ import (
 // so the effective enforcement point is between 4 MB and 4 MB + one buffer
 // fill. This imprecision is acceptable for a safety limit whose goal is
 // preventing abuse, not byte-exact enforcement.
-const maxMessageSize = 4 * 1024 * 1024 // 4 MB
+const (
+	maxMessageSize = 4 * 1024 * 1024 // 4 MB
+	maxResultSize  = 1 * 1024 * 1024 // 1 MB
+)
 
 var errMessageTooLarge = errors.New("message exceeds 4MB size limit")
 

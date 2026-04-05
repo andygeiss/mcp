@@ -17,6 +17,7 @@ const (
 	binaryCheckSize   = 512
 	defaultMaxResults = 100
 	maxFileSize       = 1 << 20 // 1 MB
+	maxSearchDepth    = 20
 )
 
 // SearchInput defines the parameters for the search tool.
@@ -31,6 +32,13 @@ type SearchInput struct {
 
 // Search searches files under Path for lines matching Pattern.
 func Search(ctx context.Context, input SearchInput) Result {
+	if err := ValidatePath(input.Path); err != nil {
+		return ErrorResult(fmt.Sprintf("invalid path: %v", err))
+	}
+	if err := ValidateInput(input.Pattern); err != nil {
+		return ErrorResult(fmt.Sprintf("invalid pattern: %v", err))
+	}
+
 	re, err := compilePattern(input.Pattern, input.CaseSensitive)
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("invalid pattern: %v", err))
@@ -110,6 +118,12 @@ func walkAndMatch(ctx context.Context, root string, re *regexp.Regexp, extSet ma
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		// Enforce maximum search depth.
+		rel, _ := filepath.Rel(cleanRoot, path)
+		depth := strings.Count(rel, string(filepath.Separator))
+		if d.IsDir() && depth >= maxSearchDepth {
+			return fs.SkipDir
 		}
 		if d.IsDir() {
 			return nil
