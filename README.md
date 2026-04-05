@@ -121,6 +121,16 @@ MCP version `2024-11-05`. JSON-RPC 2.0 with these specifics:
 | Unknown notifications | Silently ignored |
 | Error messages | Contextual (e.g. `"unknown tool: foo"`) |
 
+## Documentation
+
+Full project documentation lives in [`docs/`](docs/index.md):
+
+- [Project Overview](docs/project-overview.md)
+- [Architecture](docs/architecture.md)
+- [API Contracts](docs/api-contracts.md)
+- [Development Guide](docs/development-guide.md)
+- [Deployment Guide](docs/deployment-guide.md)
+
 ## License
 
 [MIT](LICENSE) -- Andreas Geiß

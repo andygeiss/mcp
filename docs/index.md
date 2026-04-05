@@ -1,6 +1,6 @@
 # Project Documentation Index
 
-**Project:** github.com/andygeiss/mcp
+**Project:** mcp
 **Generated:** 2026-04-05
 **Scan Level:** Exhaustive
 
@@ -8,48 +8,41 @@
 
 - **Type:** Monolith
 - **Primary Language:** Go 1.26
-- **Architecture:** Sequential message loop with three-state lifecycle
-- **Protocol:** MCP 2024-11-05 over JSON-RPC 2.0
-- **Dependencies:** Zero (standard library only)
+- **Architecture:** Sequential dispatch loop (stdin/stdout JSON-RPC 2.0)
+- **Dependencies:** Zero external (stdlib only)
+- **MCP Version:** 2024-11-05
 
 ## Quick Reference
 
-- **Tech Stack:** Go 1.26, encoding/json, log/slog, testing/synctest
+- **Tech Stack:** Go 1.26, JSON-RPC 2.0, slog, encoding/json
 - **Entry Point:** `cmd/mcp/main.go`
-- **Architecture Pattern:** Flat packages, strict one-way dependency graph
-- **Transport:** stdin (requests) / stdout (responses) / stderr (diagnostics)
-- **Registered Tools:** search (regex file content search)
+- **Architecture Pattern:** Decode -> validate -> dispatch -> encode loop
+- **Build:** `go build -ldflags "-X main.version=$(git describe --tags --always --dirty)" ./cmd/mcp/`
+- **Test:** `go test -race ./...`
+- **Lint:** `golangci-lint run ./...`
 
 ## Generated Documentation
 
-- [Project Overview](./project-overview.md) -- Executive summary, tech stack, key metrics
-- [Architecture](./architecture.md) -- Package structure, state machine, protocol, tool system
-- [Source Tree Analysis](./source-tree-analysis.md) -- Annotated directory tree, critical folders
-- [API Contracts](./api-contracts.md) -- MCP methods, JSON-RPC interface, error codes, tool schemas
-- [Development Guide](./development-guide.md) -- Setup, build, test, contribute, add tools
-- [Deployment Guide](./deployment-guide.md) -- Release pipeline, CI/CD, OSS-Fuzz, security
+- [Project Overview](./project-overview.md)
+- [Architecture](./architecture.md)
+- [Source Tree Analysis](./source-tree-analysis.md)
+- [API Contracts](./api-contracts.md)
+- [Development Guide](./development-guide.md)
+- [Deployment Guide](./deployment-guide.md)
 
 ## Existing Documentation
 
-- [README.md](../README.md) -- Project overview, quickstart, architecture summary
-- [CONTRIBUTING.md](../CONTRIBUTING.md) -- Dev setup, testing requirements, PR process
-- [SECURITY.md](../SECURITY.md) -- Security policy, vulnerability reporting
-- [CLAUDE.md](../CLAUDE.md) -- Engineering guide for AI agents (comprehensive)
-- [LICENSE](../LICENSE) -- MIT license
+- [README](../README.md) -- Project overview, quickstart, architecture summary
+- [CLAUDE.md](../CLAUDE.md) -- AI agent engineering instructions and guardrails
+- [CONTRIBUTING.md](../CONTRIBUTING.md) -- Contributor guide: prerequisites, testing, PR process
+- [SECURITY.md](../SECURITY.md) -- Security policy and vulnerability reporting
+- [LICENSE](../LICENSE) -- MIT License
 
 ## Getting Started
 
-1. **Understand the project:** Start with [Project Overview](./project-overview.md) for scope and tech stack
-2. **Understand the architecture:** Read [Architecture](./architecture.md) for the state machine, transport, and tool system
-3. **Explore the code:** Use [Source Tree Analysis](./source-tree-analysis.md) to navigate the codebase
-4. **Understand the protocol:** Reference [API Contracts](./api-contracts.md) for all MCP methods and error codes
-5. **Set up development:** Follow [Development Guide](./development-guide.md) for build, test, and contribution workflow
-6. **Release and deploy:** See [Deployment Guide](./deployment-guide.md) for CI/CD and release pipeline
-
-## For Brownfield PRD
-
-When planning new features for this project, provide this index as input to the PRD workflow:
-- **UI-only features:** Not applicable (CLI binary, no UI)
-- **Protocol features:** Reference [Architecture](./architecture.md) + [API Contracts](./api-contracts.md)
-- **New tools:** Reference [Development Guide](./development-guide.md#adding-a-new-tool) + [Architecture](./architecture.md#tool-system)
-- **Full-stack features:** Reference all architecture docs
+1. Install Go 1.26+
+2. Clone the repository
+3. Run `make check` to verify everything builds, tests pass, and lint is clean
+4. Read `docs/architecture.md` for the full technical deep-dive
+5. Read `docs/api-contracts.md` for the JSON-RPC protocol reference
+6. To add a new tool, follow the guide in `docs/development-guide.md`
