@@ -13,7 +13,11 @@ import (
 	"strings"
 )
 
-const maxFileSize = 1 << 20 // 1 MB
+const (
+	binaryCheckSize   = 512
+	defaultMaxResults = 100
+	maxFileSize       = 1 << 20 // 1 MB
+)
 
 // SearchInput defines the parameters for the search tool.
 // Copy this pattern when adding tools with multiple input types.
@@ -39,7 +43,7 @@ func Search(ctx context.Context, input SearchInput) Result {
 
 	limit := input.MaxResults
 	if limit <= 0 {
-		limit = 100
+		limit = defaultMaxResults
 	}
 
 	extSet := buildExtSet(input.Extensions)
@@ -126,8 +130,8 @@ func walkAndMatch(ctx context.Context, root string, re *regexp.Regexp, extSet ma
 
 func isBinary(data []byte) bool {
 	check := data
-	if len(check) > 512 {
-		check = check[:512]
+	if len(check) > binaryCheckSize {
+		check = check[:binaryCheckSize]
 	}
 	return bytes.Contains(check, []byte{0})
 }
