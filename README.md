@@ -123,4 +123,4 @@ MCP version `2024-11-05`. JSON-RPC 2.0 with these specifics:
 
 ## License
 
-[MIT](LICENSE) -- Andreas Geiss
+[MIT](LICENSE) -- Andreas Geiß
