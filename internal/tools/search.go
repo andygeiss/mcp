@@ -138,6 +138,10 @@ func isBinary(data []byte) bool {
 
 func matchFile(path, root string, re *regexp.Regexp, remaining int) []string {
 	cleanPath := filepath.Clean(path)
+	linfo, err := os.Lstat(cleanPath)
+	if err != nil || linfo.Mode()&os.ModeSymlink != 0 {
+		return nil
+	}
 	f, err := os.OpenFile(cleanPath, os.O_RDONLY|openNoFollowFlag, 0)
 	if err != nil {
 		return nil

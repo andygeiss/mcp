@@ -77,7 +77,8 @@ func Test_Server_With_InitializeHandshake_Should_ReturnCapabilities(t *testing.T
 	// Verify the result contains expected fields
 	var result struct {
 		Capabilities struct {
-			Tools struct{} `json:"tools"`
+			Experimental map[string]any `json:"experimental"`
+			Tools        struct{}       `json:"tools"`
 		} `json:"capabilities"`
 		ProtocolVersion string `json:"protocolVersion"`
 		ServerInfo      struct {
@@ -90,6 +91,16 @@ func Test_Server_With_InitializeHandshake_Should_ReturnCapabilities(t *testing.T
 	assert.That(t, "protocol version", result.ProtocolVersion, "2024-11-05")
 	assert.That(t, "server name", result.ServerInfo.Name, "mcp")
 	assert.That(t, "server version", result.ServerInfo.Version, "test")
+
+	// Verify experimental concurrency capability
+	concurrency, ok := result.Capabilities.Experimental["concurrency"].(map[string]any)
+	if !ok {
+		t.Fatal("expected experimental.concurrency map")
+	}
+	maxInFlight, ok := concurrency["maxInFlight"].(float64)
+	if !ok || int(maxInFlight) != 1 {
+		t.Errorf("expected maxInFlight=1, got %v", concurrency["maxInFlight"])
+	}
 }
 
 func Test_Server_With_UninitializedRequest_Should_Return32600(t *testing.T) {
@@ -489,7 +500,7 @@ func Test_Server_With_NonObjectParams_Should_Return32600(t *testing.T) {
 	assert.That(t, "error message", responses[1].Error.Message, "params must be an object")
 }
 
-func Test_Server_With_WrongFieldType_Should_ReturnContextualError(t *testing.T) {
+func Test_Server_With_WrongFieldType_Should_Return32602(t *testing.T) {
 	t.Parallel()
 
 	// Arrange — send number where string expected
@@ -498,9 +509,53 @@ func Test_Server_With_WrongFieldType_Should_ReturnContextualError(t *testing.T) 
 	// Act
 	responses, err := runServer(t, testRegistry(), input)
 
+	// Assert — wrong types now produce a -32602 protocol error, not isError result
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.InvalidParams)
+
+	if !strings.Contains(responses[1].Error.Message, "test") {
+		t.Errorf("expected tool name in error, got: %s", responses[1].Error.Message)
+	}
+}
+
+func Test_Server_With_MalformedToolArguments_Should_Return32602(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — arguments is a string, not an object
+	input := handshake() + `{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"test","arguments":"bad"}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input)
+
 	// Assert
 	assert.That(t, "error", err, nil)
 	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.InvalidParams)
+
+	if !strings.Contains(responses[1].Error.Message, "test") {
+		t.Errorf("expected tool name in error message, got: %s", responses[1].Error.Message)
+	}
+}
+
+func Test_Server_With_ErrorResult_Should_ReturnSuccessEnvelope(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — handler returns ErrorResult (tool-level failure, not protocol error)
+	r := tools.NewRegistry()
+	tools.Register(r, "failing", "returns error result", func(_ context.Context, _ testInput) tools.Result {
+		return tools.ErrorResult("something went wrong")
+	})
+
+	input := handshake() + `{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"failing","arguments":{"message":"x"}}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, r, input)
+
+	// Assert — tool-level errors stay in result with isError: true, not in error object
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "no protocol error", responses[1].Error == nil, true)
 
 	var result struct {
 		Content []struct {
@@ -511,15 +566,7 @@ func Test_Server_With_WrongFieldType_Should_ReturnContextualError(t *testing.T) 
 	err = json.Unmarshal(responses[1].Result, &result)
 	assert.That(t, "unmarshal error", err, nil)
 	assert.That(t, "isError", result.IsError, true)
-
-	// Error message should name the tool and include field context
-	text := result.Content[0].Text
-	if !strings.Contains(text, "test") {
-		t.Errorf("expected tool name in error, got: %s", text)
-	}
-	if !strings.Contains(text, "message") {
-		t.Errorf("expected field name in error, got: %s", text)
-	}
+	assert.That(t, "text", result.Content[0].Text, "something went wrong")
 }
 
 func Test_Server_With_DefaultTimeout_Should_AllowSlowHandler(t *testing.T) {
