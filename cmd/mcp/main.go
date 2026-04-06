@@ -24,6 +24,9 @@ func run() error {
 	defer stop()
 
 	registry := tools.NewRegistry()
+	// Register tools here. The search tool is included as a reference
+	// implementation — replace or extend with your own tools.
+	// See internal/tools/search.go for the implementation pattern.
 	tools.Register(registry, "search", "Searches files for a pattern", tools.Search)
 
 	srv := server.NewServer("mcp", version, registry, os.Stdin, os.Stdout, os.Stderr,

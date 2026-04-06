@@ -268,7 +268,8 @@ type initializeResult struct {
 }
 
 type initializeCapabilities struct {
-	Tools struct{} `json:"tools"`
+	Experimental map[string]any `json:"experimental,omitempty"`
+	Tools        struct{}       `json:"tools"`
 }
 
 type serverInfo struct {
@@ -281,7 +282,13 @@ func (s *Server) handleInitialize(msg protocol.Request) protocol.Response {
 	s.state = stateInitializing
 
 	result := initializeResult{
-		Capabilities:    initializeCapabilities{},
+		Capabilities: initializeCapabilities{
+			Experimental: map[string]any{
+				"concurrency": map[string]any{
+					"maxInFlight": protocol.MaxConcurrentRequests,
+				},
+			},
+		},
 		ProtocolVersion: protocol.MCPVersion,
 		ServerInfo:      serverInfo{Name: s.name, Version: s.version},
 	}
@@ -417,8 +424,9 @@ type timingDiag struct {
 	ToolName  string `json:"toolName"`
 }
 
-// toolError carries the error message and structured data from dispatchToolCall.
+// toolError carries the error code, message, and structured data from dispatchToolCall.
 type toolError struct {
+	code    int
 	data    any
 	message string
 }
@@ -440,6 +448,7 @@ func (s *Server) dispatchToolCall(ctx context.Context, tool tools.Tool, params j
 				n := runtime.Stack(buf, false)
 				s.logger.Error("tool_handler_panicked", "tool_name", tool.Name, "panic", r, "stack", string(buf[:n]))
 				ch <- outcome{err: &toolError{
+					code:    protocol.InternalError,
 					data:    &panicDiag{PanicValue: fmt.Sprint(r), ToolName: tool.Name},
 					message: fmt.Sprintf("internal error: tool %q panicked", tool.Name),
 				}}
@@ -447,9 +456,26 @@ func (s *Server) dispatchToolCall(ctx context.Context, tool tools.Tool, params j
 		}()
 		hctx, cancel := context.WithTimeout(ctx, s.handlerTimeout)
 		defer cancel()
-		result := tool.Handler(hctx, params)
+		result, err := tool.Handler(hctx, params)
+		if err != nil {
+			pe, ok := errors.AsType[*protocol.CodeError](err)
+			if ok {
+				ch <- outcome{err: &toolError{
+					code:    pe.Code,
+					data:    pe.Data,
+					message: pe.Message,
+				}}
+			} else {
+				ch <- outcome{err: &toolError{
+					code:    protocol.InternalError,
+					message: err.Error(),
+				}}
+			}
+			return
+		}
 		if errors.Is(hctx.Err(), context.DeadlineExceeded) {
 			ch <- outcome{err: &toolError{
+				code: protocol.InternalError,
 				data: &timingDiag{
 					ElapsedMs: time.Since(start).Milliseconds(),
 					TimeoutMs: s.handlerTimeout.Milliseconds(),
@@ -469,6 +495,7 @@ func (s *Server) dispatchToolCall(ctx context.Context, tool tools.Tool, params j
 	case <-ctx.Done():
 		s.logger.Error("tool_handler_cancelled", "tool_name", tool.Name)
 		return tools.Result{}, &toolError{
+			code: protocol.InternalError,
 			data: &timingDiag{
 				ElapsedMs: time.Since(start).Milliseconds(),
 				ToolName:  tool.Name,
@@ -478,6 +505,7 @@ func (s *Server) dispatchToolCall(ctx context.Context, tool tools.Tool, params j
 	case <-deadline.C:
 		s.logger.Error("tool_handler_timeout", "tool_name", tool.Name)
 		return tools.Result{}, &toolError{
+			code: protocol.InternalError,
 			data: &timingDiag{
 				ElapsedMs: time.Since(start).Milliseconds(),
 				TimeoutMs: s.handlerTimeout.Milliseconds(),

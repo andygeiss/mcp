@@ -9,6 +9,9 @@ const (
 	ParseError     = -32700
 )
 
+// MaxConcurrentRequests advertises the server's sequential dispatch limit.
+const MaxConcurrentRequests = 1
+
 // MCP method constants.
 const (
 	MCPVersion              = "2024-11-05"

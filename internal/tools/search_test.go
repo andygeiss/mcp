@@ -255,6 +255,40 @@ func Test_Search_With_DanglingSymlink_Should_ReturnError(t *testing.T) {
 	assert.That(t, "isError", result.IsError, true)
 }
 
+func Test_Search_With_SymlinkFileInWalk_Should_SkipFile(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — directory with a regular file and a symlink to an outside file
+	dir := localTempDir(t)
+	writeFile(t, dir, "regular.txt", "findme regular\n")
+
+	outsideDir := t.TempDir()
+	outsideFile := filepath.Join(outsideDir, "outside.txt")
+	if err := os.WriteFile(outsideFile, []byte("findme outside\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	link := filepath.Join(dir, "symlink.txt")
+	if err := os.Symlink(outsideFile, link); err != nil {
+		t.Skip("symlinks not supported:", err)
+	}
+
+	input := tools.SearchInput{Pattern: "findme", Path: dir}
+
+	// Act
+	result := tools.Search(context.Background(), input)
+
+	// Assert
+	assert.That(t, "isError", result.IsError, false)
+	text := result.Content[0].Text
+	if !strings.Contains(text, "regular.txt") {
+		t.Error("expected regular.txt in results")
+	}
+	if strings.Contains(text, "symlink.txt") {
+		t.Error("symlink file should be skipped")
+	}
+}
+
 func Test_Search_With_BinaryFile_Should_SkipFile(t *testing.T) {
 	t.Parallel()
 

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/andygeiss/mcp/internal/protocol"
 )
 
 // ContentBlock represents a single content item in a tool result.
@@ -56,7 +58,7 @@ type Tool struct {
 // registry after JSON unmarshalling. Tool authors do not implement this
 // directly — [Register] wraps a typed handler func(ctx, T) Result into a
 // ToolHandler automatically.
-type ToolHandler func(ctx context.Context, params json.RawMessage) Result
+type ToolHandler func(ctx context.Context, params json.RawMessage) (Result, error)
 
 // ErrorResult creates a Result indicating a tool execution failure.
 func ErrorResult(text string) Result {
@@ -111,12 +113,15 @@ func Register[T any](r *Registry, name, description string, handler func(ctx con
 
 	schema := deriveSchema[T]()
 
-	wrapped := func(ctx context.Context, params json.RawMessage) Result {
+	wrapped := func(ctx context.Context, params json.RawMessage) (Result, error) {
 		var input T
 		if err := json.Unmarshal(params, &input); err != nil {
-			return ErrorResult(fmt.Sprintf("invalid arguments for tool %q: %v", name, err))
+			return Result{}, &protocol.CodeError{
+				Code:    protocol.InvalidParams,
+				Message: fmt.Sprintf("invalid arguments for tool %q: %v", name, err),
+			}
 		}
-		return handler(ctx, input)
+		return handler(ctx, input), nil
 	}
 
 	tool := Tool{
