@@ -384,7 +384,7 @@ func (s *Server) handleToolsCall(ctx context.Context, msg protocol.Request) prot
 	result, toolErr := s.dispatchToolCall(ctx, tool, params.Arguments)
 	if toolErr != nil {
 		data, _ := json.Marshal(toolErr.data)
-		ce := protocol.ErrInternalError(toolErr.message)
+		ce := &protocol.CodeError{Code: toolErr.code, Message: toolErr.message}
 		ce.Data = data
 		return s.errorResponse(msg.ID, ce)
 	}
@@ -458,8 +458,8 @@ func (s *Server) dispatchToolCall(ctx context.Context, tool tools.Tool, params j
 		defer cancel()
 		result, err := tool.Handler(hctx, params)
 		if err != nil {
-			pe, ok := errors.AsType[*protocol.CodeError](err)
-			if ok {
+			var pe *protocol.CodeError
+			if errors.As(err, &pe) {
 				ch <- outcome{err: &toolError{
 					code:    pe.Code,
 					data:    pe.Data,
