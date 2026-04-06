@@ -45,6 +45,7 @@ type Server struct {
 	registry       *tools.Registry
 	safetyMargin   time.Duration
 	state          int
+	trace          bool
 	version        string
 }
 
@@ -56,6 +57,14 @@ type Option func(*Server)
 func WithHandlerTimeout(d time.Duration) Option {
 	return func(s *Server) {
 		s.handlerTimeout = d
+	}
+}
+
+// WithTrace enables protocol trace mode. When enabled, every incoming request
+// and outgoing response is logged to stderr. Zero overhead when disabled.
+func WithTrace(enabled bool) Option {
+	return func(s *Server) {
+		s.trace = enabled
 	}
 }
 
@@ -131,10 +140,21 @@ func (s *Server) Run(ctx context.Context) error {
 			return s.handleDecodeError(fmt.Errorf("decode message: %w", errMessageTooLarge))
 		}
 
+		if s.trace {
+			raw, _ := json.Marshal(msg)
+			s.logger.Info("trace_request", "direction", "←", "message", string(raw))
+		}
+
 		resp, respond := s.dispatch(ctx, msg)
 		if !respond {
 			continue
 		}
+
+		if s.trace {
+			raw, _ := json.Marshal(resp)
+			s.logger.Info("trace_response", "direction", "→", "message", string(raw))
+		}
+
 		if err := protocol.Encode(s.enc, resp); err != nil {
 			s.logger.Error("encode_error", "error", err)
 			return fmt.Errorf("encode error: %w", err)
@@ -190,7 +210,7 @@ func (s *Server) dispatch(ctx context.Context, msg protocol.Request) (protocol.R
 	if msg.Method == protocol.MethodPing {
 		resp, err := protocol.NewResultResponse(msg.ID, json.RawMessage("{}"))
 		if err != nil {
-			return s.errorResponse(msg.ID, &protocol.CodeError{Code: protocol.InternalError, Message: "failed to marshal ping result"}), true
+			return s.errorResponse(msg.ID, protocol.ErrInternalError("failed to marshal ping result")), true
 		}
 		return resp, true
 	}
@@ -199,24 +219,24 @@ func (s *Server) dispatch(ctx context.Context, msg protocol.Request) (protocol.R
 	switch s.state {
 	case stateUninitialized:
 		if msg.Method != protocol.MethodInitialize {
-			return s.errorResponse(msg.ID, &protocol.CodeError{Code: protocol.InvalidRequest, Message: "server not initialized"}), true
+			return s.errorResponse(msg.ID, protocol.ErrInvalidRequest("server not initialized (send initialize first)")), true
 		}
 		return s.handleInitialize(msg), true
 
 	case stateInitializing:
 		if msg.Method == protocol.MethodInitialize {
-			return s.errorResponse(msg.ID, &protocol.CodeError{Code: protocol.InvalidRequest, Message: "already initialized"}), true
+			return s.errorResponse(msg.ID, protocol.ErrInvalidRequest("already initialized")), true
 		}
-		return s.errorResponse(msg.ID, &protocol.CodeError{Code: protocol.InvalidRequest, Message: "server initializing, awaiting notifications/initialized"}), true
+		return s.errorResponse(msg.ID, protocol.ErrInvalidRequest("server initializing, awaiting notifications/initialized")), true
 
 	case stateReady:
 		if msg.Method == protocol.MethodInitialize {
-			return s.errorResponse(msg.ID, &protocol.CodeError{Code: protocol.InvalidRequest, Message: "already initialized"}), true
+			return s.errorResponse(msg.ID, protocol.ErrInvalidRequest("already initialized")), true
 		}
 		return s.handleMethod(ctx, msg), true
 
 	default:
-		return s.errorResponse(msg.ID, &protocol.CodeError{Code: protocol.InternalError, Message: "unknown server state"}), true
+		return s.errorResponse(msg.ID, protocol.ErrInternalError("unknown server state")), true
 	}
 }
 
@@ -276,7 +296,7 @@ func (s *Server) handleInitialize(msg protocol.Request) protocol.Response {
 	resp, err := protocol.NewResultResponse(msg.ID, result)
 	if err != nil {
 		s.logger.Error("marshal_initialize", "error", err)
-		return s.errorResponse(msg.ID, &protocol.CodeError{Code: protocol.InternalError, Message: "failed to marshal initialize result"})
+		return s.errorResponse(msg.ID, protocol.ErrInternalError("failed to marshal initialize result"))
 	}
 	return resp
 }
@@ -299,9 +319,9 @@ func (s *Server) handleMethod(ctx context.Context, msg protocol.Request) protoco
 	case msg.Method == protocol.MethodToolsList:
 		return s.handleToolsList(msg)
 	case strings.HasPrefix(msg.Method, "rpc."):
-		return s.errorResponse(msg.ID, &protocol.CodeError{Code: protocol.MethodNotFound, Message: "reserved method: " + msg.Method})
+		return s.errorResponse(msg.ID, protocol.ErrMethodNotFound("reserved method: "+msg.Method))
 	default:
-		return s.errorResponse(msg.ID, &protocol.CodeError{Code: protocol.MethodNotFound, Message: "unknown method: " + msg.Method})
+		return s.errorResponse(msg.ID, protocol.ErrMethodNotFound("unknown method: "+msg.Method))
 	}
 }
 
@@ -312,11 +332,9 @@ func (s *Server) handleUnsupportedCapability(msg protocol.Request) protocol.Resp
 		Hint:                  "this server supports tools only; use tools/list and tools/call",
 		SupportedCapabilities: []string{"tools"},
 	})
-	return s.errorResponse(msg.ID, &protocol.CodeError{
-		Code:    protocol.MethodNotFound,
-		Data:    data,
-		Message: "method not found: " + msg.Method,
-	})
+	ce := protocol.ErrMethodNotFound("method not found: " + msg.Method)
+	ce.Data = data
+	return s.errorResponse(msg.ID, ce)
 }
 
 // toolsListResult is the result of tools/list.
@@ -330,7 +348,7 @@ func (s *Server) handleToolsList(msg protocol.Request) protocol.Response {
 	resp, err := protocol.NewResultResponse(msg.ID, result)
 	if err != nil {
 		s.logger.Error("marshal_tools_list", "error", err)
-		return s.errorResponse(msg.ID, &protocol.CodeError{Code: protocol.InternalError, Message: "failed to marshal tools list"})
+		return s.errorResponse(msg.ID, protocol.ErrInternalError("failed to marshal tools list"))
 	}
 	return resp
 }
@@ -345,7 +363,7 @@ type toolCallParams struct {
 func (s *Server) handleToolsCall(ctx context.Context, msg protocol.Request) protocol.Response {
 	var params toolCallParams
 	if err := json.Unmarshal(msg.Params, &params); err != nil {
-		return s.errorResponse(msg.ID, &protocol.CodeError{Code: protocol.InvalidParams, Message: "invalid tools/call params: " + err.Error()})
+		return s.errorResponse(msg.ID, protocol.ErrInvalidParams("invalid tools/call params: "+err.Error()))
 	}
 
 	// Normalize absent or null arguments to {}.
@@ -354,28 +372,39 @@ func (s *Server) handleToolsCall(ctx context.Context, msg protocol.Request) prot
 	}
 
 	if params.Name == "" {
-		return s.errorResponse(msg.ID, &protocol.CodeError{Code: protocol.InvalidParams, Message: "tool name is required"})
+		return s.errorResponse(msg.ID, protocol.ErrInvalidParams("tool name is required"))
 	}
 
 	tool, ok := s.registry.Lookup(params.Name)
 	if !ok {
-		return s.errorResponse(msg.ID, &protocol.CodeError{Code: protocol.InvalidParams, Message: "unknown tool: " + params.Name})
+		available := strings.Join(s.registry.Names(), ", ")
+		return s.errorResponse(msg.ID, protocol.ErrInvalidParams("unknown tool: "+params.Name+" (available: "+available+")"))
 	}
 
 	result, toolErr := s.dispatchToolCall(ctx, tool, params.Arguments)
 	if toolErr != nil {
 		data, _ := json.Marshal(toolErr.data)
-		return s.errorResponse(msg.ID, &protocol.CodeError{
-			Code:    toolErr.code,
-			Data:    data,
-			Message: toolErr.message,
-		})
+		ce := protocol.ErrInternalError(toolErr.message)
+		ce.Data = data
+		return s.errorResponse(msg.ID, ce)
 	}
 
-	resp, err := protocol.NewResultResponse(msg.ID, result)
+	// Check result size before marshaling the response.
+	resultJSON, err := json.Marshal(result)
 	if err != nil {
 		s.logger.Error("marshal_tool_result", "error", err, "tool_name", params.Name)
-		return s.errorResponse(msg.ID, &protocol.CodeError{Code: protocol.InternalError, Message: "failed to marshal tool result"})
+		return s.errorResponse(msg.ID, protocol.ErrInternalError("failed to marshal tool result"))
+	}
+	if len(resultJSON) > maxResultSize {
+		s.logger.Warn("tool_result_truncated", "tool_name", params.Name, "size", len(resultJSON), "limit", maxResultSize)
+		result = tools.TextResult(fmt.Sprintf("[result truncated: exceeded maximum size of %d bytes]", maxResultSize))
+		resultJSON, _ = json.Marshal(result)
+	}
+
+	resp, err := protocol.NewResultResponse(msg.ID, json.RawMessage(resultJSON))
+	if err != nil {
+		s.logger.Error("marshal_tool_result", "error", err, "tool_name", params.Name)
+		return s.errorResponse(msg.ID, protocol.ErrInternalError("failed to marshal tool result"))
 	}
 	return resp
 }

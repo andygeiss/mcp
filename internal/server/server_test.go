@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -116,7 +118,7 @@ func Test_Server_With_UninitializedRequest_Should_Return32600(t *testing.T) {
 	assert.That(t, "error", err, nil)
 	assert.That(t, "response count", len(responses), 1)
 	assert.That(t, "error code", responses[0].Error.Code, protocol.InvalidRequest)
-	assert.That(t, "error message", responses[0].Error.Message, "server not initialized")
+	assert.That(t, "error message", responses[0].Error.Message, "server not initialized (send initialize first)")
 }
 
 func Test_Server_With_InitializingStateRequest_Should_ReturnAwaitingMessage(t *testing.T) {
@@ -248,7 +250,7 @@ func Test_Server_With_UnknownTool_Should_Return32602(t *testing.T) {
 	assert.That(t, "error", err, nil)
 	assert.That(t, "response count", len(responses), 2)
 	assert.That(t, "error code", responses[1].Error.Code, protocol.InvalidParams)
-	assert.That(t, "error message", responses[1].Error.Message, "unknown tool: nonexistent")
+	assert.That(t, "error message", responses[1].Error.Message, "unknown tool: nonexistent (available: test)")
 }
 
 func Test_Server_With_PanickingHandler_Should_Return32603(t *testing.T) {
@@ -368,6 +370,46 @@ func Test_Server_With_PanickingHandler_Should_LogStackToStderr(t *testing.T) {
 	if !found {
 		t.Error("expected tool_handler_panicked log entry in stderr")
 	}
+}
+
+func Test_Server_With_ErrorPanic_Should_Return32603(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — panic with an error value instead of string
+	r := testRegistry()
+	tools.Register(r, "error-panicker", "panics with error", func(_ context.Context, _ testInput) tools.Result {
+		panic(fmt.Errorf("wrapped error: %w", errors.New("root cause")))
+	})
+
+	input := handshake() + `{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"error-panicker","arguments":{"message":"x"}}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, r, input)
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.InternalError)
+}
+
+func Test_Server_With_IntPanic_Should_Return32603(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — panic with an arbitrary type (int)
+	r := testRegistry()
+	tools.Register(r, "int-panicker", "panics with int", func(_ context.Context, _ testInput) tools.Result {
+		panic(42)
+	})
+
+	input := handshake() + `{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"int-panicker","arguments":{"message":"x"}}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, r, input)
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.InternalError)
 }
 
 func Test_Server_With_EOF_Should_ShutdownCleanly(t *testing.T) {

@@ -29,6 +29,8 @@ func run() error {
 	// See internal/tools/search.go for the implementation pattern.
 	tools.Register(registry, "search", "Searches files for a pattern", tools.Search)
 
-	srv := server.NewServer("mcp", version, registry, os.Stdin, os.Stdout, os.Stderr)
+	srv := server.NewServer("mcp", version, registry, os.Stdin, os.Stdout, os.Stderr,
+		server.WithTrace(os.Getenv("MCP_TRACE") == "1"),
+	)
 	return srv.Run(ctx)
 }

@@ -24,6 +24,31 @@ func (e *CodeError) Error() string {
 	return e.Message
 }
 
+// ErrInternalError creates a CodeError with the InternalError code.
+func ErrInternalError(msg string) *CodeError {
+	return &CodeError{Code: InternalError, Message: msg}
+}
+
+// ErrInvalidParams creates a CodeError with the InvalidParams code.
+func ErrInvalidParams(msg string) *CodeError {
+	return &CodeError{Code: InvalidParams, Message: msg}
+}
+
+// ErrInvalidRequest creates a CodeError with the InvalidRequest code.
+func ErrInvalidRequest(msg string) *CodeError {
+	return &CodeError{Code: InvalidRequest, Message: msg}
+}
+
+// ErrMethodNotFound creates a CodeError with the MethodNotFound code.
+func ErrMethodNotFound(msg string) *CodeError {
+	return &CodeError{Code: MethodNotFound, Message: msg}
+}
+
+// ErrParseError creates a CodeError with the ParseError code.
+func ErrParseError(msg string) *CodeError {
+	return &CodeError{Code: ParseError, Message: msg}
+}
+
 // Request represents a JSON-RPC 2.0 request or notification.
 type Request struct {
 	ID      json.RawMessage `json:"id,omitempty"`

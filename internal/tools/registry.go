@@ -73,6 +73,15 @@ func NewRegistry() *Registry {
 	return &Registry{tools: []Tool{}}
 }
 
+// Names returns the names of all registered tools in alphabetical order.
+func (r *Registry) Names() []string {
+	names := make([]string, len(r.tools))
+	for i, t := range r.tools {
+		names[i] = t.Name
+	}
+	return names
+}
+
 // Lookup finds a tool by name.
 func (r *Registry) Lookup(name string) (Tool, bool) {
 	for _, t := range r.tools {

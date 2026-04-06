@@ -1,0 +1,5 @@
+{"jsonrpc":"2.0","method":"ping","id":1,"params":{}}
+{"jsonrpc":"2.0","method":"initialize","id":2,"params":{"capabilities":{},"clientInfo":{"name":"test"}}}
+{"jsonrpc":"2.0","method":"ping","id":3,"params":{}}
+{"jsonrpc":"2.0","method":"notifications/initialized"}
+{"jsonrpc":"2.0","method":"ping","id":4,"params":{}}

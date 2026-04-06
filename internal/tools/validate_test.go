@@ -1,0 +1,77 @@
+package tools_test
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/andygeiss/mcp/internal/pkg/assert"
+	"github.com/andygeiss/mcp/internal/tools"
+)
+
+func Test_ValidatePath_With_TraversalSegment_Should_ReturnError(t *testing.T) {
+	t.Parallel()
+
+	err := tools.ValidatePath("../../etc/passwd")
+
+	if err == nil {
+		t.Fatal("expected error for path traversal")
+	}
+	assert.That(t, "message", err.Error(), "path traversal not allowed")
+}
+
+func Test_ValidatePath_With_NullByte_Should_ReturnError(t *testing.T) {
+	t.Parallel()
+
+	err := tools.ValidatePath("foo\x00bar")
+
+	if err == nil {
+		t.Fatal("expected error for null byte")
+	}
+	assert.That(t, "message", err.Error(), "path contains null byte")
+}
+
+func Test_ValidatePath_With_ExcessiveLength_Should_ReturnError(t *testing.T) {
+	t.Parallel()
+
+	err := tools.ValidatePath(strings.Repeat("a", tools.MaxInputLength+1))
+
+	if err == nil {
+		t.Fatal("expected error for excessive length")
+	}
+}
+
+func Test_ValidatePath_With_ValidPath_Should_ReturnNil(t *testing.T) {
+	t.Parallel()
+
+	err := tools.ValidatePath("src/main.go")
+
+	assert.That(t, "error", err, nil)
+}
+
+func Test_ValidateInput_With_NullByte_Should_ReturnError(t *testing.T) {
+	t.Parallel()
+
+	err := tools.ValidateInput("hello\x00world")
+
+	if err == nil {
+		t.Fatal("expected error for null byte")
+	}
+}
+
+func Test_ValidateInput_With_ExcessiveLength_Should_ReturnError(t *testing.T) {
+	t.Parallel()
+
+	err := tools.ValidateInput(strings.Repeat("x", tools.MaxInputLength+1))
+
+	if err == nil {
+		t.Fatal("expected error for excessive length")
+	}
+}
+
+func Test_ValidateInput_With_ValidInput_Should_ReturnNil(t *testing.T) {
+	t.Parallel()
+
+	err := tools.ValidateInput("func main()")
+
+	assert.That(t, "error", err, nil)
+}
