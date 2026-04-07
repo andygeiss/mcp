@@ -690,13 +690,13 @@ type capabilityGuidance struct {
 // handleMethod dispatches ready-state methods.
 func (s *Server) handleMethod(msg protocol.Request) protocol.Response {
 	switch {
-	case strings.HasPrefix(msg.Method, "completion/"):
+	case strings.HasPrefix(msg.Method, protocol.NamespaceCompletion):
 		return s.handleUnsupportedCapability(msg)
-	case strings.HasPrefix(msg.Method, "elicitation/"):
+	case strings.HasPrefix(msg.Method, protocol.NamespaceElicitation):
 		return s.handleUnsupportedCapability(msg)
-	case strings.HasPrefix(msg.Method, "prompts/"):
+	case strings.HasPrefix(msg.Method, protocol.NamespacePrompts):
 		return s.handleUnsupportedCapability(msg)
-	case strings.HasPrefix(msg.Method, "resources/"):
+	case strings.HasPrefix(msg.Method, protocol.NamespaceResources):
 		return s.handleUnsupportedCapability(msg)
 	case msg.Method == protocol.MethodToolsCall:
 		// tools/call in ready state is intercepted by Run for async dispatch.
@@ -704,7 +704,7 @@ func (s *Server) handleMethod(msg protocol.Request) protocol.Response {
 		return s.errorResponse(msg.ID, protocol.ErrInternalError("unexpected tools/call in handleMethod"))
 	case msg.Method == protocol.MethodToolsList:
 		return s.handleToolsList(msg)
-	case strings.HasPrefix(msg.Method, "rpc."):
+	case strings.HasPrefix(msg.Method, protocol.PrefixRPC):
 		return s.errorResponse(msg.ID, protocol.ErrMethodNotFound("reserved method: "+msg.Method))
 	default:
 		return s.errorResponse(msg.ID, protocol.ErrMethodNotFound("unknown method: "+msg.Method))

@@ -104,7 +104,7 @@ Follow the simplest existing tool in `internal/tools/` as the template. Define a
 ## Coding Conventions
 
 - **Constants**: Protocol constants in `protocol/constants.go`. Use `const`, never `var`. Never inline.
-- **Ordering**: Declarations alphabetically. `NewTypeName` constructor first after its type, then methods alphabetically. `case` clauses alphabetically in switches. In YAML/Make config files: schema-defined top-level keys stay in the tool's canonical order (e.g., `name` → `on` → `permissions` → `jobs` for GitHub Actions); user-defined keys within those schemas are alphabetical (job names, permission names, linter lists, env vars, Makefile targets after the default). Value lists (`goos`, `goarch`, linter enable lists) are alphabetical. Steps remain in sequential order.
+- **Ordering**: Declarations alphabetically where practical; logical grouping for state machines and dispatch. `NewTypeName` constructor first after its type, then methods alphabetically. `case` clauses alphabetically in switches. In YAML/Make config files: schema-defined top-level keys stay in the tool's canonical order (e.g., `name` → `on` → `permissions` → `jobs` for GitHub Actions); user-defined keys within those schemas are alphabetical (job names, permission names, linter lists, env vars, Makefile targets after the default). Value lists (`goos`, `goarch`, linter enable lists) are alphabetical. Steps remain in sequential order.
 - **JSON tags**: Every exported protocol field gets `json:"fieldName"` matching MCP spec camelCase. `omitempty` for optional fields.
 - **Error handling**: `fmt.Errorf("operation: %w", err)`. Map to JSON-RPC error codes at the protocol boundary.
 - **Imports**: stdlib first, blank line, then internal packages.

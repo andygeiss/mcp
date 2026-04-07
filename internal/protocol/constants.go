@@ -23,5 +23,14 @@ const (
 	NotificationInitialized = "notifications/initialized"
 )
 
+// Namespace prefix constants for method dispatch.
+const (
+	NamespaceCompletion  = "completion/"
+	NamespaceElicitation = "elicitation/"
+	NamespacePrompts     = "prompts/"
+	NamespaceResources   = "resources/"
+	PrefixRPC            = "rpc."
+)
+
 // Version is the JSON-RPC version string.
 const Version = "2.0"

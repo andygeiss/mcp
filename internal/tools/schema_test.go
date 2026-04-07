@@ -286,6 +286,419 @@ func Test_DeriveSchema_With_BareCommaTag_Should_ExcludeField(t *testing.T) {
 	assert.That(t, "named present", hasNamed, true)
 }
 
+// Depth guard test types
+
+type depth1 struct {
+	F depth2 `json:"f"`
+}
+type depth2 struct {
+	F depth3 `json:"f"`
+}
+type depth3 struct {
+	F depth4 `json:"f"`
+}
+type depth4 struct {
+	F depth5 `json:"f"`
+}
+type depth5 struct {
+	F depth6 `json:"f"`
+}
+type depth6 struct {
+	F depth7 `json:"f"`
+}
+type depth7 struct {
+	F depth8 `json:"f"`
+}
+type depth8 struct {
+	F depth9 `json:"f"`
+}
+type depth9 struct {
+	F depth10 `json:"f"`
+}
+type depth10 struct {
+	F depth11 `json:"f"`
+}
+type depth11 struct {
+	F string `json:"f"`
+}
+
+type excessiveDepthInput struct {
+	Root depth1 `json:"root"`
+}
+
+func Test_DeriveSchema_With_ExcessiveDepth_Should_Panic(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := tools.NewRegistry()
+
+	// Act / Assert
+	defer func() {
+		rec := recover()
+		if rec == nil {
+			t.Fatal("expected panic for excessive depth")
+		}
+		msg, ok := rec.(string)
+		if !ok {
+			t.Fatalf("expected string panic, got %T", rec)
+		}
+		if !strings.Contains(msg, "exceeded max depth") {
+			t.Errorf("panic message should contain \"exceeded max depth\", got: %s", msg)
+		}
+	}()
+	tools.Register(r, "deep", "deep tool", func(_ context.Context, _ excessiveDepthInput) tools.Result {
+		return tools.TextResult("ok")
+	})
+}
+
+type selfRef struct {
+	F *selfRef `json:"f"`
+}
+
+type selfRefInput struct {
+	Root selfRef `json:"root"`
+}
+
+func Test_DeriveSchema_With_SelfReferentialType_Should_Panic(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := tools.NewRegistry()
+
+	// Act / Assert
+	defer func() {
+		rec := recover()
+		if rec == nil {
+			t.Fatal("expected panic for self-referential type")
+		}
+		msg, ok := rec.(string)
+		if !ok {
+			t.Fatalf("expected string panic, got %T", rec)
+		}
+		if !strings.Contains(msg, "exceeded max depth") {
+			t.Errorf("panic message should contain \"exceeded max depth\", got: %s", msg)
+		}
+	}()
+	tools.Register(r, "selfref", "self-ref tool", func(_ context.Context, _ selfRefInput) tools.Result {
+		return tools.TextResult("ok")
+	})
+}
+
+// Exact depth limit types (10 levels: exact1 -> exact2 -> ... -> exact10 with a string leaf)
+
+type exact1 struct {
+	F exact2 `json:"f"`
+}
+type exact2 struct {
+	F exact3 `json:"f"`
+}
+type exact3 struct {
+	F exact4 `json:"f"`
+}
+type exact4 struct {
+	F exact5 `json:"f"`
+}
+type exact5 struct {
+	F exact6 `json:"f"`
+}
+type exact6 struct {
+	F exact7 `json:"f"`
+}
+type exact7 struct {
+	F exact8 `json:"f"`
+}
+type exact8 struct {
+	F exact9 `json:"f"`
+}
+type exact9 struct {
+	F exact10 `json:"f"`
+}
+type exact10 struct {
+	F string `json:"f"`
+}
+
+type exactDepthInput struct {
+	Root exact1 `json:"root"`
+}
+
+func Test_DeriveSchema_With_ExactDepthLimit_Should_Succeed(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := tools.NewRegistry()
+
+	// Act — should not panic
+	tools.Register(r, "exact", "exact depth tool", func(_ context.Context, _ exactDepthInput) tools.Result {
+		return tools.TextResult("ok")
+	})
+
+	// Assert
+	tool, ok := r.Lookup("exact")
+	assert.That(t, "found", ok, true)
+	assert.That(t, "schema type", tool.InputSchema.Type, "object")
+}
+
+type mixedLeaf struct {
+	V string `json:"v"`
+}
+
+type mixedDepthInput struct {
+	Data []map[string][]map[string][]map[string][]map[string][]map[string]mixedLeaf `json:"data"`
+}
+
+func Test_DeriveSchema_With_MixedNestingExceedingDepth_Should_Panic(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := tools.NewRegistry()
+
+	// Act / Assert
+	defer func() {
+		rec := recover()
+		if rec == nil {
+			t.Fatal("expected panic for mixed nesting exceeding depth")
+		}
+		msg, ok := rec.(string)
+		if !ok {
+			t.Fatalf("expected string panic, got %T", rec)
+		}
+		if !strings.Contains(msg, "exceeded max depth") {
+			t.Errorf("panic message should contain \"exceeded max depth\", got: %s", msg)
+		}
+	}()
+	tools.Register(r, "mixed", "mixed depth tool", func(_ context.Context, _ mixedDepthInput) tools.Result {
+		return tools.TextResult("ok")
+	})
+}
+
+// Embedding test types
+
+type EmbeddedBase struct {
+	Host string `json:"host"`
+	Port int    `json:"port"`
+}
+
+type embeddedInput struct {
+	EmbeddedBase
+	Name string `json:"name"`
+}
+
+func Test_DeriveSchema_With_EmbeddedStruct_Should_PromoteFields(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := tools.NewRegistry()
+	tools.Register(r, "embed", "embed tool", func(_ context.Context, _ embeddedInput) tools.Result {
+		return tools.TextResult("ok")
+	})
+
+	// Act
+	tool, ok := r.Lookup("embed")
+
+	// Assert
+	assert.That(t, "found", ok, true)
+	assert.That(t, "properties count", len(tool.InputSchema.Properties), 3)
+
+	hostProp := tool.InputSchema.Properties["host"]
+	assert.That(t, "host type", hostProp.Type, "string")
+
+	portProp := tool.InputSchema.Properties["port"]
+	assert.That(t, "port type", portProp.Type, "integer")
+
+	nameProp := tool.InputSchema.Properties["name"]
+	assert.That(t, "name type", nameProp.Type, "string")
+
+	assert.That(t, "required count", len(tool.InputSchema.Required), 3)
+}
+
+type TaggedEmbeddedBase struct {
+	X string `json:"x"`
+	Y string `json:"y"`
+}
+
+type taggedEmbeddedInput struct {
+	TaggedEmbeddedBase `json:"base"`
+	Label              string `json:"label"`
+}
+
+func Test_DeriveSchema_With_TaggedEmbeddedStruct_Should_NestFields(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := tools.NewRegistry()
+	tools.Register(r, "tagged-embed", "tagged embed tool", func(_ context.Context, _ taggedEmbeddedInput) tools.Result {
+		return tools.TextResult("ok")
+	})
+
+	// Act
+	tool, ok := r.Lookup("tagged-embed")
+
+	// Assert
+	assert.That(t, "found", ok, true)
+	assert.That(t, "properties count", len(tool.InputSchema.Properties), 2)
+
+	baseProp := tool.InputSchema.Properties["base"]
+	assert.That(t, "base type", baseProp.Type, "object")
+	assert.That(t, "base nested count", len(baseProp.Properties), 2)
+
+	labelProp := tool.InputSchema.Properties["label"]
+	assert.That(t, "label type", labelProp.Type, "string")
+}
+
+type DeepEmbedC struct {
+	Z string `json:"z"`
+}
+
+type DeepEmbedB struct {
+	DeepEmbedC
+	Y string `json:"y"`
+}
+
+type DeepEmbedA struct {
+	DeepEmbedB
+	X string `json:"x"`
+}
+
+type deepEmbeddedInput struct {
+	DeepEmbedA
+	W string `json:"w"`
+}
+
+func Test_DeriveSchema_With_DeepEmbedding_Should_PromoteAllLevels(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := tools.NewRegistry()
+	tools.Register(r, "deep-embed", "deep embed tool", func(_ context.Context, _ deepEmbeddedInput) tools.Result {
+		return tools.TextResult("ok")
+	})
+
+	// Act
+	tool, ok := r.Lookup("deep-embed")
+
+	// Assert
+	assert.That(t, "found", ok, true)
+	assert.That(t, "properties count", len(tool.InputSchema.Properties), 4)
+	assert.That(t, "w type", tool.InputSchema.Properties["w"].Type, "string")
+	assert.That(t, "x type", tool.InputSchema.Properties["x"].Type, "string")
+	assert.That(t, "y type", tool.InputSchema.Properties["y"].Type, "string")
+	assert.That(t, "z type", tool.InputSchema.Properties["z"].Type, "string")
+}
+
+type PtrEmbedBase struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
+type ptrEmbeddedInput struct {
+	*PtrEmbedBase
+	Extra string `json:"extra"`
+}
+
+func Test_DeriveSchema_With_EmbeddedPointerStruct_Should_PromoteFields(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := tools.NewRegistry()
+	tools.Register(r, "ptr-embed", "ptr embed tool", func(_ context.Context, _ ptrEmbeddedInput) tools.Result {
+		return tools.TextResult("ok")
+	})
+
+	// Act
+	tool, ok := r.Lookup("ptr-embed")
+
+	// Assert
+	assert.That(t, "found", ok, true)
+	assert.That(t, "properties count", len(tool.InputSchema.Properties), 3)
+	assert.That(t, "id type", tool.InputSchema.Properties["id"].Type, "integer")
+	assert.That(t, "name type", tool.InputSchema.Properties["name"].Type, "string")
+	assert.That(t, "extra type", tool.InputSchema.Properties["extra"].Type, "string")
+}
+
+type ShadowBase struct {
+	Name string `json:"name"`
+	Age  int    `json:"age"`
+}
+
+type shadowInput struct {
+	ShadowBase
+	Name string `json:"name"` // shadows embedded Name
+}
+
+func Test_DeriveSchema_With_ShadowedField_Should_PreferParent(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := tools.NewRegistry()
+	tools.Register(r, "shadow", "shadow tool", func(_ context.Context, _ shadowInput) tools.Result {
+		return tools.TextResult("ok")
+	})
+
+	// Act
+	tool, ok := r.Lookup("shadow")
+
+	// Assert
+	assert.That(t, "found", ok, true)
+	assert.That(t, "properties count", len(tool.InputSchema.Properties), 2)
+	assert.That(t, "name type", tool.InputSchema.Properties["name"].Type, "string")
+	assert.That(t, "age type", tool.InputSchema.Properties["age"].Type, "integer")
+}
+
+type unexportedBase struct {
+	Secret string `json:"secret"`
+}
+
+type unexportedEmbedInput struct {
+	unexportedBase
+	Public string `json:"public"`
+}
+
+func Test_DeriveSchema_With_UnexportedEmbeddedStruct_Should_NotPromote(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := tools.NewRegistry()
+	tools.Register(r, "unexported", "unexported tool", func(_ context.Context, _ unexportedEmbedInput) tools.Result {
+		return tools.TextResult("ok")
+	})
+
+	// Act
+	tool, ok := r.Lookup("unexported")
+
+	// Assert
+	assert.That(t, "found", ok, true)
+	assert.That(t, "properties count", len(tool.InputSchema.Properties), 1)
+	_, hasSecret := tool.InputSchema.Properties["secret"]
+	assert.That(t, "secret not promoted", hasSecret, false)
+	_, hasPublic := tool.InputSchema.Properties["public"]
+	assert.That(t, "public present", hasPublic, true)
+}
+
+type MyString string
+
+type nonStructEmbedInput struct {
+	MyString `json:"value"`
+	Label    string `json:"label"`
+}
+
+func Test_DeriveSchema_With_EmbeddedNonStructType_Should_NotPanic(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := tools.NewRegistry()
+	tools.Register(r, "nonstruct", "nonstruct tool", func(_ context.Context, _ nonStructEmbedInput) tools.Result {
+		return tools.TextResult("ok")
+	})
+
+	// Act
+	tool, ok := r.Lookup("nonstruct")
+
+	// Assert
+	assert.That(t, "found", ok, true)
+	_, hasLabel := tool.InputSchema.Properties["label"]
+	assert.That(t, "label present", hasLabel, true)
+}
+
 type nonStringMapKeyInput struct {
 	Data map[int]string `json:"data"`
 }

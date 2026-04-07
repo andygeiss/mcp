@@ -85,6 +85,43 @@ func Test_Lookup_With_UnknownTool_Should_ReturnFalse(t *testing.T) {
 	assert.That(t, "found", ok, false)
 }
 
+func Test_Names_With_MultipleTools_Should_ReturnAlphabetical(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := tools.NewRegistry()
+	tools.Register(r, "beta", "b desc", func(_ context.Context, _ stubInput) tools.Result {
+		return tools.TextResult("b")
+	})
+	tools.Register(r, "alpha", "a desc", func(_ context.Context, _ stubInput) tools.Result {
+		return tools.TextResult("a")
+	})
+
+	// Act
+	names := r.Names()
+
+	// Assert
+	assert.That(t, "count", len(names), 2)
+	assert.That(t, "first", names[0], "alpha")
+	assert.That(t, "second", names[1], "beta")
+}
+
+func Test_Names_With_EmptyRegistry_Should_ReturnEmptySlice(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := tools.NewRegistry()
+
+	// Act
+	names := r.Names()
+
+	// Assert
+	assert.That(t, "length", len(names), 0)
+	if names == nil {
+		t.Fatal("expected empty slice, got nil")
+	}
+}
+
 func Test_TextResult_Should_SetContentType(t *testing.T) {
 	t.Parallel()
 
