@@ -1,49 +1,44 @@
 {
   "workflow_version": "1.2.0",
   "timestamps": {
-    "started": "2026-04-05T10:00:00Z",
-    "last_updated": "2026-04-05T10:15:00Z",
-    "completed": "2026-04-05T10:15:00Z"
+    "started": "2026-04-07T14:00:00Z",
+    "last_updated": "2026-04-07T14:10:00Z",
+    "completed": "2026-04-07T14:10:00Z"
   },
   "mode": "initial_scan",
   "scan_level": "exhaustive",
   "project_root": "/Users/andygeiss/Documents/github.com/andygeiss/mcp",
   "project_knowledge": "/Users/andygeiss/Documents/github.com/andygeiss/mcp/docs",
   "completed_steps": [
-    {"step": "step_1", "status": "completed", "timestamp": "2026-04-05T10:02:00Z", "summary": "Classified as monolith, 1 part, project_type_id=backend (user override)"},
-    {"step": "step_2", "status": "completed", "timestamp": "2026-04-05T10:03:00Z", "summary": "Found 8 existing docs (README, CLAUDE.md, CONTRIBUTING, SECURITY, LICENSE, 3 templates)"},
-    {"step": "step_3", "status": "completed", "timestamp": "2026-04-05T10:04:00Z", "summary": "Tech stack: Go 1.26, JSON-RPC 2.0, zero external deps, 50+ linters, GoReleaser, OSS-Fuzz"},
-    {"step": "step_4", "status": "completed", "timestamp": "2026-04-05T10:06:00Z", "summary": "Conditional analysis: API scan (5 methods, 1 tool), no data models, no state management, no UI"},
-    {"step": "step_5", "status": "completed", "timestamp": "2026-04-05T10:07:00Z", "summary": "Source tree documented: 13 production files, 20 test files, 5 CI workflows"},
-    {"step": "step_6", "status": "completed", "timestamp": "2026-04-05T10:08:00Z", "summary": "Dev/deployment guides: Makefile targets, CI pipeline, GoReleaser, OSS-Fuzz, Cosign"},
-    {"step": "step_8", "status": "completed", "timestamp": "2026-04-05T10:10:00Z", "summary": "Architecture doc: sequential dispatch, state machine, transport constraints, security"},
-    {"step": "step_9", "status": "completed", "timestamp": "2026-04-05T10:11:00Z", "summary": "All supporting docs written: overview, source tree, API contracts, dev guide, deploy guide"},
-    {"step": "step_10", "status": "completed", "timestamp": "2026-04-05T10:12:00Z", "summary": "Master index generated with links to all docs"},
-    {"step": "step_11", "status": "completed", "timestamp": "2026-04-05T10:14:00Z", "summary": "Validation complete, no incomplete markers"},
-    {"step": "step_12", "status": "completed", "timestamp": "2026-04-05T10:15:00Z", "summary": "Workflow complete"}
+    {"step": "step_1", "status": "completed", "timestamp": "2026-04-07T14:00:00Z", "summary": "Classified as monolith with 1 part: CLI (Go)"},
+    {"step": "step_2", "status": "completed", "timestamp": "2026-04-07T14:01:00Z", "summary": "Found 5 existing docs (README.md, CONTRIBUTING.md, SECURITY.md, CLAUDE.md, LICENSE)"},
+    {"step": "step_3", "status": "completed", "timestamp": "2026-04-07T14:02:00Z", "summary": "Tech stack: Go 1.26, stdlib only, JSON-RPC 2.0"},
+    {"step": "step_4", "status": "completed", "timestamp": "2026-04-07T14:03:00Z", "summary": "Conditional analysis complete: CLI type, no API/data/UI scans needed"},
+    {"step": "step_5", "status": "completed", "timestamp": "2026-04-07T14:04:00Z", "summary": "Source tree documented: 14 production files, 24 test files, 7 critical dirs"},
+    {"step": "step_6", "status": "completed", "timestamp": "2026-04-07T14:05:00Z", "summary": "Dev guide with build/test/lint/fuzz commands; deployment guide with GoReleaser, CI/CD, OSS-Fuzz"},
+    {"step": "step_8", "status": "completed", "timestamp": "2026-04-07T14:06:00Z", "summary": "Architecture doc: lifecycle state machine, dispatch loop, tool system, error codes, resilience"},
+    {"step": "step_9", "status": "completed", "timestamp": "2026-04-07T14:07:00Z", "summary": "project-overview.md, source-tree-analysis.md, development-guide.md, deployment-guide.md written"},
+    {"step": "step_10", "status": "completed", "timestamp": "2026-04-07T14:08:00Z", "summary": "Master index generated with all links validated"},
+    {"step": "step_11", "status": "completed", "timestamp": "2026-04-07T14:09:00Z", "summary": "Validation complete, no incomplete markers found"},
+    {"step": "step_12", "status": "completed", "timestamp": "2026-04-07T14:10:00Z", "summary": "Workflow complete"}
   ],
   "current_step": "completed",
-  "findings": {
-    "project_classification": "monolith, 1 part, Go 1.26 backend",
-    "technology_stack": "Go 1.26 with zero external deps, JSON-RPC 2.0, slog, encoding/json",
-    "api_endpoints": "5 methods (initialize, ping, tools/list, tools/call, notifications/initialized), 1 tool (search)"
-  },
   "project_types": [
-    {
-      "part_id": "mcp",
-      "project_type_id": "backend",
-      "display_name": "Go MCP Server (Backend)"
-    }
+    {"part_id": "mcp", "project_type_id": "cli", "display_name": "CLI (Go)"}
   ],
+  "findings": {
+    "project_classification": "monolith, 1 part, Go 1.26 stdlib-only CLI",
+    "technology_stack": "Go 1.26, encoding/json, log/slog, JSON-RPC 2.0, MCP 2025-06-18",
+    "existing_docs_count": 5
+  },
   "outputs_generated": [
     "project-scan-report.json",
     "project-overview.md",
     "architecture.md",
     "source-tree-analysis.md",
-    "api-contracts.md",
     "development-guide.md",
     "deployment-guide.md",
     "index.md"
   ],
-  "resume_instructions": "Workflow complete"
+  "resume_instructions": "Workflow complete. All documentation generated."
 }

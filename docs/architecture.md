@@ -1,141 +1,259 @@
 # Architecture
 
 **Project:** mcp
-**Generated:** 2026-04-05
+**Generated:** 2026-04-07
 
-## Executive Summary
+## Overview
 
-The MCP server is a single Go binary (`cmd/mcp/`) that implements the Model Context Protocol over stdin/stdout using JSON-RPC 2.0. The architecture is intentionally flat -- no hexagonal layers, no bounded contexts, no dependency injection frameworks. Complexity is added only when the code demands it.
+Flat, simple architecture. Single CLI binary communicating over stdin/stdout via JSON-RPC 2.0. No HTTP, no WebSocket, no external dependencies. Complexity is added only when the code demands it.
 
-## Architecture Pattern
-
-**Sequential dispatch loop** -- the server reads one JSON-RPC message at a time from stdin, dispatches it to the appropriate handler, and writes the response to stdout. There are no goroutine pools for request handling; concurrency exists only within individual tool handler execution (timeout/panic recovery).
+## Package Structure
 
 ```
-stdin -> json.Decoder -> Decode -> Validate -> Dispatch -> Encode -> json.Encoder -> stdout
-                                                  |
-                                            State Machine
-                                         (uninitialized ->
-                                          initializing ->
-                                              ready)
+cmd/
+  mcp/                  Entry point — wiring only: flags, I/O injection, os.Exit
+  init/                 Template rewriter — rewrites module path, renames binary, self-deletes
+internal/
+  pkg/
+    assert/             Lightweight test assertion helper (assert.That)
+  protocol/             JSON-RPC 2.0 types, codec, constants
+  server/               MCP lifecycle, dispatch, capability negotiation, resilience
+  tools/                Tool registry, reflection-based schema derivation, handlers
 ```
 
-## Package Structure and Dependency Direction
+## Dependency Direction
 
 ```
-cmd/mcp/           -> internal/server/ -> internal/protocol/
-                   -> internal/tools/  -> internal/protocol/
-
-cmd/init/          (standalone, self-deleting template rewriter)
-
-internal/pkg/assert/  (test-only, zero internal dependencies)
+cmd/mcp/ ──→ internal/server/ ──→ internal/protocol/
+                    │
+                    └──→ internal/tools/ ──→ internal/protocol/
 ```
 
-### Package Responsibilities
+- `protocol/` has zero internal dependencies -- it is the foundation layer
+- `tools/` may import `protocol` but never `server`
+- `cmd/mcp/` wires everything together
 
-| Package | Responsibility |
-|---|---|
-| `cmd/mcp/` | Wiring only: parse flags, inject `os.Stdin`/`os.Stdout`/`os.Stderr`, register tools, call `server.Run`, `os.Exit` |
-| `cmd/init/` | Template rewriter for consumers who fork/clone the repo. Rewrites module paths, renames binary dir, self-deletes. Not part of normal builds. |
-| `internal/protocol/` | JSON-RPC 2.0 types (`Request`, `Response`, `Error`, `CodeError`), codec (`Decode`, `Validate`, `Encode`), and protocol constants. Zero internal dependencies. |
-| `internal/server/` | MCP server lifecycle: initialization state machine, method dispatch, tool call execution with timeout/panic recovery, per-message size enforcement via counting reader. |
-| `internal/tools/` | Tool registry, reflection-based schema derivation from struct tags, individual tool handler implementations (currently: `search`), input validation. |
-| `internal/pkg/assert/` | Lightweight generic test assertion helper (`assert.That`). Test-only. |
+## Transport Layer
 
-## Initialization State Machine
+| Stream | Purpose | Rules |
+|---|---|---|
+| **stdin** | Incoming JSON-RPC messages | Persistent `json.NewDecoder`. No `bufio.Scanner`. |
+| **stdout** | Outgoing JSON-RPC responses | Protocol-only. Every byte must be valid JSON-RPC. |
+| **stderr** | Diagnostics | `slog.JSONHandler` exclusively. |
+
+All constructors accept `io.Reader`/`io.Writer` (not `*os.File`) so tests inject `bytes.Buffer`.
+
+## Server Lifecycle (State Machine)
 
 Three states: **uninitialized** -> **initializing** -> **ready**.
 
-| State | Allowed Methods | Rejected With |
+```
+                 initialize           notifications/initialized
+  UNINITIALIZED ──────────→ INITIALIZING ───────────────────→ READY
+       │                         │                              │
+       │ ping ✓                  │ ping ✓                      │ all methods ✓
+       │ other → -32600          │ other → -32600              │
+```
+
+- `initialize` transitions to **initializing** and returns capabilities
+- `notifications/initialized` transitions to **ready**
+- `ping` is always accepted regardless of state
+- Unknown notifications are silently ignored
+
+## Dispatch Architecture
+
+The dispatch loop uses two modes:
+
+### Idle Mode
+```
+stdin decode → validate → route:
+  ├── notification → handle silently (no response)
+  ├── ping → immediate response
+  ├── initialize → state machine transition
+  ├── tools/call → spawn async handler
+  └── other method → synchronous dispatch
+```
+
+### In-Flight Mode (tool handler running)
+```
+priority: check handler completion first
+then select:
+  ├── handler result → send response, return to idle
+  ├── stdin message:
+  │     ├── ping → immediate response
+  │     ├── notifications/cancelled → cancel handler
+  │     ├── other notification → handle silently
+  │     └── other request → reject -32600 (busy)
+  └── context done → cancel handler, shutdown
+```
+
+## Tool System
+
+### Registration
+Tools are registered in `cmd/mcp/main.go` via `tools.Register[T]()`. The generic type parameter `T` defines the input struct. Struct fields with `json` tags are reflected to build the JSON Schema returned in `tools/list`. Fields without `omitempty` are marked required.
+
+### Schema Derivation
+`tools/schema.go` uses `reflect.Type.Fields` (Go 1.26 iterator) to walk struct fields. Supports: bool, int/uint variants, float, string, slice, map (string keys), nested structs, pointers. Panics on unsupported types (channels, funcs).
+
+### Handler Execution
+1. Validate params, unmarshal arguments
+2. Spawn handler goroutine with `context.WithTimeout` (30s default)
+3. Safety timer at timeout + 1s margin
+4. Panic recovery with stack trace logging (trace excluded from response)
+5. Result size limit: 1MB (truncated with warning)
+
+### Annotations
+Tools can declare behavioral hints via `WithAnnotations()`:
+- `destructiveHint`, `idempotentHint`, `openWorldHint`, `readOnlyHint`, `title`
+
+## Error Handling
+
+### JSON-RPC Error Codes
+
+| Code | Meaning | When |
 |---|---|---|
-| **Uninitialized** | `initialize`, `ping` | `-32600` ("server not initialized") |
-| **Initializing** | `ping` | `-32600` ("server initializing, awaiting notifications/initialized") |
-| **Ready** | All methods | -- |
+| `-32700` | Parse error | Malformed JSON, size limit exceeded, batch arrays |
+| `-32600` | Invalid request | Bad structure, not initialized, already initialized, busy |
+| `-32602` | Invalid params | Wrong types, missing fields, unknown tool name |
+| `-32601` | Method not found | Unknown method, `rpc.*` reserved, unsupported capability |
+| `-32603` | Internal error | Handler panic, timeout, marshal failure |
 
-- `initialize` -> respond with capabilities, transition to **initializing**. Duplicate -> `-32600` ("already initialized").
-- `notifications/initialized` in **initializing** -> transition to **ready**. Other states -> silently ignore.
-- `ping` always works in any state.
-- Unknown notifications are silently ignored -- never respond, never log.
+### Error Propagation
+- Handlers return `*protocol.CodeError` with specific codes
+- Non-CodeError errors fall back to -32603 (internal error)
+- `errors.AsType[*protocol.CodeError]` (Go 1.26) for type-safe unwrapping
 
-## Transport Constraints
+### Unsupported Capabilities
+Methods in `completion/`, `elicitation/`, `prompts/`, `resources/` namespaces return -32601 with structured `capabilityGuidance` data pointing to `tools` as the only supported capability.
 
-| Channel | Purpose | Rules |
-|---|---|---|
-| **stdin** | JSON-RPC requests | Persistent `json.NewDecoder`. No `bufio.Scanner`. |
-| **stdout** | JSON-RPC responses only | Every byte must be a valid JSON-RPC message. No logs, no debug output. |
-| **stderr** | Structured diagnostics | `slog.JSONHandler` exclusively. `snake_case` log keys. |
+## Resilience
 
-- **I/O injection**: Constructors accept `io.Reader`/`io.Writer` (not `*os.File`) so tests inject `bytes.Buffer`.
-- **EOF handling**: `io.EOF` / `io.ErrUnexpectedEOF` -> clean shutdown (exit 0). All other decode errors -> fatal (exit 1).
-- **Signals**: `SIGINT`/`SIGTERM` via `signal.NotifyContext` cancel the server context for graceful shutdown.
+### Size Limits
+- Per-message: 4MB via `countingReader` (reset between messages)
+- Tool result: 1MB (truncated with warning, not fatal)
 
-## Per-Message Size Enforcement
+### Handler Timeout
+- Default: 30s per handler
+- Safety margin: 1s additional before force-fail
+- Configurable via `WithHandlerTimeout()` and `WithSafetyMargin()`
 
-The `countingReader` wraps stdin and tracks bytes read since the last reset. When the 4MB limit is exceeded, the server sends a `-32700` (parse error) response and exits fatally. The counter resets before each `Decode` call.
+### Panic Recovery
+Panics in tool handlers are caught, logged with stack trace, and returned as -32603 with `panicDiag` data. Stack traces are excluded from the wire response (security).
 
-| Limit | Value | Scope |
-|---|---|---|
-| Max message size | 4 MB | Per incoming JSON-RPC message |
-| Max result size | 1 MB | Per tool call response body |
+### Cancellation
+`notifications/cancelled` with matching `requestId` cancels the in-flight handler's context. The response is suppressed per MCP spec.
 
-## Tool Handler Dispatch
+### EOF Handling
+- `io.EOF` / `io.ErrUnexpectedEOF` -> clean shutdown (exit 0)
+- All other decode errors -> -32700 response, then fatal (exit 1)
 
-Tool calls are dispatched in a goroutine with:
+## Input Validation
 
-1. **Panic recovery** -- catches panics, logs stack trace to stderr, returns `-32603` with structured `panicDiag` data (tool name, panic value -- no stack in wire response).
-2. **Handler timeout** -- `context.WithTimeout` (default 30s, configurable via `WithHandlerTimeout`).
-3. **Safety margin** -- a backup timer (default 1s) that fires if the handler ignores context cancellation entirely.
-4. **Context cancellation** -- parent context cancellation propagates to the handler.
+### Tool Inputs
+- `ValidatePath()`: rejects paths > 4096 chars, null bytes, `..` traversal
+- `ValidateInput()`: rejects inputs > 4096 chars, null bytes
+- Search tool: path must be within working directory (symlink-resolved)
+- File opens with `O_NOFOLLOW` on Unix to prevent symlink attacks
 
-All error responses include structured `Error.Data` with timing diagnostics (`elapsedMs`, `timeoutMs`, `toolName`).
+### Protocol Level
+- JSON-RPC version must be "2.0"
+- Method must be non-empty
+- Params must be a JSON object (not array/primitive)
+- ID must be string, number, or null
 
-## Tool Schema Derivation
+## Concurrency Model
 
-Tool input schemas are generated automatically from Go struct field tags via reflection (`tools/schema.go`):
+### Sequential Dispatch
+The server advertises `experimental.concurrency.maxInFlight: 1`. Only one tool handler runs at a time. Additional `tools/call` requests while a handler is in flight are rejected with `-32600` ("server busy: request in flight").
 
-- `json:"fieldName"` -> property name
-- `json:"fieldName,omitempty"` -> optional (not in `required`)
-- `description:"..."` tag -> property description
-- Go types map to JSON Schema: `string` -> `"string"`, `int*` -> `"integer"`, `float*` -> `"number"`, `bool` -> `"boolean"`, `[]T` -> `"array"`, `map[string]T` -> `"object"` with `additionalProperties`, structs -> nested `"object"`
+### Async Tool Dispatch
+Despite sequential dispatch, tool calls are executed asynchronously from the decode loop:
 
-## Method Routing (Ready State)
+```
+Main goroutine (decode loop)          Handler goroutine
+─────────────────────────────         ─────────────────
+tools/call arrives
+  ├── validate params
+  ├── spawn handler goroutine  ──→    context.WithTimeout(ctx, 30s)
+  ├── switch to in-flight mode        execute tool handler
+  ├── continue reading stdin          ...
+  │   (accept ping, cancel)           handler returns result
+  ├── receive result  ←───────────    send to inFlightCh
+  ├── encode response
+  └── return to idle mode
+```
 
-| Method Pattern | Handler |
-|---|---|
-| `tools/list` | Returns all registered tools (alphabetically sorted) |
-| `tools/call` | Dispatches to named tool handler with timeout/panic recovery |
-| `prompts/*` | `-32601` with guidance data (supported capabilities) |
-| `resources/*` | `-32601` with guidance data (supported capabilities) |
-| `rpc.*` | `-32601` ("reserved method") |
-| Other | `-32601` ("unknown method") |
+This design enables:
+- **Ping responsiveness** during long-running tools
+- **Cancellation** via `notifications/cancelled` while handler is executing
+- **Graceful shutdown** can cancel in-flight handler and wait for completion
 
-## JSON-RPC 2.0 Specifics
+### Goroutine Lifecycle
+Handlers run in a nested goroutine structure:
+1. **Outer goroutine** (started by `startToolCallAsync`): owns `inFlightCh`, calls `dispatchToolCall`
+2. **Inner goroutine** (started by `dispatchToolCall`): runs the actual handler with `defer recover()` for panic protection, owns the handler timeout `context.WithTimeout`
 
-- Newline-delimited JSON objects. No LSP framing. No batch requests (JSON array -> `-32700`).
-- `id` is `json.RawMessage` -- preserve original type (string, number, null), echo back exactly.
-- A message without `id` is a notification -- never respond to it.
-- `params`: when absent or `null`, default to `{}` before unmarshaling.
-- Error `message` fields are contextual (e.g., `"unknown tool: foo"`, not generic `"invalid params"`).
+If a handler ignores `ctx.Done()` and exceeds the budget, the goroutine is abandoned after the safety timer fires. The server logs a warning and proceeds to the next request.
 
-## Error Code Catalog
+### Decode Error During In-Flight
+When a decode error occurs while a handler is running:
+1. Send `-32700` parse error response
+2. Wait for the handler to complete (with 2x budget timeout)
+3. Send the handler's response if it completes normally
+4. Then shut down with the fatal decode error
 
-| Code | Meaning | When Used |
-|---|---|---|
-| `-32700` | Parse error | Malformed JSON, batch arrays, message size exceeded |
-| `-32600` | Invalid request | Wrong JSON-RPC version, empty method, non-object params, not initialized, already initialized |
-| `-32601` | Method not found | Unknown method, `rpc.*` reserved, unsupported capabilities (prompts/, resources/) |
-| `-32602` | Invalid params | Wrong types, missing required fields, unknown tool name, empty tool name |
-| `-32603` | Internal error | Handler panics, timeouts, context cancellation, marshal failures |
+This ensures no response is lost even when the transport fails.
 
-## Security Measures
+## Protocol Codec Details
 
-- **Input validation**: Path traversal prevention, null byte rejection, length limits (4096 chars per input string)
-- **Symlink safety**: `O_NOFOLLOW` on Unix for file opens in search tool; symlink resolution with working directory containment check
-- **Binary file detection**: Files containing null bytes in first 512 bytes are skipped
-- **No shell execution**: The search tool uses Go's `regexp` and `filepath.WalkDir`, never shells out
-- **Supply chain**: Pinned GitHub Actions by hash, Dependabot for automated updates, Cosign signing, SBOM generation
-- **Static analysis**: CodeQL weekly, 50+ golangci-lint rules, `depguard` blocks external deps and json/v2
+### Decode Pipeline
+```
+json.Decoder.Decode → raw json.RawMessage
+  ├── batch detection: raw[0] == '[' → error "batch requests not supported"
+  ├── json.Unmarshal into Request struct
+  └── params normalization: absent or null → {}
+```
 
-## Trace Mode
+### encoding/json v1 Behaviors (Accepted)
+The protocol codec relies on `encoding/json` v1 semantics. These behaviors differ from `json/v2` strict defaults but are accepted for MCP:
+- **Case-insensitive field matching**: `"Method"` matches `method` struct field
+- **Last-value-wins for duplicate keys**: `"method":"a","method":"b"` → method is "b"
+- **Invalid UTF-8 passthrough**: Non-UTF-8 bytes in params are not rejected
 
-Enabled via `MCP_TRACE=1` environment variable. Logs every incoming request and outgoing response to stderr. Zero overhead when disabled (boolean check before marshaling).
+These are documented as accepted trade-offs. Well-behaved MCP clients send correctly-cased fields, no duplicate keys, and valid UTF-8.
+
+### ID Validation
+The `Validate` function checks ID type by inspecting the first byte of `json.RawMessage`:
+- `"` → string (valid)
+- `0`-`9`, `-` → number (valid)
+- `n` → null (valid)
+- Anything else (e.g., `t`/`f` for booleans, `[` for arrays, `{` for objects) → `-32600`
+
+## Wire Format Examples
+
+### Initialize Handshake
+```json
+→ {"jsonrpc":"2.0","method":"initialize","id":1,"params":{"capabilities":{}}}
+← {"id":1,"jsonrpc":"2.0","result":{"capabilities":{"experimental":{"concurrency":{"maxInFlight":1}},"tools":{}},"protocolVersion":"2025-06-18","serverInfo":{"name":"mcp","version":"..."}}}
+→ {"jsonrpc":"2.0","method":"notifications/initialized"}
+(no response — notification)
+```
+
+### Tool Call
+```json
+→ {"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"echo","arguments":{"message":"hello"}}}
+← {"id":2,"jsonrpc":"2.0","result":{"content":[{"text":"hello","type":"text"}]}}
+```
+
+### Error Response with Data
+```json
+→ {"jsonrpc":"2.0","method":"resources/list","id":3,"params":{}}
+← {"error":{"code":-32601,"data":{"hint":"this server supports tools only; use tools/list and tools/call","supportedCapabilities":["tools"]},"message":"method not found: resources/list"},"id":3,"jsonrpc":"2.0"}
+```
+
+### Cancellation
+```json
+→ {"jsonrpc":"2.0","method":"tools/call","id":4,"params":{"name":"search","arguments":{"path":".","pattern":"TODO"}}}
+→ {"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":4,"reason":"user cancelled"}}
+(response for id:4 is suppressed)
+```
