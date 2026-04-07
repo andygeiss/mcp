@@ -24,10 +24,10 @@ func Test_Architecture_With_ImportGraph_Should_MatchDocumentation(t *testing.T) 
 		pkg        string
 		disallowed []string
 	}{
-		{"internal/protocol", []string{module}},                        // imports nothing internal
-		{"internal/tools", []string{module + "server"}},                // never imports server
-		{"internal/server", []string{"github.com/andygeiss/mcp/cmd/"}}, // never imports cmd
-		{"internal/pkg/assert", []string{module}},                      // imports nothing internal
+		{"internal/protocol", []string{module}},
+		{"internal/tools", []string{module + "server"}},
+		{"internal/server", []string{"github.com/andygeiss/mcp/cmd/"}},
+		{"internal/pkg/assert", []string{module}},
 	}
 
 	for _, rule := range rules {

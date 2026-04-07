@@ -1327,3 +1327,186 @@ func Test_Server_With_CancelledNotification_Should_SuppressResponse(t *testing.T
 	assert.That(t, "response count", len(responses), 1)
 	assert.That(t, "response id", string(responses[0].ID), "1")
 }
+
+func Test_Server_With_ToolsListMultipleTools_Should_ReturnAlphabeticalOrder(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — three tools in non-alphabetical order
+	r := tools.NewRegistry()
+	tools.Register(r, "zeta", "z tool", func(_ context.Context, _ testInput) tools.Result {
+		return tools.TextResult("z")
+	})
+	tools.Register(r, "alpha", "a tool", func(_ context.Context, _ testInput) tools.Result {
+		return tools.TextResult("a")
+	})
+	tools.Register(r, "mid", "m tool", func(_ context.Context, _ testInput) tools.Result {
+		return tools.TextResult("m")
+	})
+
+	input := handshake() + `{"jsonrpc":"2.0","method":"tools/list","id":2,"params":{}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, r, input)
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+
+	var result struct {
+		Tools []struct {
+			Description string `json:"description"`
+			InputSchema struct {
+				Type string `json:"type"`
+			} `json:"inputSchema"`
+			Name string `json:"name"`
+		} `json:"tools"`
+	}
+	err = json.Unmarshal(responses[1].Result, &result)
+	assert.That(t, "unmarshal error", err, nil)
+	assert.That(t, "tools count", len(result.Tools), 3)
+	assert.That(t, "first tool", result.Tools[0].Name, "alpha")
+	assert.That(t, "second tool", result.Tools[1].Name, "mid")
+	assert.That(t, "third tool", result.Tools[2].Name, "zeta")
+
+	// Verify each tool has description and inputSchema.type
+	for _, tool := range result.Tools {
+		if tool.Description == "" {
+			t.Errorf("tool %q missing description", tool.Name)
+		}
+		assert.That(t, tool.Name+" schema type", tool.InputSchema.Type, "object")
+	}
+}
+
+func Test_Server_With_ToolsListEmptyRegistry_Should_ReturnEmptyArray(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := tools.NewRegistry()
+	input := handshake() + `{"jsonrpc":"2.0","method":"tools/list","id":2,"params":{}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, r, input)
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+
+	var result struct {
+		Tools []any `json:"tools"`
+	}
+	err = json.Unmarshal(responses[1].Result, &result)
+	assert.That(t, "unmarshal error", err, nil)
+	assert.That(t, "tools count", len(result.Tools), 0)
+}
+
+func Test_Server_With_ToolsListAnnotations_Should_IncludeAnnotations(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := tools.NewRegistry()
+	tools.Register(r, "readonly", "read-only tool", func(_ context.Context, _ testInput) tools.Result {
+		return tools.TextResult("ok")
+	}, tools.WithAnnotations(tools.Annotations{ReadOnlyHint: true}))
+
+	input := handshake() + `{"jsonrpc":"2.0","method":"tools/list","id":2,"params":{}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, r, input)
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+
+	var result struct {
+		Tools []struct {
+			Annotations struct {
+				ReadOnlyHint bool `json:"readOnlyHint"`
+			} `json:"annotations"`
+			Name string `json:"name"`
+		} `json:"tools"`
+	}
+	err = json.Unmarshal(responses[1].Result, &result)
+	assert.That(t, "unmarshal error", err, nil)
+	assert.That(t, "tools count", len(result.Tools), 1)
+	assert.That(t, "tool name", result.Tools[0].Name, "readonly")
+	assert.That(t, "readOnlyHint", result.Tools[0].Annotations.ReadOnlyHint, true)
+}
+
+func Test_Server_With_TraceEnabled_Should_LogProtocolMessages(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	input := handshake()
+	var stdout, stderr bytes.Buffer
+	srv := server.NewServer("mcp", "test", testRegistry(), strings.NewReader(input), &stdout, &stderr,
+		server.WithTrace(true),
+	)
+
+	// Act
+	err := srv.Run(context.Background())
+
+	// Assert
+	assert.That(t, "error", err, nil)
+
+	entries := parseLogEntries(t, &stderr)
+	traceReq := findLogEntry(entries, "trace_request")
+	if traceReq == nil {
+		t.Fatal("expected trace_request log entry")
+	}
+	traceResp := findLogEntry(entries, "trace_response")
+	if traceResp == nil {
+		t.Fatal("expected trace_response log entry")
+	}
+}
+
+func Test_Server_With_RequestDuringInFlight_Should_ReturnServerBusy(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — handler that blocks until context cancelled, second request arrives while in flight
+	r := tools.NewRegistry()
+	tools.Register(r, "blocker", "blocks", func(ctx context.Context, _ testInput) tools.Result {
+		<-ctx.Done()
+		return tools.TextResult("done")
+	})
+
+	input := handshake() +
+		`{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"blocker","arguments":{"message":"x"}}}` + "\n" +
+		`{"jsonrpc":"2.0","method":"tools/list","id":3,"params":{}}` + "\n"
+
+	var stdout, stderr bytes.Buffer
+	srv := server.NewServer("mcp", "test", r, strings.NewReader(input), &stdout, &stderr,
+		server.WithHandlerTimeout(5*time.Second),
+	)
+
+	// Act
+	err := srv.Run(context.Background())
+
+	// Assert
+	assert.That(t, "error", err, nil)
+
+	var responses []protocol.Response
+	dec := json.NewDecoder(&stdout)
+	for {
+		var resp protocol.Response
+		if uerr := dec.Decode(&resp); uerr != nil {
+			break
+		}
+		responses = append(responses, resp)
+	}
+
+	// Find the server busy response
+	var busyResp *protocol.Response
+	for i := range responses {
+		if string(responses[i].ID) == "3" {
+			busyResp = &responses[i]
+			break
+		}
+	}
+	if busyResp == nil {
+		t.Fatal("expected response for request id 3")
+	}
+	assert.That(t, "error code", busyResp.Error.Code, protocol.InvalidRequest)
+	if !strings.Contains(busyResp.Error.Message, "server busy") {
+		t.Errorf("expected server busy message, got: %s", busyResp.Error.Message)
+	}
+}
