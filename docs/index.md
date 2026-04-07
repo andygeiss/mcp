@@ -1,48 +1,63 @@
 # Project Documentation Index
 
 **Project:** mcp
-**Generated:** 2026-04-05
+**Generated:** 2026-04-07
 **Scan Level:** Exhaustive
 
 ## Project Overview
 
-- **Type:** Monolith
+- **Type:** Monolith (single CLI binary)
 - **Primary Language:** Go 1.26
-- **Architecture:** Sequential dispatch loop (stdin/stdout JSON-RPC 2.0)
-- **Dependencies:** Zero external (stdlib only)
-- **MCP Version:** 2025-06-18
+- **Architecture:** Flat — `cmd/mcp/ -> server/ -> protocol/`, `server/ -> tools/`
+- **Protocol:** MCP 2025-06-18 over JSON-RPC 2.0 (stdin/stdout)
+- **Dependencies:** None (standard library only)
 
 ## Quick Reference
 
-- **Tech Stack:** Go 1.26, JSON-RPC 2.0, slog, encoding/json
+- **Tech Stack:** Go 1.26, encoding/json, log/slog
 - **Entry Point:** `cmd/mcp/main.go`
-- **Architecture Pattern:** Decode -> validate -> dispatch -> encode loop
-- **Build:** `go build -ldflags "-X main.version=$(git describe --tags --always --dirty)" ./cmd/mcp/`
+- **Architecture Pattern:** Flat, sequential dispatch, three-state lifecycle
+- **Tools:** echo, search
+- **Build:** `make check` (build + test + lint)
 - **Test:** `go test -race ./...`
-- **Lint:** `golangci-lint run ./...`
 
 ## Generated Documentation
 
 - [Project Overview](./project-overview.md)
 - [Architecture](./architecture.md)
 - [Source Tree Analysis](./source-tree-analysis.md)
-- [API Contracts](./api-contracts.md)
 - [Development Guide](./development-guide.md)
 - [Deployment Guide](./deployment-guide.md)
 
 ## Existing Documentation
 
-- [README](../README.md) -- Project overview, quickstart, architecture summary
-- [CLAUDE.md](../CLAUDE.md) -- AI agent engineering instructions and guardrails
-- [CONTRIBUTING.md](../CONTRIBUTING.md) -- Contributor guide: prerequisites, testing, PR process
-- [SECURITY.md](../SECURITY.md) -- Security policy and vulnerability reporting
-- [LICENSE](../LICENSE) -- MIT License
+- [README.md](../README.md) — Project introduction, quickstart, feature list
+- [CONTRIBUTING.md](../CONTRIBUTING.md) — Dev setup, testing requirements, PR process
+- [SECURITY.md](../SECURITY.md) — Vulnerability reporting policy
+- [CLAUDE.md](../CLAUDE.md) — AI-facing engineering instructions and guardrails
+- [LICENSE](../LICENSE) — MIT License
 
 ## Getting Started
 
-1. Install Go 1.26+
-2. Clone the repository
-3. Run `make check` to verify everything builds, tests pass, and lint is clean
-4. Read `docs/architecture.md` for the full technical deep-dive
-5. Read `docs/api-contracts.md` for the JSON-RPC protocol reference
-6. To add a new tool, follow the guide in `docs/development-guide.md`
+### Build and Run
+
+```bash
+make check                    # Full quality pipeline
+make build                    # Compile only
+go run ./cmd/mcp/             # Run the MCP server
+```
+
+### Add a New Tool
+
+1. Create input struct + handler in `internal/tools/`
+2. Register in `cmd/mcp/main.go` via `tools.Register[T]()`
+3. Schema is auto-derived from struct tags
+4. Write tests (unit + integration)
+
+### Use as Template
+
+```bash
+git clone https://github.com/andygeiss/mcp.git my-server
+cd my-server
+make init MODULE=github.com/myorg/my-server
+```

@@ -1,155 +1,125 @@
 # Deployment Guide
 
 **Project:** mcp
-**Generated:** 2026-04-05
+**Generated:** 2026-04-07
 
-## Build
+## Release Process
 
-### Local Build
+Releases are automated via [GoReleaser](https://goreleaser.com/) triggered by Git tags.
+
+### Creating a Release
 
 ```bash
-go build -ldflags "-X main.version=$(git describe --tags --always --dirty)" ./cmd/mcp/
+git tag v1.0.0
+git push origin v1.0.0
 ```
 
-Produces a single static binary `mcp` in the current directory.
+This triggers `.github/workflows/release.yml` which:
+1. Builds binaries for darwin/linux on amd64/arm64
+2. Generates tar.gz archives with LICENSE and README.md
+3. Creates SHA-256 checksums
+4. Generates SBOMs via Syft
+5. Signs checksums with [cosign](https://github.com/sigstore/cosign) (keyless, OIDC)
+6. Publishes GitHub Release
 
-### Cross-Platform Build (GoReleaser)
-
-The project uses GoReleaser for release builds:
+### Build Matrix
 
 | OS | Architecture |
 |---|---|
 | darwin (macOS) | amd64, arm64 |
 | linux | amd64, arm64 |
 
-### Release Artifacts
-
-Each release produces:
-- `mcp_<version>_<os>_<arch>.tar.gz` (binary + LICENSE + README.md)
-- `checksums.txt` (SHA-256)
-- Cosign signature on checksums (keyless Sigstore)
-- SBOM (Software Bill of Materials via Syft)
-
-## CI/CD Pipeline
-
-### GitHub Actions Workflows
-
-| Workflow | Trigger | Purpose |
-|---|---|---|
-| **CI** (`ci.yml`) | Push to main, PRs | Build, test (with coverage), lint, fuzz (30s) |
-| **Nightly Fuzz** (`fuzz.yml`) | Daily 03:00 UTC, manual | Extended fuzz testing (5min/target, configurable) |
-| **Release** (`release.yml`) | Push `v*.*.*` tag, manual | GoReleaser + Cosign signing + SBOM |
-| **CodeQL** (`codeql.yml`) | Push to main, PRs, weekly Mon 06:00 UTC | Static analysis for Go |
-| **Scorecard** (`scorecard.yml`) | Push to main, weekly Mon 06:00 UTC, manual | OpenSSF security posture scoring |
-
-### CI Steps (per PR)
-
-1. **bench** -- `make bench` (benchmarks with benchstat comparison)
-2. **build** -- `make build` (compile all packages)
-3. **fuzz** -- `make fuzz` (30s fuzz run)
-4. **lint** -- golangci-lint via official action
-5. **test** -- `make cover` (tests with race detector + coverage report + 60% threshold gate)
-
-All five jobs run in parallel on `ubuntu-latest`.
-
-### Continuous Fuzzing
-
-Two layers of fuzzing:
-
-1. **CI fuzz** -- 30s per PR, auto-discovers all `Fuzz_*` targets
-2. **OSS-Fuzz** -- Google's continuous fuzzing infrastructure, runs the protocol decoder fuzzer with libFuzzer + AddressSanitizer. Config in `oss-fuzz/`:
-   - `Dockerfile` -- pinned base image by SHA256 hash
-   - `build.sh` -- compiles native Go fuzzer
-   - `project.yaml` -- libfuzzer engine, address sanitizer
-
-### Dependency Management
-
-- **Dependabot** updates GitHub Actions and Go module dependencies weekly
-- All GitHub Actions are pinned by full commit SHA (not version tags) for supply chain security
-- Zero external Go dependencies (stdlib only)
-
-## Release Process
-
-1. Ensure all CI checks pass on `main`
-2. Create and push a version tag: `git tag v1.0.0 && git push origin v1.0.0`
-3. The Release workflow triggers automatically:
-   - GoReleaser builds cross-platform binaries
-   - Cosign signs the checksums (keyless via GitHub OIDC)
-   - Syft generates SBOM
-   - GitHub Release is created with all artifacts
-
-## Running in Production
-
-The MCP server is designed to be run by an MCP client (e.g., Claude Desktop, IDE extensions). The client launches the binary and communicates via stdin/stdout.
+### Version Injection
 
 ```bash
-# Direct execution
-./mcp
-
-# With version info
-./mcp  # version is baked in at build time via ldflags
-
-# With trace logging
-MCP_TRACE=1 ./mcp 2>trace.log
+go build -ldflags "-X main.version=$(git describe --tags --always --dirty)" ./cmd/mcp/
 ```
 
-### Signal Handling
+The `--version` flag prints the injected version string and exits.
 
-- `SIGINT` / `SIGTERM` -- graceful shutdown via context cancellation
-- stdin EOF -- clean shutdown (exit 0)
+## CI/CD Pipelines
 
-### Exit Codes
+### CI (`.github/workflows/ci.yml`)
+Runs on every push to `main` and every pull request.
 
-| Code | Meaning |
+| Job | Steps |
 |---|---|
-| 0 | Clean shutdown (EOF, signal, context cancel) |
-| 1 | Fatal error (decode error, encode error) |
+| `build` | `make build` |
+| `test` | `make coverage` (race detector + coverage) |
+| `fuzz` | `make fuzz` (30s) |
+| `lint` | `golangci-lint run ./...` |
 
-## Container
+### Nightly Fuzz (`.github/workflows/fuzz.yml`)
+Runs daily at 03:00 UTC. Discovers all `Fuzz_*` targets automatically and runs each for 5 minutes. Can be triggered manually with custom duration.
 
-> **Note:** Untested reference — validate in your target environment before production use.
+### CodeQL (`.github/workflows/codeql.yml`)
+Static analysis. Runs weekly (Monday 06:00 UTC) and on every PR/push.
 
-```dockerfile
-FROM golang:1.26 AS builder
-WORKDIR /src
-COPY . .
-RUN CGO_ENABLED=0 go build \
-    -ldflags "-X main.version=$(git describe --tags --always --dirty)" \
-    -o /mcp ./cmd/mcp/
+### OpenSSF Scorecard (`.github/workflows/scorecard.yml`)
+Supply chain security assessment. Runs weekly and on push to `main`. Results uploaded as SARIF.
 
-FROM scratch
-COPY --from=builder /mcp /mcp
-ENTRYPOINT ["/mcp"]
+### Dependabot (`.github/dependabot.yml`)
+Weekly checks for:
+- GitHub Actions updates
+- Go module updates (though there are no external dependencies)
+
+## OSS-Fuzz Integration
+
+The project is integrated with [Google OSS-Fuzz](https://github.com/google/oss-fuzz) for continuous fuzzing.
+
+| File | Purpose |
+|---|---|
+| `oss-fuzz/project.yaml` | Project config: Go, libfuzzer engine, address sanitizer |
+| `oss-fuzz/build.sh` | Compiles `Fuzz_Decoder_With_ArbitraryInput` target |
+| `oss-fuzz/Dockerfile` | Build container based on `base-builder-go` |
+
+### Local Testing
+
+```bash
+docker build -f oss-fuzz/Dockerfile -t mcp-fuzz-test .
 ```
 
-The MCP client launches the container with stdin attached, e.g. `docker run -i mcp`.
+## Security
 
-## Systemd
+### Supply Chain
+- Pinned GitHub Actions with SHA hashes (not tags)
+- Cosign keyless signing for releases
+- SBOM generation with Syft
+- OpenSSF Scorecard monitoring
+- CodeQL static analysis
 
-> **Note:** Untested reference — validate in your target environment before production use.
+### Vulnerability Reporting
+Report via [GitHub Security Advisories](https://github.com/andygeiss/mcp/security/advisories/new). Response within 72 hours, assessment within 7 days, fix target within 30 days.
 
-```ini
-[Unit]
-Description=MCP Server
-After=network.target
+### Scope
+- `cmd/mcp` binary: in scope
+- `cmd/init` template rewriter: not security-critical
 
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/mcp
-Restart=on-failure
-StandardInput=socket
-StandardOutput=socket
+## Deployment as MCP Server
 
-[Install]
-WantedBy=multi-user.target
+This is a CLI binary — no containers, no services. Deploy by:
+
+1. Download the release binary for your platform
+2. Place it in your `PATH`
+3. Configure your MCP client to invoke it
+
+### Claude Code Configuration
+
+Create `.mcp.json` in your project root:
+```json
+{
+  "mcpServers": {
+    "mcp": {
+      "command": "/path/to/mcp"
+    }
+  }
+}
 ```
 
-The MCP server reads from stdin and writes to stdout. In a systemd context, the MCP client must manage the I/O connection (e.g. via socket activation).
+### Using as Template
 
-## Security Considerations
-
-- The binary reads from stdin only -- no network listeners
-- Stdout is protocol-only (no data leakage)
-- Structured logs go to stderr only
-- Tool handlers are sandboxed with timeouts and panic recovery
-- File operations in the search tool are restricted to the working directory
+```bash
+git clone https://github.com/andygeiss/mcp.git my-server
+cd my-server
+make init MODULE=github.com/myorg/my-server
+```
