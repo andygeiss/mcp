@@ -265,6 +265,8 @@ func (s *Server) handleDecodeResultDuringInFlight(ctx context.Context, dr decode
 
 	s.requestCount++
 	if s.trace {
+		// Marshal cannot fail: protocol.Request contains only JSON-safe fields
+		// (string, json.RawMessage).
 		raw, _ := json.Marshal(dr.msg)
 		s.logger.Info("trace_request", "direction", "←", "message", string(raw))
 	}
@@ -328,6 +330,8 @@ func (s *Server) handleDecodeResultIdle(ctx context.Context, dr decodeResult) er
 
 	s.requestCount++
 	if s.trace {
+		// Marshal cannot fail: protocol.Request contains only JSON-safe fields
+		// (string, json.RawMessage).
 		raw, _ := json.Marshal(dr.msg)
 		s.logger.Info("trace_request", "direction", "←", "message", string(raw))
 	}
@@ -355,6 +359,8 @@ func (s *Server) handleDecodeResultIdle(ctx context.Context, dr decodeResult) er
 // encodeResponse writes a JSON-RPC response to stdout with optional trace logging.
 func (s *Server) encodeResponse(resp protocol.Response) error {
 	if s.trace {
+		// Marshal cannot fail: protocol.Response contains only JSON-safe fields
+		// (string, int, json.RawMessage).
 		raw, _ := json.Marshal(resp)
 		s.logger.Info("trace_response", "direction", "→", "message", string(raw))
 	}
@@ -434,7 +440,11 @@ func (s *Server) startToolCallAsync(ctx context.Context, msg protocol.Request) (
 func (s *Server) executeToolCall(ctx context.Context, id json.RawMessage, tool tools.Tool, params toolCallParams) protocol.Response {
 	result, toolErr := s.dispatchToolCall(ctx, tool, params.Arguments)
 	if toolErr != nil {
-		data, _ := json.Marshal(toolErr.data)
+		data, err := json.Marshal(toolErr.data)
+		if err != nil {
+			slog.Warn("marshal tool error data failed", "error", err)
+			data = nil
+		}
 		ce := &protocol.CodeError{Code: toolErr.code, Message: toolErr.message}
 		ce.Data = data
 		return protocol.NewErrorResponseFromCodeError(id, ce)
@@ -449,6 +459,7 @@ func (s *Server) executeToolCall(ctx context.Context, id json.RawMessage, tool t
 	if len(resultJSON) > maxResultSize {
 		s.logger.Warn("tool_result_truncated", "tool_name", params.Name, "size", len(resultJSON), "limit", maxResultSize)
 		result = tools.TextResult(fmt.Sprintf("[result truncated: exceeded maximum size of %d bytes]", maxResultSize))
+		// Marshal cannot fail: tools.TextResult contains only string fields.
 		resultJSON, _ = json.Marshal(result)
 	}
 
@@ -601,10 +612,12 @@ func (s *Server) handleNotification(msg protocol.Request) {
 	case protocol.NotificationCancelled:
 		s.handleCancelledNotification(msg)
 	case protocol.NotificationInitialized:
-		if s.state == stateInitializing {
-			s.state = stateReady
-			s.logger.Info("server_ready")
+		if s.state != stateInitializing {
+			s.logger.Warn("unexpected notifications/initialized", "current_state", s.state)
+			return
 		}
+		s.state = stateReady
+		s.logger.Info("server_ready")
 	}
 	// All unknown notifications are silently ignored.
 }
@@ -617,6 +630,7 @@ func (s *Server) handleCancelledNotification(msg protocol.Request) {
 	}
 	var params cancelledParams
 	if err := json.Unmarshal(msg.Params, &params); err != nil {
+		s.logger.Warn("unmarshal cancelled notification failed", "error", err)
 		return
 	}
 	if !bytes.Equal(params.RequestID, s.inFlightID) {
@@ -700,6 +714,8 @@ func (s *Server) handleMethod(msg protocol.Request) protocol.Response {
 // handleUnsupportedCapability returns a -32601 response with guidance data
 // for methods in unsupported MCP namespaces (completion/, elicitation/, prompts/, resources/).
 func (s *Server) handleUnsupportedCapability(msg protocol.Request) protocol.Response {
+	// Marshal cannot fail: capabilityGuidance contains only JSON-safe fields
+	// (string, []string).
 	data, _ := json.Marshal(&capabilityGuidance{
 		Hint:                  "this server supports tools only; use tools/list and tools/call",
 		SupportedCapabilities: []string{"tools"},

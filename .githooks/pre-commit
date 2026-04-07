@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Pre-commit hook — runs the full quality pipeline.
+# Target: completes within 60 seconds on a developer workstation.
+
+if ! command -v golangci-lint &> /dev/null; then
+    echo "WARNING: golangci-lint is not installed. Running build and test only." >&2
+    echo "Install: https://golangci-lint.run/welcome/install/" >&2
+    exec make build test
+fi
+
+exec make check

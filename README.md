@@ -1,6 +1,7 @@
 # mcp
 
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/andygeiss/mcp/badge)](https://scorecard.dev/viewer/?uri=github.com/andygeiss/mcp)
+[![Coverage](https://codecov.io/gh/andygeiss/mcp/branch/main/graph/badge.svg)](https://codecov.io/gh/andygeiss/mcp)
 
 A minimal, zero-dependency Go implementation of the [Model Context Protocol](https://modelcontextprotocol.io) (MCP).
 

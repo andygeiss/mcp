@@ -25,14 +25,7 @@ func Test_Server_With_SIGTERM_Should_ShutdownCleanly(t *testing.T) {
 func testSignalShutdown(t *testing.T, sig syscall.Signal) {
 	t.Helper()
 
-	// Arrange — build the binary
-	binary := t.TempDir() + "/mcp"
-	build := exec.Command("go", "build", "-o", binary, ".") //nolint:gosec // integration test: args are literal except t.TempDir() output path
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build failed: %v\n%s", err, out)
-	}
-
-	cmd := exec.Command(binary) //nolint:gosec // integration test: binary built above to t.TempDir()
+	cmd := exec.Command(testBinary)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatal(err)

@@ -1,17 +1,21 @@
 FUZZTIME ?= 30s
 MODULE   ?= github.com/example/myproject
 
-.PHONY: build check coverage fuzz init lint test
+.PHONY: bench build check cover fuzz init lint setup test
 
-## Run the full quality pipeline (build, test, lint)
-check: build test lint
+## Run benchmarks (6 iterations for benchstat)
+bench:
+	go test -bench=. -count=6 ./...
 
 ## Build all packages
 build:
 	go build ./...
 
-## Generate test coverage report
-coverage:
+## Run the full quality pipeline (build, test, lint)
+check: build test lint
+
+## Run tests with coverage report
+cover:
 	go test -race -coverprofile=coverage.out ./...
 	go tool cover -func=coverage.out
 
@@ -26,6 +30,10 @@ init:
 ## Run linter (must pass with zero issues)
 lint:
 	golangci-lint run ./...
+
+## Configure local development environment
+setup:
+	git config core.hooksPath .githooks
 
 ## Run all tests with race detector
 test:

@@ -115,3 +115,54 @@ func Test_Server_With_SynctestContextCancellation_Should_ShutdownCleanly(t *test
 		assert.That(t, "error", err, nil)
 	})
 }
+
+func Test_Server_With_ConcurrentRequest_Should_RejectWithServerBusy(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		// Arrange
+		r := tools.NewRegistry()
+		tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) tools.Result {
+			<-ctx.Done()
+			return tools.ErrorResult("cancelled")
+		})
+
+		input := handshake() +
+			`{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"blocker","arguments":{"message":"first"}}}` + "\n" +
+			`{"jsonrpc":"2.0","method":"tools/call","id":3,"params":{"name":"blocker","arguments":{"message":"second"}}}` + "\n"
+
+		var stdout, stderr bytes.Buffer
+		srv := server.NewServer("mcp", "test", r, strings.NewReader(input), &stdout, &stderr,
+			server.WithHandlerTimeout(time.Hour))
+
+		// Act
+		err := srv.Run(t.Context())
+
+		// Assert
+		assert.That(t, "error", err, nil)
+
+		var responses []protocol.Response
+		dec := json.NewDecoder(&stdout)
+		for {
+			var resp protocol.Response
+			if uerr := dec.Decode(&resp); uerr != nil {
+				break
+			}
+			responses = append(responses, resp)
+		}
+
+		// Find the response for id:3 (the concurrent request)
+		found := false
+		for _, resp := range responses {
+			if string(resp.ID) == "3" {
+				found = true
+				assert.That(t, "error code", resp.Error.Code, protocol.InvalidRequest)
+				if !strings.Contains(resp.Error.Message, "server busy") {
+					t.Errorf("expected 'server busy' in message, got: %s", resp.Error.Message)
+				}
+			}
+		}
+		if !found {
+			t.Fatal("expected response for id:3")
+		}
+	})
+}
