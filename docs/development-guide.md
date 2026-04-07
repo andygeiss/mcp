@@ -16,6 +16,9 @@
 git clone https://github.com/andygeiss/mcp.git
 cd mcp
 
+# Set up pre-commit hooks
+make setup
+
 # Full quality pipeline (build + test + lint)
 make check
 
@@ -36,8 +39,17 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}
 | `make lint` | Run golangci-lint (must pass with 0 issues) |
 | `make fuzz` | Fuzz the protocol decoder (30s default) |
 | `make fuzz FUZZTIME=5m` | Fuzz with custom duration |
-| `make coverage` | Generate test coverage report |
+| `make cover` | Run tests with coverage report |
+| `make setup` | Configure local development environment (git hooks) |
 | `make init MODULE=github.com/org/repo` | Initialize as new project from template |
+
+## Pre-Commit Hooks
+
+Run `make setup` after cloning to configure git hooks. This sets `core.hooksPath` to `.githooks/`, which contains a pre-commit hook that runs `make check` (build + test + lint) before every commit.
+
+If golangci-lint is not installed, the hook warns and runs `make build test` instead (graceful degradation).
+
+To bypass the hook in emergencies: `git commit --no-verify`. Use sparingly.
 
 ## Testing
 

@@ -9,15 +9,19 @@ The MCP server is a single Go binary (`cmd/mcp/`) that implements the Model Cont
 
 ## Architecture Pattern
 
-**Sequential dispatch loop** -- the server reads one JSON-RPC message at a time from stdin, dispatches it to the appropriate handler, and writes the response to stdout. There are no goroutine pools for request handling; concurrency exists only within individual tool handler execution (timeout/panic recovery).
+**Sequential dispatch loop** (`maxInFlight: 1`) -- the server reads one JSON-RPC message at a time from stdin, dispatches it to the appropriate handler, and writes the response to stdout. Tool calls execute in a background goroutine so the decode loop can continue reading messages for cancellation and ping support, but only one tool handler runs at a time; additional requests while a handler is in flight are rejected with `-32600`.
 
 ```
-stdin -> json.Decoder -> Decode -> Validate -> Dispatch -> Encode -> json.Encoder -> stdout
-                                                  |
-                                            State Machine
-                                         (uninitialized ->
-                                          initializing ->
-                                              ready)
+                    [background goroutine]        [main dispatch path]
+stdin -> json.Decoder -> Decode -> decodeCh -> Validate -> Dispatch -> Encode -> stdout
+                                                              |
+                                                        State Machine
+                                                     (uninitialized ->
+                                                      initializing ->
+                                                          ready)
+                                                              |
+                                              [tool handler goroutine, maxInFlight: 1]
+                                              Tool.Handler -> inFlightCh
 ```
 
 ## Package Structure and Dependency Direction

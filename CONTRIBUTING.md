@@ -9,12 +9,13 @@
 ## Dev Setup
 
 ```bash
+make setup          # configure pre-commit hooks (run once after cloning)
 make check          # build + test + lint (recommended)
 make build          # compile all packages
 make test           # run tests with race detector
 make fuzz           # fuzz the protocol decoder (30s default)
 make lint           # lint with zero issues required
-make coverage       # generate coverage report
+make cover          # run tests with coverage report
 ```
 
 ## Testing Requirements

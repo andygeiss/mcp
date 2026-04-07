@@ -257,45 +257,38 @@ func Test_Server_With_UnknownTool_Should_Return32602(t *testing.T) {
 func Test_Server_With_PanickingHandler_Should_Return32603(t *testing.T) {
 	t.Parallel()
 
-	// Arrange
-	r := tools.NewRegistry()
-	tools.Register(r, "panicker", "panics", func(_ context.Context, _ testInput) tools.Result {
-		panic("intentional panic")
-	})
+	tests := []struct {
+		name       string
+		panicValue any
+		toolName   string
+	}{
+		{name: "string panic", panicValue: "intentional panic", toolName: "panicker"},
+		{name: "error panic", panicValue: fmt.Errorf("wrapped error: %w", errors.New("root cause")), toolName: "error-panicker"},
+		{name: "int panic", panicValue: 42, toolName: "int-panicker"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	input := handshake() + `{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"panicker","arguments":{"message":"boom"}}}` + "\n"
+			// Arrange
+			r := testRegistry()
+			tools.Register(r, tt.toolName, "panics", func(_ context.Context, _ testInput) tools.Result {
+				panic(tt.panicValue)
+			})
 
-	// Act
-	responses, err := runServer(t, r, input)
+			input := handshake() + `{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"` + tt.toolName + `","arguments":{"message":"boom"}}}` + "\n"
 
-	// Assert
-	assert.That(t, "error", err, nil)
-	assert.That(t, "response count", len(responses), 2)
+			// Act
+			responses, err := runServer(t, r, input)
 
-	// Panic is caught and returned as JSON-RPC -32603 protocol error
-	assert.That(t, "error code", responses[1].Error.Code, protocol.InternalError)
-}
-
-func Test_Server_With_PanickingHandler_Should_IncludeToolNameInError(t *testing.T) {
-	t.Parallel()
-
-	// Arrange
-	r := tools.NewRegistry()
-	tools.Register(r, "panicker", "panics", func(_ context.Context, _ testInput) tools.Result {
-		panic("test-panic-value")
-	})
-
-	input := handshake() + `{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"panicker","arguments":{"message":"boom"}}}` + "\n"
-
-	// Act
-	responses, err := runServer(t, r, input)
-
-	// Assert
-	assert.That(t, "error", err, nil)
-	assert.That(t, "response count", len(responses), 2)
-	assert.That(t, "error code", responses[1].Error.Code, protocol.InternalError)
-	if !strings.Contains(responses[1].Error.Message, "panicker") {
-		t.Errorf("expected tool name in error message, got: %s", responses[1].Error.Message)
+			// Assert
+			assert.That(t, "error", err, nil)
+			assert.That(t, "response count", len(responses), 2)
+			assert.That(t, "error code", responses[1].Error.Code, protocol.InternalError)
+			if !strings.Contains(responses[1].Error.Message, tt.toolName) {
+				t.Errorf("expected tool name in error message, got: %s", responses[1].Error.Message)
+			}
+		})
 	}
 }
 
@@ -371,46 +364,6 @@ func Test_Server_With_PanickingHandler_Should_LogStackToStderr(t *testing.T) {
 	if !found {
 		t.Error("expected tool_handler_panicked log entry in stderr")
 	}
-}
-
-func Test_Server_With_ErrorPanic_Should_Return32603(t *testing.T) {
-	t.Parallel()
-
-	// Arrange — panic with an error value instead of string
-	r := testRegistry()
-	tools.Register(r, "error-panicker", "panics with error", func(_ context.Context, _ testInput) tools.Result {
-		panic(fmt.Errorf("wrapped error: %w", errors.New("root cause")))
-	})
-
-	input := handshake() + `{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"error-panicker","arguments":{"message":"x"}}}` + "\n"
-
-	// Act
-	responses, err := runServer(t, r, input)
-
-	// Assert
-	assert.That(t, "error", err, nil)
-	assert.That(t, "response count", len(responses), 2)
-	assert.That(t, "error code", responses[1].Error.Code, protocol.InternalError)
-}
-
-func Test_Server_With_IntPanic_Should_Return32603(t *testing.T) {
-	t.Parallel()
-
-	// Arrange — panic with an arbitrary type (int)
-	r := testRegistry()
-	tools.Register(r, "int-panicker", "panics with int", func(_ context.Context, _ testInput) tools.Result {
-		panic(42)
-	})
-
-	input := handshake() + `{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"int-panicker","arguments":{"message":"x"}}}` + "\n"
-
-	// Act
-	responses, err := runServer(t, r, input)
-
-	// Assert
-	assert.That(t, "error", err, nil)
-	assert.That(t, "response count", len(responses), 2)
-	assert.That(t, "error code", responses[1].Error.Code, protocol.InternalError)
 }
 
 func Test_Server_With_EOF_Should_ShutdownCleanly(t *testing.T) {
@@ -915,78 +868,45 @@ func Test_Server_With_AbsentParams_Should_DispatchNormally(t *testing.T) {
 	assert.That(t, "no error", responses[1].Error == nil, true)
 }
 
-func Test_Server_With_ResourcesList_Should_ReturnGuidance(t *testing.T) {
+func Test_Server_With_UnsupportedCapability_Should_ReturnGuidance(t *testing.T) {
 	t.Parallel()
 
-	// Arrange
-	input := handshake() + `{"jsonrpc":"2.0","method":"resources/list","id":2,"params":{}}` + "\n"
-
-	// Act
-	responses, err := runServer(t, testRegistry(), input)
-
-	// Assert
-	assert.That(t, "error", err, nil)
-	assert.That(t, "response count", len(responses), 2)
-	assert.That(t, "error code", responses[1].Error.Code, protocol.MethodNotFound)
-	if !strings.Contains(responses[1].Error.Message, "resources/list") {
-		t.Errorf("expected method name in message, got: %s", responses[1].Error.Message)
+	tests := []struct {
+		name   string
+		method string
+	}{
+		{name: "prompts/get", method: "prompts/get"},
+		{name: "resources/list", method: "resources/list"},
+		{name: "resources/subscribe", method: "resources/subscribe"},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	var data map[string]any
-	if err := json.Unmarshal(responses[1].Error.Data, &data); err != nil {
-		t.Fatalf("failed to unmarshal error data: %v", err)
-	}
-	caps, ok := data["supportedCapabilities"].([]any)
-	if !ok || len(caps) == 0 {
-		t.Fatalf("expected supportedCapabilities array, got: %v", data["supportedCapabilities"])
-	}
-	assert.That(t, "capability", caps[0], "tools")
-	if hint, ok := data["hint"].(string); !ok || hint == "" {
-		t.Error("expected non-empty hint string")
-	}
-}
+			// Arrange
+			input := handshake() + `{"jsonrpc":"2.0","method":"` + tt.method + `","id":2,"params":{}}` + "\n"
 
-func Test_Server_With_PromptsGet_Should_ReturnGuidance(t *testing.T) {
-	t.Parallel()
+			// Act
+			responses, err := runServer(t, testRegistry(), input)
 
-	// Arrange
-	input := handshake() + `{"jsonrpc":"2.0","method":"prompts/get","id":2,"params":{}}` + "\n"
+			// Assert
+			assert.That(t, "error", err, nil)
+			assert.That(t, "response count", len(responses), 2)
+			assert.That(t, "error code", responses[1].Error.Code, protocol.MethodNotFound)
+			if !strings.Contains(responses[1].Error.Message, tt.method) {
+				t.Errorf("expected method name in message, got: %s", responses[1].Error.Message)
+			}
 
-	// Act
-	responses, err := runServer(t, testRegistry(), input)
-
-	// Assert
-	assert.That(t, "error", err, nil)
-	assert.That(t, "response count", len(responses), 2)
-	assert.That(t, "error code", responses[1].Error.Code, protocol.MethodNotFound)
-	if !strings.Contains(responses[1].Error.Message, "prompts/get") {
-		t.Errorf("expected method name in message, got: %s", responses[1].Error.Message)
-	}
-
-	var data map[string]any
-	if err := json.Unmarshal(responses[1].Error.Data, &data); err != nil {
-		t.Fatalf("failed to unmarshal error data: %v", err)
-	}
-	if _, ok := data["supportedCapabilities"]; !ok {
-		t.Error("expected supportedCapabilities in data")
-	}
-}
-
-func Test_Server_With_ResourcesSubscribeRequest_Should_ReturnGuidance(t *testing.T) {
-	t.Parallel()
-
-	// Arrange
-	input := handshake() + `{"jsonrpc":"2.0","method":"resources/subscribe","id":2,"params":{}}` + "\n"
-
-	// Act
-	responses, err := runServer(t, testRegistry(), input)
-
-	// Assert
-	assert.That(t, "error", err, nil)
-	assert.That(t, "response count", len(responses), 2)
-	assert.That(t, "error code", responses[1].Error.Code, protocol.MethodNotFound)
-	if !strings.Contains(responses[1].Error.Message, "resources/subscribe") {
-		t.Errorf("expected method name in message, got: %s", responses[1].Error.Message)
+			var data map[string]any
+			if uerr := json.Unmarshal(responses[1].Error.Data, &data); uerr != nil {
+				t.Fatalf("failed to unmarshal error data: %v", uerr)
+			}
+			caps, ok := data["supportedCapabilities"].([]any)
+			if !ok || len(caps) == 0 {
+				t.Fatalf("expected supportedCapabilities array, got: %v", data["supportedCapabilities"])
+			}
+			assert.That(t, "capability", caps[0], "tools")
+		})
 	}
 }
 
@@ -1217,4 +1137,193 @@ func Test_Server_With_Notification_Should_IncrementRequestCountOnly(t *testing.T
 	}
 	assert.That(t, "requests", int(requests), 4)
 	assert.That(t, "errors", int(errs), 0)
+}
+
+func Test_Server_With_InitializedNotification_In_Each_State_Should_Transition_Or_Ignore(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		input         string
+		expectReady   bool   // true if tools/list should succeed
+		expectWarnLog bool   // true if "unexpected notifications/initialized" should appear
+		toolsListID   string // the id of the tools/list request
+		responseCount int
+	}{
+		{
+			name:          "uninitialized",
+			input:         initializedNotification + `{"jsonrpc":"2.0","method":"tools/list","id":1,"params":{}}` + "\n",
+			expectReady:   false,
+			expectWarnLog: true,
+			toolsListID:   "1",
+			responseCount: 1,
+		},
+		{
+			name:          "initializing",
+			input:         initRequest + initializedNotification + `{"jsonrpc":"2.0","method":"tools/list","id":2,"params":{}}` + "\n",
+			expectReady:   true,
+			expectWarnLog: false,
+			toolsListID:   "2",
+			responseCount: 2,
+		},
+		{
+			name:          "ready",
+			input:         handshake() + initializedNotification + `{"jsonrpc":"2.0","method":"tools/list","id":2,"params":{}}` + "\n",
+			expectReady:   true,
+			expectWarnLog: true,
+			toolsListID:   "2",
+			responseCount: 2,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Arrange
+			var stdout, stderr bytes.Buffer
+			srv := server.NewServer("mcp", "test", testRegistry(), strings.NewReader(tt.input), &stdout, &stderr)
+
+			// Act
+			err := srv.Run(context.Background())
+
+			// Assert
+			assert.That(t, "error", err, nil)
+
+			var responses []protocol.Response
+			dec := json.NewDecoder(&stdout)
+			for {
+				var resp protocol.Response
+				if uerr := dec.Decode(&resp); uerr != nil {
+					break
+				}
+				responses = append(responses, resp)
+			}
+			assert.That(t, "response count", len(responses), tt.responseCount)
+
+			// Check last response (tools/list)
+			lastResp := responses[len(responses)-1]
+			if tt.expectReady {
+				assert.That(t, "tools/list success", lastResp.Error == nil, true)
+			} else {
+				assert.That(t, "error code", lastResp.Error.Code, protocol.InvalidRequest)
+			}
+
+			// Check warn log
+			entries := parseLogEntries(t, &stderr)
+			warn := findLogEntry(entries, "unexpected notifications/initialized")
+			if tt.expectWarnLog && warn == nil {
+				t.Fatal("expected 'unexpected notifications/initialized' log entry")
+			}
+			if !tt.expectWarnLog && warn != nil {
+				t.Fatal("unexpected warn log entry")
+			}
+		})
+	}
+}
+
+func Test_Server_With_Malformed_Cancelled_Notification_Should_Log_Warn(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — register a blocking handler so there's an in-flight request
+	// when the malformed cancel notification arrives
+	r := tools.NewRegistry()
+	tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) tools.Result {
+		<-ctx.Done()
+		return tools.ErrorResult("cancelled")
+	})
+
+	input := handshake() +
+		`{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"blocker","arguments":{"message":"x"}}}` + "\n" +
+		`{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"reason":123}}` + "\n"
+
+	var stdout, stderr bytes.Buffer
+	srv := server.NewServer("mcp", "test", r, strings.NewReader(input), &stdout, &stderr,
+		server.WithHandlerTimeout(100*time.Millisecond),
+		server.WithSafetyMargin(100*time.Millisecond))
+
+	// Act
+	err := srv.Run(context.Background())
+
+	// Assert — no error response (notification), warn logged to stderr
+	assert.That(t, "error", err, nil)
+
+	entries := parseLogEntries(t, &stderr)
+	warn := findLogEntry(entries, "unmarshal cancelled notification failed")
+	if warn == nil {
+		t.Fatal("expected 'unmarshal cancelled notification failed' log entry in stderr")
+	}
+}
+
+func Test_Server_With_CancelledNotification_Should_CancelInFlightContext(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — handler that blocks until context cancelled
+	cancelled := make(chan struct{})
+	r := tools.NewRegistry()
+	tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) tools.Result {
+		<-ctx.Done()
+		close(cancelled)
+		return tools.ErrorResult("cancelled")
+	})
+
+	input := handshake() +
+		`{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"blocker","arguments":{"message":"x"}}}` + "\n" +
+		`{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":2}}` + "\n"
+
+	var stdout, stderr bytes.Buffer
+	srv := server.NewServer("mcp", "test", r, strings.NewReader(input), &stdout, &stderr,
+		server.WithHandlerTimeout(time.Hour))
+
+	// Act
+	err := srv.Run(context.Background())
+
+	// Assert
+	assert.That(t, "error", err, nil)
+
+	// Verify handler's context was cancelled (allow brief time for goroutine cleanup)
+	select {
+	case <-cancelled:
+		// ok
+	case <-time.After(5 * time.Second):
+		t.Fatal("expected handler context to be cancelled")
+	}
+}
+
+func Test_Server_With_CancelledNotification_Should_SuppressResponse(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := tools.NewRegistry()
+	tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) tools.Result {
+		<-ctx.Done()
+		return tools.ErrorResult("cancelled")
+	})
+
+	input := handshake() +
+		`{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"blocker","arguments":{"message":"x"}}}` + "\n" +
+		`{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":2}}` + "\n"
+
+	var stdout, stderr bytes.Buffer
+	srv := server.NewServer("mcp", "test", r, strings.NewReader(input), &stdout, &stderr,
+		server.WithHandlerTimeout(time.Hour))
+
+	// Act
+	err := srv.Run(context.Background())
+
+	// Assert
+	assert.That(t, "error", err, nil)
+
+	// Decode all responses — only initialize response (id:1) should be present
+	var responses []protocol.Response
+	dec := json.NewDecoder(&stdout)
+	for {
+		var resp protocol.Response
+		if uerr := dec.Decode(&resp); uerr != nil {
+			break
+		}
+		responses = append(responses, resp)
+	}
+
+	assert.That(t, "response count", len(responses), 1)
+	assert.That(t, "response id", string(responses[0].ID), "1")
 }

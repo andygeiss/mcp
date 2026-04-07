@@ -44,12 +44,13 @@ Each release produces:
 
 ### CI Steps (per PR)
 
-1. **build** -- `make build` (compile all packages)
-2. **test** -- `make coverage` (tests with race detector + coverage report)
-3. **lint** -- golangci-lint via official action
-4. **fuzz** -- `make fuzz` (30s fuzz run)
+1. **bench** -- `make bench` (benchmarks with benchstat comparison)
+2. **build** -- `make build` (compile all packages)
+3. **fuzz** -- `make fuzz` (30s fuzz run)
+4. **lint** -- golangci-lint via official action
+5. **test** -- `make cover` (tests with race detector + coverage report + 60% threshold gate)
 
-All four jobs run in parallel on `ubuntu-latest`.
+All five jobs run in parallel on `ubuntu-latest`.
 
 ### Continuous Fuzzing
 
@@ -103,6 +104,47 @@ MCP_TRACE=1 ./mcp 2>trace.log
 |---|---|
 | 0 | Clean shutdown (EOF, signal, context cancel) |
 | 1 | Fatal error (decode error, encode error) |
+
+## Container
+
+> **Note:** Untested reference — validate in your target environment before production use.
+
+```dockerfile
+FROM golang:1.26 AS builder
+WORKDIR /src
+COPY . .
+RUN CGO_ENABLED=0 go build \
+    -ldflags "-X main.version=$(git describe --tags --always --dirty)" \
+    -o /mcp ./cmd/mcp/
+
+FROM scratch
+COPY --from=builder /mcp /mcp
+ENTRYPOINT ["/mcp"]
+```
+
+The MCP client launches the container with stdin attached, e.g. `docker run -i mcp`.
+
+## Systemd
+
+> **Note:** Untested reference — validate in your target environment before production use.
+
+```ini
+[Unit]
+Description=MCP Server
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/mcp
+Restart=on-failure
+StandardInput=socket
+StandardOutput=socket
+
+[Install]
+WantedBy=multi-user.target
+```
+
+The MCP server reads from stdin and writes to stdout. In a systemd context, the MCP client must manage the I/O connection (e.g. via socket activation).
 
 ## Security Considerations
 

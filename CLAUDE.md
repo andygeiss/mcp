@@ -14,7 +14,7 @@ Go implementation of the Model Context Protocol (MCP). Module path: `github.com/
 
 Minimal, efficient MCP server communicating over stdin/stdout using JSON-RPC 2.0. Single CLI binary — no HTTP, no WebSocket. MCP protocol version: `2025-06-18`. This project serves as both a working MCP server and a scaffold for building custom MCP servers via `make init MODULE=...`.
 
-Prefer the newest stdlib API available at the Go version declared in `go.mod`. No external dependencies beyond the standard library. Go 1.26 was chosen for Green Tea GC (10-40% overhead reduction), `reflect.Type.Fields` iterators, `signal.NotifyContext` cancel cause, and `errors.AsType[T]`. `GOEXPERIMENT=jsonv2` is **not supported** — the protocol codec relies on `encoding/json` v1 behavior.
+Prefer the newest stdlib API available at the Go version declared in `go.mod`. No external `go.mod` dependencies beyond the standard library. CI toolchain tools (golangci-lint, GitHub Actions, Codecov) are exempt infrastructure, not project dependencies. Go 1.26 was chosen for Green Tea GC (10-40% overhead reduction), `reflect.Type.Fields` iterators, `signal.NotifyContext` cancel cause, and `errors.AsType[T]`. `GOEXPERIMENT=jsonv2` is **not supported** — the protocol codec relies on `encoding/json` v1 behavior.
 
 ## Build & Test
 
