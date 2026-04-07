@@ -48,10 +48,11 @@ type Result struct {
 
 // Tool represents a registered MCP tool with its handler.
 type Tool struct {
-	Description string      `json:"description"`
-	Handler     ToolHandler `json:"-"`
-	InputSchema InputSchema `json:"inputSchema"`
-	Name        string      `json:"name"`
+	Annotations *Annotations `json:"annotations,omitempty"`
+	Description string       `json:"description"`
+	Handler     ToolHandler  `json:"-"`
+	InputSchema InputSchema  `json:"inputSchema"`
+	Name        string       `json:"name"`
 }
 
 // ToolHandler is the low-level function signature used internally by the
@@ -104,7 +105,7 @@ func (r *Registry) Lookup(name string) (Tool, bool) {
 // The handler receives a typed input T after the server unmarshals the raw
 // JSON arguments. Return [TextResult] for success or [ErrorResult] for
 // tool-level failures.
-func Register[T any](r *Registry, name, description string, handler func(ctx context.Context, input T) Result) {
+func Register[T any](r *Registry, name, description string, handler func(ctx context.Context, input T) Result, opts ...Option) {
 	for _, t := range r.tools {
 		if t.Name == name {
 			panic("duplicate tool name: " + name)
@@ -129,6 +130,9 @@ func Register[T any](r *Registry, name, description string, handler func(ctx con
 		Handler:     wrapped,
 		InputSchema: schema,
 		Name:        name,
+	}
+	for _, opt := range opts {
+		opt(&tool)
 	}
 
 	r.tools = append(r.tools, tool)

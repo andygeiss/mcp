@@ -98,6 +98,13 @@ func runConformanceTest(t *testing.T, reqFile string) {
 		}
 	}
 
+	// When a golden response file exists, its line count is authoritative
+	// (handles edge cases like batch-array-rejection where the request has no
+	// parseable id but the server still writes an error response).
+	if len(expectedResponses) > 0 {
+		expectedCount = len(expectedResponses)
+	}
+
 	assert.That(t, "response count", len(responses), expectedCount)
 
 	// Verify all responses have jsonrpc 2.0

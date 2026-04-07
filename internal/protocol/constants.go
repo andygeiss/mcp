@@ -14,11 +14,12 @@ const MaxConcurrentRequests = 1
 
 // MCP method constants.
 const (
-	MCPVersion              = "2024-11-05"
+	MCPVersion              = "2025-06-18"
 	MethodInitialize        = "initialize"
 	MethodPing              = "ping"
 	MethodToolsCall         = "tools/call"
 	MethodToolsList         = "tools/list"
+	NotificationCancelled   = "notifications/cancelled"
 	NotificationInitialized = "notifications/initialized"
 )
 

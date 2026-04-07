@@ -593,3 +593,153 @@ func Test_DecodeEncode_With_ValidRequest_Should_RoundTrip(t *testing.T) {
 	assert.That(t, "response id", string(check.ID), `"req-1"`)
 	assert.That(t, "response jsonrpc", check.JSONRPC, "2.0")
 }
+
+func Test_Validate_With_BooleanID_Should_ReturnInvalidRequest(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	req := protocol.Request{
+		ID:      json.RawMessage("true"),
+		JSONRPC: "2.0",
+		Method:  "ping",
+		Params:  json.RawMessage("{}"),
+	}
+	// Act
+	got := protocol.Validate(req)
+	// Assert
+	if got == nil {
+		t.Fatal("expected error, got nil")
+	}
+	assert.That(t, "code", got.Code, protocol.InvalidRequest)
+	assert.That(t, "message", got.Message, "id must be a string, number, or null")
+}
+
+func Test_Validate_With_BooleanFalseID_Should_ReturnInvalidRequest(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	req := protocol.Request{
+		ID:      json.RawMessage("false"),
+		JSONRPC: "2.0",
+		Method:  "ping",
+		Params:  json.RawMessage("{}"),
+	}
+	// Act
+	got := protocol.Validate(req)
+	// Assert
+	if got == nil {
+		t.Fatal("expected error, got nil")
+	}
+	assert.That(t, "code", got.Code, protocol.InvalidRequest)
+	assert.That(t, "message", got.Message, "id must be a string, number, or null")
+}
+
+func Test_Validate_With_ArrayID_Should_ReturnInvalidRequest(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	req := protocol.Request{
+		ID:      json.RawMessage("[1]"),
+		JSONRPC: "2.0",
+		Method:  "ping",
+		Params:  json.RawMessage("{}"),
+	}
+	// Act
+	got := protocol.Validate(req)
+	// Assert
+	if got == nil {
+		t.Fatal("expected error, got nil")
+	}
+	assert.That(t, "code", got.Code, protocol.InvalidRequest)
+	assert.That(t, "message", got.Message, "id must be a string, number, or null")
+}
+
+func Test_Validate_With_ObjectID_Should_ReturnInvalidRequest(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	req := protocol.Request{
+		ID:      json.RawMessage(`{"a":1}`),
+		JSONRPC: "2.0",
+		Method:  "ping",
+		Params:  json.RawMessage("{}"),
+	}
+	// Act
+	got := protocol.Validate(req)
+	// Assert
+	if got == nil {
+		t.Fatal("expected error, got nil")
+	}
+	assert.That(t, "code", got.Code, protocol.InvalidRequest)
+	assert.That(t, "message", got.Message, "id must be a string, number, or null")
+}
+
+func Test_Validate_With_NullID_Should_ReturnNil(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	req := protocol.Request{
+		ID:      json.RawMessage("null"),
+		JSONRPC: "2.0",
+		Method:  "ping",
+		Params:  json.RawMessage("{}"),
+	}
+	// Act
+	got := protocol.Validate(req)
+	// Assert
+	assert.That(t, "error", got, (*protocol.CodeError)(nil))
+}
+
+func Test_Validate_With_ZeroID_Should_ReturnNil(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	req := protocol.Request{
+		ID:      json.RawMessage("0"),
+		JSONRPC: "2.0",
+		Method:  "ping",
+		Params:  json.RawMessage("{}"),
+	}
+	// Act
+	got := protocol.Validate(req)
+	// Assert
+	assert.That(t, "error", got, (*protocol.CodeError)(nil))
+}
+
+func Test_Validate_With_EmptyStringID_Should_ReturnNil(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	req := protocol.Request{
+		ID:      json.RawMessage(`""`),
+		JSONRPC: "2.0",
+		Method:  "ping",
+		Params:  json.RawMessage("{}"),
+	}
+	// Act
+	got := protocol.Validate(req)
+	// Assert
+	assert.That(t, "error", got, (*protocol.CodeError)(nil))
+}
+
+func Test_Validate_With_NegativeNumberID_Should_ReturnNil(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	req := protocol.Request{
+		ID:      json.RawMessage("-1"),
+		JSONRPC: "2.0",
+		Method:  "ping",
+		Params:  json.RawMessage("{}"),
+	}
+	// Act
+	got := protocol.Validate(req)
+	// Assert
+	assert.That(t, "error", got, (*protocol.CodeError)(nil))
+}
+
+func Test_Validate_With_NotificationNoID_Should_SkipValidation(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	req := protocol.Request{
+		JSONRPC: "2.0",
+		Method:  "notifications/initialized",
+		Params:  json.RawMessage("{}"),
+	}
+	// Act
+	got := protocol.Validate(req)
+	// Assert
+	assert.That(t, "error", got, (*protocol.CodeError)(nil))
+}

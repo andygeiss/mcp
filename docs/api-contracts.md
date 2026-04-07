@@ -7,7 +7,7 @@
 
 - **Protocol:** JSON-RPC 2.0 over stdin/stdout
 - **Framing:** Newline-delimited JSON objects (one JSON object per line)
-- **MCP Version:** `2024-11-05`
+- **MCP Version:** `2025-06-18`
 
 ## Methods
 
@@ -36,7 +36,7 @@ Initiates the MCP handshake. Must be the first request. Transitions server from 
     "capabilities": {
       "tools": {}
     },
-    "protocolVersion": "2024-11-05",
+    "protocolVersion": "2025-06-18",
     "serverInfo": {
       "name": "mcp",
       "version": "<version>"

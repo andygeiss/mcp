@@ -133,7 +133,7 @@ func testSignalShutdown(t *testing.T, sig syscall.Signal) {
 		if err := dec.Decode(&entry); err != nil {
 			break
 		}
-		if entry["msg"] == "server_shutting_down" {
+		if entry["msg"] == "server_stopped" {
 			foundShutdown = true
 			reason, _ := entry["reason"].(string)
 			if reason == "eof" {
@@ -143,6 +143,6 @@ func testSignalShutdown(t *testing.T, sig syscall.Signal) {
 		}
 	}
 	if !foundShutdown {
-		t.Errorf("expected server_shutting_down log entry; stderr: %s", allStderr)
+		t.Errorf("expected server_stopped log entry; stderr: %s", allStderr)
 	}
 }

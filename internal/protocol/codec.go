@@ -48,6 +48,14 @@ func Validate(req Request) *CodeError {
 	if len(req.Params) > 0 && req.Params[0] != '{' {
 		return ErrInvalidRequest("params must be an object")
 	}
+	if len(req.ID) > 0 {
+		switch req.ID[0] {
+		case '"', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '-', 'n':
+			// valid: string, number, null
+		default:
+			return ErrInvalidRequest("id must be a string, number, or null")
+		}
+	}
 	return nil
 }
 
