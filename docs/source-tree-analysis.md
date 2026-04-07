@@ -1,7 +1,7 @@
 # Source Tree Analysis
 
 **Project:** mcp
-**Generated:** 2026-04-05
+**Generated:** 2026-04-07
 
 ## Directory Tree
 
@@ -9,107 +9,114 @@
 mcp/
 ├── .github/
 │   ├── ISSUE_TEMPLATE/
-│   │   ├── bug_report.md           # Bug report issue template
-│   │   └── feature_request.md      # Feature request issue template
-│   ├── PULL_REQUEST_TEMPLATE.md    # PR template
-│   ├── dependabot.yml              # Automated dependency updates (Actions + gomod)
-│   ���── workflows/
-│       ├── ci.yml                  # CI: build, test, lint, fuzz on PR/push
-│       ├── codeql.yml              # Weekly CodeQL static analysis
-│       ├── fuzz.yml                # Nightly extended fuzz testing (5min/target)
-│       ├── release.yml             # GoReleaser + Cosign on version tags
-│       └── scorecard.yml           # OpenSSF Scorecard on push to main
+│   │   ├── bug_report.md            # Bug report template
+│   │   └── feature_request.md       # Feature request template
+│   ├── workflows/
+│   │   ├── ci.yml                   # Build + test + fuzz + lint on PR/push
+│   │   ├── codeql.yml               # CodeQL static analysis (weekly + PR)
+│   │   ├── fuzz.yml                 # Nightly fuzz (all targets, 5m each)
+│   │   ├── release.yml              # GoReleaser on version tags
+│   │   └── scorecard.yml            # OpenSSF Scorecard (weekly)
+│   ├── PULL_REQUEST_TEMPLATE.md     # PR checklist
+│   └── dependabot.yml               # Weekly updates for actions + gomod
 ├── cmd/
-│   ├── init/                       # Template rewriter (self-deleting after use)
-│   │   ├── main.go                 # CLI entry: parse args, call rewriteProject
-│   │   ├── rewrite.go              # Module path rewriting, binary dir rename, cleanup
-│   │   ├── rewrite_test.go         # Unit tests for rewrite logic
-│   │   └── integration_test.go     # Integration tests for full rewrite pipeline
-│   └── mcp/                        # ** Main binary entry point **
-│       └── main.go                 # Wiring: signal handling, registry setup, server.Run
+│   ├── init/                        # Template rewriter (self-deleting)
+│   │   ├── main.go                  # ← Entry point: parse args, call rewriteProject
+│   │   ├── rewrite.go               # Rewrite logic: go.mod, imports, text files, rename
+│   │   ├── rewrite_test.go          # Unit tests for rewrite functions
+│   │   ├── integration_test.go      # Integration: full rewrite in temp dir
+│   │   └── template_consumer_test.go # Verifies template consumer workflow
+│   └── mcp/                         # MCP server binary
+│       ├── main.go                  # ← Entry point: signal setup, registry wiring, server.Run
+│       ├── integration_test.go      # Full server integration tests
+│       └── signal_test.go           # Signal handling tests
 ├── internal/
 │   ├── pkg/
-│   │   └── assert/                 # Test-only assertion helpers
-│   │       ├── assert.go           # assert.That[T] generic deep-equal helper
-│   │       └── assert_test.go
-│   ├── protocol/                   # JSON-RPC 2.0 types and codec (zero internal deps)
-│   │   ├── codec.go                # Decode, Validate, Encode, response constructors
-│   │   ├── constants.go            # Error codes, MCP version, method constants
-│   │   ├── message.go              # Request, Response, Error, CodeError types + constructors
-│   │   ├── benchmark_test.go       # Performance benchmarks
-│   │   ├── fuzz_test.go            # Fuzz_Decoder_With_ArbitraryInput (OSS-Fuzz target)
-│   │   ├── protocol_test.go        # Comprehensive codec tests, golden tests, round-trips
-│   │   └── testdata/fuzz/          # Fuzz corpus (300+ entries)
-│   ├── server/                     # MCP server lifecycle and dispatch
-│   │   ├── server.go               # Server struct, Run loop, dispatch, state machine, tool call
-│   │   ├── counting_reader.go      # Per-message size limit enforcement
-│   │   ├── architecture_test.go    # Import graph verification (dependency direction)
-│   │   ├── claudemd_test.go        # CLAUDE.md claims have matching tests
-│   │   ├── conformance_test.go     # Data-driven conformance tests from testdata/
-│   │   ├── counting_reader_internal_test.go  # White-box countingReader tests
-│   │   ├── example_test.go         # Testable examples
-│   │   ├── fuzz_test.go            # Fuzz_Server_Pipeline (full server fuzzing)
-│   │   ├── integration_test.go     # Full pipeline: init -> tools/call, panic, timeout
-│   │   ├── io_test.go              # I/O edge cases: slow stdin, partial reads, stdout close
-│   │   ├── server_test.go          # Unit tests: state machine, methods, errors, timeouts
-│   │   ├── stdout_test.go          # Stdout purity: every byte is valid JSON-RPC
-│   │   ├── synctest_test.go        # Deterministic concurrency tests via testing/synctest
-│   │   └── testdata/conformance/   # Request/response JSONL files for conformance suite
-│   └── tools/                      # Tool registry and handlers
-│       ├── registry.go             # Registry, Register[T], Tool type, Result helpers
-│       ├── schema.go               # Reflection-based InputSchema derivation
-│       ├── search.go               # Search tool: file pattern matching with security
-│       ├── validate.go             # Input validation: path traversal, null bytes, length
-│       ├── open_unix.go            # O_NOFOLLOW for Unix
-│       ├── open_other.go           # No-op flag for non-Unix
-│       ├── benchmark_test.go       # Performance benchmarks
-│       ├── example_test.go         # Testable examples
-│       ├── registry_test.go        # Registry unit tests
-│       ├── schema_test.go          # Schema derivation: all Go types, edge cases
-│       ├── search_test.go          # Search tool: matches, limits, security, symlinks
-│       ├── search_internal_test.go # White-box search internals
-│       ├── search_unix_internal_test.go  # Unix-specific search tests
-│       └── validate_test.go        # Validation: traversal, null bytes, length
-├── oss-fuzz/                       # Google OSS-Fuzz integration
-│   ├── Dockerfile                  # Pinned base image (hash)
-│   ├── build.sh                    # Compile native Go fuzzer
-│   └── project.yaml                # OSS-Fuzz project config (libfuzzer + ASAN)
-├── .golangci.yml                   # Linter config: 50+ linters, strict rules
-├── .goreleaser.yml                 # Release: darwin/linux, amd64/arm64, cosign, SBOM
-├── .mcp.json                       # MCP server config for local development
-├── CLAUDE.md                       # AI agent engineering instructions
-├── CONTRIBUTING.md                 # Contributor guide: setup, testing, PR process
-├── LICENSE                         # MIT License
-├── Makefile                        # build, test, lint, fuzz, coverage, init targets
-├── README.md                       # Project overview, quickstart, architecture summary
-├── SECURITY.md                     # Security policy, vulnerability reporting
-└── go.mod                          # Module: github.com/andygeiss/mcp, Go 1.26
+│   │   └── assert/
+│   │       ├── assert.go            # assert.That[T] — generic deep-equal helper
+│   │       └── assert_test.go       # Self-tests for the assertion helper
+│   ├── protocol/
+│   │   ├── codec.go                 # Decode, Validate, Encode, response builders
+│   │   ├── constants.go             # Error codes, method names, MCP version
+│   │   ├── message.go               # Request, Response, Error, CodeError types
+│   │   ├── benchmark_test.go        # Codec benchmarks
+│   │   ├── fuzz_test.go             # Fuzz targets for decoder
+│   │   └── protocol_test.go         # Codec unit tests
+│   ├── server/
+│   │   ├── server.go                # Server struct, Run loop, dispatch, lifecycle
+│   │   ├── counting_reader.go       # Per-message size limit enforcement
+│   │   ├── architecture_test.go     # Dependency direction tests
+│   │   ├── claudemd_test.go         # CLAUDE.md self-consistency tests
+│   │   ├── conformance_test.go      # MCP protocol conformance suite
+│   │   ├── counting_reader_internal_test.go # White-box counting reader tests
+│   │   ├── example_test.go          # Example tests for documentation
+│   │   ├── fuzz_test.go             # Server-level fuzz tests
+│   │   ├── integration_test.go      # Server integration tests
+│   │   ├── io_test.go               # I/O behavior tests
+│   │   ├── server_test.go           # Core server unit tests
+│   │   ├── stdout_test.go           # Stdout protocol-only enforcement
+│   │   └── synctest_test.go         # Synchronization tests
+│   └── tools/
+│       ├── annotations.go           # Annotations type + WithAnnotations option
+│       ├── echo.go                  # Echo tool handler
+│       ├── open_other.go            # O_NOFOLLOW stub for non-Unix
+│       ├── open_unix.go             # O_NOFOLLOW for Unix (symlink protection)
+│       ├── registry.go              # Registry, Register[T], Tool types
+│       ├── schema.go                # Reflection-based JSON Schema derivation
+│       ├── search.go                # Search tool handler (file grep)
+│       ├── validate.go              # Input validation (path, string)
+│       ├── annotations_test.go      # Annotations tests
+│       ├── benchmark_test.go        # Registry benchmarks
+│       ├── echo_test.go             # Echo tool tests
+│       ├── example_test.go          # Example tests
+│       ├── registry_test.go         # Registry unit tests
+│       ├── schema_test.go           # Schema derivation tests
+│       ├── search_internal_test.go  # White-box search tests
+│       ├── search_test.go           # Search tool tests
+│       ├── search_unix_internal_test.go # Unix-specific search tests
+│       └── validate_test.go         # Validation tests
+├── oss-fuzz/
+│   ├── build.sh                     # OSS-Fuzz build script
+│   ├── Dockerfile                   # OSS-Fuzz container
+│   └── project.yaml                 # OSS-Fuzz project config
+├── .gitignore
+├── .golangci.yml                    # Lint config: 50+ linters, strict rules
+├── .goreleaser.yml                  # Release: darwin/linux, amd64/arm64, cosign
+├── .mcp.json                        # MCP server config for Claude Code
+├── CLAUDE.md                        # AI-facing project instructions
+├── CONTRIBUTING.md                  # Contribution guidelines
+├── LICENSE                          # MIT
+├── Makefile                         # build, check, coverage, fuzz, init, lint, test
+├── README.md                        # Project documentation
+├── SECURITY.md                      # Vulnerability reporting policy
+└── go.mod                           # Module: github.com/andygeiss/mcp, Go 1.26
 ```
 
 ## Critical Directories
 
 | Directory | Purpose | Key Files |
 |---|---|---|
-| `cmd/mcp/` | Binary entry point | `main.go` -- all wiring, no business logic |
-| `internal/protocol/` | Wire format | `codec.go`, `message.go`, `constants.go` |
-| `internal/server/` | Server core | `server.go` (490 LOC), `counting_reader.go` |
-| `internal/tools/` | Tool system | `registry.go`, `schema.go`, `search.go`, `validate.go` |
-| `.github/workflows/` | CI/CD | 5 workflows: CI, fuzz, release, CodeQL, Scorecard |
-| `oss-fuzz/` | Continuous fuzzing | Google OSS-Fuzz harness |
+| `cmd/mcp/` | Server binary entry point | `main.go` — all wiring, no logic |
+| `cmd/init/` | Template rewriter (for consumers) | `rewrite.go` — module path + binary rename |
+| `internal/protocol/` | JSON-RPC 2.0 foundation | `codec.go`, `message.go`, `constants.go` |
+| `internal/server/` | MCP server core | `server.go` — lifecycle, dispatch, resilience |
+| `internal/tools/` | Tool registry + handlers | `registry.go`, `schema.go`, `echo.go`, `search.go` |
+| `internal/pkg/assert/` | Test assertions | `assert.go` — single generic helper |
+| `.github/workflows/` | CI/CD pipelines | 5 workflows: ci, codeql, fuzz, release, scorecard |
 
 ## Entry Points
 
-| Entry Point | Purpose |
-|---|---|
-| `cmd/mcp/main.go` | MCP server binary (production) |
-| `cmd/init/main.go` | Template rewriter (one-time use, self-deleting) |
+| Entry Point | Binary | Purpose |
+|---|---|---|
+| `cmd/mcp/main.go` | `mcp` | MCP server — production binary |
+| `cmd/init/main.go` | (go run) | Template rewriter — one-time use, self-deleting |
 
-## File Counts
+## File Metrics
 
 | Category | Count |
 |---|---|
-| Production `.go` files | 13 |
-| Test `.go` files | 20 |
-| Fuzz corpus entries | 300+ |
+| Production `.go` files | 14 |
+| Test `.go` files | 24 |
 | CI/CD workflow files | 5 |
-| Documentation files | 5 (README, CLAUDE, CONTRIBUTING, SECURITY, LICENSE) |
+| Config files | 7 |
+| Documentation files | 5 |
