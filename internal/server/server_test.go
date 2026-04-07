@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -90,7 +91,7 @@ func Test_Server_With_InitializeHandshake_Should_ReturnCapabilities(t *testing.T
 	}
 	err = json.Unmarshal(resp.Result, &result)
 	assert.That(t, "unmarshal error", err, nil)
-	assert.That(t, "protocol version", result.ProtocolVersion, "2024-11-05")
+	assert.That(t, "protocol version", result.ProtocolVersion, "2025-06-18")
 	assert.That(t, "server name", result.ServerInfo.Name, "mcp")
 	assert.That(t, "server version", result.ServerInfo.Version, "test")
 
@@ -1004,4 +1005,216 @@ func Test_Server_With_ResourcesNotification_Should_SilentlyIgnore(t *testing.T) 
 	assert.That(t, "error", err, nil)
 	assert.That(t, "response count", len(responses), 2)
 	assert.That(t, "ping success", responses[1].Error == nil, true)
+}
+
+// --- Lifecycle logging tests ---
+
+// parseLogEntries parses newline-delimited JSON log entries from stderr.
+func parseLogEntries(t *testing.T, stderr *bytes.Buffer) []map[string]any {
+	t.Helper()
+	var entries []map[string]any
+	dec := json.NewDecoder(stderr)
+	for {
+		var entry map[string]any
+		if err := dec.Decode(&entry); err != nil {
+			break
+		}
+		entries = append(entries, entry)
+	}
+	return entries
+}
+
+// findLogEntry finds the first log entry with the given msg value.
+func findLogEntry(entries []map[string]any, msg string) map[string]any {
+	for _, e := range entries {
+		if e["msg"] == msg {
+			return e
+		}
+	}
+	return nil
+}
+
+func Test_Server_With_StartupLog_Should_ContainStructuredFields(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	input := handshake()
+	var stdout, stderr bytes.Buffer
+	srv := server.NewServer("mcp", "v1.0.0", testRegistry(), strings.NewReader(input), &stdout, &stderr)
+
+	// Act
+	_ = srv.Run(context.Background())
+
+	// Assert
+	entries := parseLogEntries(t, &stderr)
+	started := findLogEntry(entries, "server_started")
+	if started == nil {
+		t.Fatal("expected server_started log entry")
+	}
+	assert.That(t, "version", started["version"], "v1.0.0")
+	assert.That(t, "name", started["name"], "mcp")
+	assert.That(t, "protocol_version", started["protocol_version"], protocol.MCPVersion)
+	toolsList, ok := started["tools"].([]any)
+	if !ok {
+		t.Fatalf("expected tools to be an array, got %T", started["tools"])
+	}
+	assert.That(t, "tools count", len(toolsList), 1)
+	assert.That(t, "tool name", toolsList[0], "test")
+}
+
+func Test_Server_With_EOFShutdown_Should_LogServerStopped(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — handshake then EOF
+	input := handshake()
+	var stdout, stderr bytes.Buffer
+	srv := server.NewServer("mcp", "test", testRegistry(), strings.NewReader(input), &stdout, &stderr)
+
+	// Act
+	err := srv.Run(context.Background())
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	entries := parseLogEntries(t, &stderr)
+	stopped := findLogEntry(entries, "server_stopped")
+	if stopped == nil {
+		t.Fatal("expected server_stopped log entry")
+	}
+	assert.That(t, "reason", stopped["reason"], "eof")
+	if _, ok := stopped["uptime_ms"]; !ok {
+		t.Fatal("expected uptime_ms in server_stopped")
+	}
+	if _, ok := stopped["requests"]; !ok {
+		t.Fatal("expected requests in server_stopped")
+	}
+	if _, ok := stopped["errors"]; !ok {
+		t.Fatal("expected errors in server_stopped")
+	}
+}
+
+func Test_Server_With_ContextCancellation_Should_LogCancelledReason(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — use a pipe; cancel ctx then close pipe to unblock the decoder.
+	// The server's decode loop blocks on stdin — closing the writer after cancel
+	// triggers EOF which lets the loop check ctx.Done on the next iteration.
+	ctx, cancel := context.WithCancel(context.Background())
+	pr, pw := io.Pipe()
+	var stdout, stderr bytes.Buffer
+	srv := server.NewServer("mcp", "test", testRegistry(), pr, &stdout, &stderr)
+
+	// Act
+	done := make(chan error, 1)
+	go func() {
+		done <- srv.Run(ctx)
+	}()
+	_, _ = pw.Write([]byte(handshake()))
+	time.Sleep(10 * time.Millisecond)
+	cancel()
+	_ = pw.Close() // unblock decode so the loop can reach ctx.Done check
+	err := <-done
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	entries := parseLogEntries(t, &stderr)
+	stopped := findLogEntry(entries, "server_stopped")
+	if stopped == nil {
+		t.Fatal("expected server_stopped log entry")
+	}
+	// After cancel + close, the server sees EOF but ctx is also cancelled.
+	// The defer checks retErr first (nil for EOF), then ctx.Err() (non-nil).
+	// context.Cause returns context.Canceled whose Error() is "context canceled".
+	assert.That(t, "reason", stopped["reason"], "context canceled")
+}
+
+func Test_Server_With_FatalDecodeError_Should_LogFatalReason(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — send invalid JSON to trigger fatal decode error
+	input := "not valid json\n"
+	var stdout, stderr bytes.Buffer
+	srv := server.NewServer("mcp", "test", testRegistry(), strings.NewReader(input), &stdout, &stderr)
+
+	// Act
+	err := srv.Run(context.Background())
+
+	// Assert
+	if err == nil {
+		t.Fatal("expected error for fatal decode")
+	}
+	entries := parseLogEntries(t, &stderr)
+	stopped := findLogEntry(entries, "server_stopped")
+	if stopped == nil {
+		t.Fatal("expected server_stopped log entry")
+	}
+	assert.That(t, "reason", stopped["reason"], "fatal_error")
+}
+
+func Test_Server_With_MixedRequests_Should_CountRequestsAndErrors(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — handshake (2 msgs) + 3 successful pings + 2 error requests = 7 decoded msgs total
+	input := handshake() +
+		`{"jsonrpc":"2.0","method":"ping","id":2,"params":{}}` + "\n" +
+		`{"jsonrpc":"2.0","method":"ping","id":3,"params":{}}` + "\n" +
+		`{"jsonrpc":"2.0","method":"ping","id":4,"params":{}}` + "\n" +
+		`{"jsonrpc":"2.0","method":"unknown","id":5,"params":{}}` + "\n" +
+		`{"jsonrpc":"2.0","method":"unknown","id":6,"params":{}}` + "\n"
+	var stdout, stderr bytes.Buffer
+	srv := server.NewServer("mcp", "test", testRegistry(), strings.NewReader(input), &stdout, &stderr)
+
+	// Act
+	err := srv.Run(context.Background())
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	entries := parseLogEntries(t, &stderr)
+	stopped := findLogEntry(entries, "server_stopped")
+	if stopped == nil {
+		t.Fatal("expected server_stopped log entry")
+	}
+	// 7 decoded messages: init + initialized_notif + 3 pings + 2 unknown
+	requests, ok := stopped["requests"].(float64)
+	if !ok {
+		t.Fatal("expected requests to be a number")
+	}
+	errs, ok := stopped["errors"].(float64)
+	if !ok {
+		t.Fatal("expected errors to be a number")
+	}
+	assert.That(t, "requests", int(requests), 7)
+	assert.That(t, "errors", int(errs), 2)
+}
+
+func Test_Server_With_Notification_Should_IncrementRequestCountOnly(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — handshake + unknown notification (no id) + ping
+	input := handshake() +
+		`{"jsonrpc":"2.0","method":"some/notification","params":{}}` + "\n" +
+		`{"jsonrpc":"2.0","method":"ping","id":2,"params":{}}` + "\n"
+	var stdout, stderr bytes.Buffer
+	srv := server.NewServer("mcp", "test", testRegistry(), strings.NewReader(input), &stdout, &stderr)
+
+	// Act
+	err := srv.Run(context.Background())
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	entries := parseLogEntries(t, &stderr)
+	stopped := findLogEntry(entries, "server_stopped")
+	if stopped == nil {
+		t.Fatal("expected server_stopped log entry")
+	}
+	// 4 decoded: init + initialized_notif + notification + ping
+	requests, ok := stopped["requests"].(float64)
+	if !ok {
+		t.Fatal("expected requests to be a number")
+	}
+	errs, ok := stopped["errors"].(float64)
+	if !ok {
+		t.Fatal("expected errors to be a number")
+	}
+	assert.That(t, "requests", int(requests), 4)
+	assert.That(t, "errors", int(errs), 0)
 }

@@ -109,7 +109,7 @@ The test suite uses table-driven subtests, parallel execution, black-box package
 
 ## Protocol compliance
 
-MCP version `2024-11-05`. JSON-RPC 2.0 with these specifics:
+MCP version `2025-06-18`. JSON-RPC 2.0 with these specifics:
 
 | Behavior | Implementation |
 |---|---|

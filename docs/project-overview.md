@@ -18,7 +18,7 @@ MCP servers don't need HTTP frameworks, routers, or dependency trees. This proje
 |---|---|---|---|
 | Language | Go | 1.26 | Green Tea GC, `reflect.Type.Fields` iterators, `errors.AsType[T]` |
 | Protocol | JSON-RPC 2.0 | - | Newline-delimited, no LSP framing |
-| MCP Version | MCP | 2024-11-05 | Three-state lifecycle |
+| MCP Version | MCP | 2025-06-18 | Three-state lifecycle |
 | Dependencies | stdlib only | - | Zero external dependencies |
 | Linter | golangci-lint | v2 config | 50+ linters enabled |
 | Release | GoReleaser | - | Cross-platform (darwin/linux, amd64/arm64) |

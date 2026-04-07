@@ -10,7 +10,7 @@
 - **Primary Language:** Go 1.26
 - **Architecture:** Sequential dispatch loop (stdin/stdout JSON-RPC 2.0)
 - **Dependencies:** Zero external (stdlib only)
-- **MCP Version:** 2024-11-05
+- **MCP Version:** 2025-06-18
 
 ## Quick Reference
 

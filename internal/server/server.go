@@ -36,17 +36,42 @@ const (
 // other than ping and initialize are rejected until the server reaches the
 // ready state.
 type Server struct {
-	counting       *countingReader
-	dec            *json.Decoder
-	enc            *json.Encoder
-	handlerTimeout time.Duration
-	logger         *slog.Logger
-	name           string
-	registry       *tools.Registry
-	safetyMargin   time.Duration
-	state          int
-	trace          bool
-	version        string
+	cancelInFlight    context.CancelFunc
+	counting          *countingReader
+	dec               *json.Decoder
+	enc               *json.Encoder
+	errorCount        int
+	handlerTimeout    time.Duration
+	inFlightCancelled bool
+	inFlightCh        chan inFlightResult
+	inFlightID        json.RawMessage
+	logger            *slog.Logger
+	name              string
+	registry          *tools.Registry
+	requestCount      int
+	safetyMargin      time.Duration
+	state             int
+	trace             bool
+	version           string
+}
+
+// inFlightResult carries the outcome of an async tool call handler.
+type inFlightResult struct {
+	isError bool
+	resp    protocol.Response
+}
+
+// cancelledParams is the expected structure of notifications/cancelled params.
+type cancelledParams struct {
+	Reason    string          `json:"reason,omitempty"`
+	RequestID json.RawMessage `json:"requestId"`
+}
+
+// decodeResult carries the outcome of an async decode operation.
+type decodeResult struct {
+	err      error
+	exceeded bool
+	msg      protocol.Request
 }
 
 // Option configures the Server.
@@ -101,65 +126,383 @@ func NewServer(name, version string, registry *tools.Registry, stdin io.Reader, 
 	return s
 }
 
-// Run starts the sequential dispatch loop: decode → dispatch → encode. It
-// processes one message at a time until EOF (clean shutdown, returns nil),
-// context cancellation (clean shutdown, returns nil), or a fatal decode error
-// (returns error after sending a -32700 response). The caller should os.Exit
-// based on whether Run returns nil.
+// Run starts the dispatch loop. It decodes messages from stdin and dispatches
+// them to the appropriate handler. Tool calls are dispatched asynchronously so
+// the decode loop can continue reading messages for cancellation and ping
+// support while a handler is in flight. The server advertises maxInFlight: 1,
+// so only one tool handler runs at a time; additional requests while a handler
+// is in flight are rejected with -32600.
 //
-// Shutdown limitation: context cancellation is checked between messages. If
-// the decoder is blocked waiting for stdin, the server cannot exit until stdin
-// produces data or EOF. This is inherent to io.Reader — it has no cancellation
-// mechanism. In practice, the parent process closing stdin triggers EOF.
+// Run returns nil for clean shutdown (EOF or context cancellation) or an error
+// for fatal decode conditions (after sending a -32700 response).
 func (s *Server) Run(ctx context.Context) error {
-	s.logger.Info("server_started", "version", s.version)
-	// Sequential dispatch — no goroutine pools. stdin/stdout has one reader
-	// and one writer; concurrency would add complexity without throughput benefit.
+	startTime := time.Now()
+	s.logger.Info("server_started",
+		"name", s.name,
+		"protocol_version", protocol.MCPVersion,
+		"tools", s.registry.Names(),
+		"version", s.version,
+	)
+	var runErr error
+	defer func() {
+		s.logShutdown(ctx, runErr, startTime)
+	}()
+
+	decodeCh := make(chan decodeResult, 1)
+	startDecode := func() {
+		go func() {
+			s.counting.Reset()
+			msg, err := protocol.Decode(s.dec)
+			decodeCh <- decodeResult{msg: msg, err: err, exceeded: s.counting.Exceeded()}
+		}()
+	}
+
+	startDecode()
+
 	for {
-		select {
-		case <-ctx.Done():
-			// cause is informational only; never branch on cause value
-			cause := "context_cancelled"
-			if c := context.Cause(ctx); c != nil {
-				cause = c.Error()
-			}
-			s.logger.Info("server_shutting_down", "reason", cause)
-			return nil
-		default:
+		var loopErr error
+		if s.inFlightCh != nil {
+			loopErr = s.runInFlight(ctx, decodeCh, startDecode)
+		} else {
+			loopErr = s.runIdle(ctx, decodeCh, startDecode)
 		}
-
-		s.counting.Reset()
-		msg, err := protocol.Decode(s.dec)
-		if err != nil {
-			return s.handleDecodeError(err)
+		if errors.Is(loopErr, errShutdown) {
+			return runErr
 		}
-		// The v1 json.Decoder may successfully decode a value even when the
-		// counting reader returned errMessageTooLarge alongside the data bytes.
-		// Check the counter explicitly after each decode.
-		if s.counting.Exceeded() {
-			return s.handleDecodeError(fmt.Errorf("decode message: %w", errMessageTooLarge))
-		}
-
-		if s.trace {
-			raw, _ := json.Marshal(msg)
-			s.logger.Info("trace_request", "direction", "←", "message", string(raw))
-		}
-
-		resp, respond := s.dispatch(ctx, msg)
-		if !respond {
-			continue
-		}
-
-		if s.trace {
-			raw, _ := json.Marshal(resp)
-			s.logger.Info("trace_response", "direction", "→", "message", string(raw))
-		}
-
-		if err := protocol.Encode(s.enc, resp); err != nil {
-			s.logger.Error("encode_error", "error", err)
-			return fmt.Errorf("encode error: %w", err)
+		if loopErr != nil {
+			runErr = loopErr
+			return runErr
 		}
 	}
+}
+
+// errShutdown is a sentinel indicating clean shutdown from ctx.Done or EOF.
+var errShutdown = errors.New("shutdown")
+
+// runInFlight handles one iteration of the dispatch loop while a tool handler
+// is in flight. Returns errShutdown for clean exit, a real error for fatal
+// conditions, or nil to continue the loop.
+func (s *Server) runInFlight(ctx context.Context, decodeCh chan decodeResult, startDecode func()) error {
+	// Prioritize handler completion over new messages to avoid rejecting
+	// requests that arrive after the handler has already finished.
+	select {
+	case ifr := <-s.inFlightCh:
+		return s.processInFlightResult(ifr)
+	default:
+	}
+
+	select {
+	case ifr := <-s.inFlightCh:
+		return s.processInFlightResult(ifr)
+
+	case dr := <-decodeCh:
+		err := s.handleDecodeResultDuringInFlight(ctx, dr)
+		if err != nil || dr.err != nil || dr.exceeded {
+			if err != nil {
+				return err
+			}
+			return errShutdown
+		}
+		startDecode()
+		return nil
+
+	case <-ctx.Done():
+		s.cancelAndAwaitInFlight()
+		return errShutdown
+	}
+}
+
+// runIdle handles one iteration of the dispatch loop when no handler is in
+// flight. Returns errShutdown for clean exit, a real error for fatal
+// conditions, or nil to continue the loop.
+func (s *Server) runIdle(ctx context.Context, decodeCh chan decodeResult, startDecode func()) error {
+	select {
+	case dr := <-decodeCh:
+		err := s.handleDecodeResultIdle(ctx, dr)
+		if err != nil || dr.err != nil || dr.exceeded {
+			if err != nil {
+				return err
+			}
+			return errShutdown
+		}
+		startDecode()
+		return nil
+
+	case <-ctx.Done():
+		return errShutdown
+	}
+}
+
+// logShutdown emits the structured shutdown log entry.
+func (s *Server) logShutdown(ctx context.Context, runErr error, startTime time.Time) {
+	var reason string
+	switch {
+	case runErr != nil:
+		reason = "fatal_error"
+	case ctx.Err() != nil:
+		reason = "context_cancelled"
+		if c := context.Cause(ctx); c != nil {
+			reason = c.Error()
+		}
+	default:
+		reason = "eof"
+	}
+	s.logger.Info("server_stopped",
+		"errors", s.errorCount,
+		"reason", reason,
+		"requests", s.requestCount,
+		"uptime_ms", time.Since(startTime).Milliseconds(),
+	)
+}
+
+// handleDecodeResultDuringInFlight processes a decode result that arrived while
+// a tool handler is in flight. On decode error: waits for the handler, sends its
+// response, then returns the decode error. On success: processes the message.
+func (s *Server) handleDecodeResultDuringInFlight(ctx context.Context, dr decodeResult) error {
+	if dr.err != nil || dr.exceeded {
+		return s.handleDecodeErrorDuringInFlight(dr)
+	}
+
+	s.requestCount++
+	if s.trace {
+		raw, _ := json.Marshal(dr.msg)
+		s.logger.Info("trace_request", "direction", "←", "message", string(raw))
+	}
+
+	// Check if handler completed concurrently with the decode.
+	select {
+	case ifr := <-s.inFlightCh:
+		if err := s.processInFlightResult(ifr); err != nil {
+			return err
+		}
+		return s.handleDecodeResultIdle(ctx, decodeResult{msg: dr.msg})
+	default:
+	}
+
+	if err := s.handleMessageDuringInFlight(dr.msg); err != nil {
+		s.cancelAndAwaitInFlight()
+		return err
+	}
+	return nil
+}
+
+// handleDecodeErrorDuringInFlight processes a decode error while a tool handler
+// is in flight. It waits for the handler to complete and sends its response
+// before returning the decode error.
+func (s *Server) handleDecodeErrorDuringInFlight(dr decodeResult) error {
+	decErr := dr.err
+	if dr.exceeded {
+		decErr = fmt.Errorf("decode message: %w", errMessageTooLarge)
+	}
+	decodeRunErr := s.handleDecodeError(decErr)
+	// Wait for handler. Use 2x the handler budget to outlast the internal safety timer.
+	timer := time.NewTimer(2 * (s.handlerTimeout + s.safetyMargin))
+	select {
+	case ifr := <-s.inFlightCh:
+		timer.Stop()
+		if !s.inFlightCancelled {
+			if ifr.isError {
+				s.errorCount++
+			}
+			if encErr := s.encodeResponse(ifr.resp); encErr != nil && decodeRunErr == nil {
+				decodeRunErr = encErr
+			}
+		}
+	case <-timer.C:
+		s.logger.Warn("handler_abandoned", "request_id", string(s.inFlightID))
+	}
+	s.clearInFlight()
+	return decodeRunErr
+}
+
+// handleDecodeResultIdle processes a decode result when no handler is in flight.
+// Returns a non-nil error for fatal conditions.
+func (s *Server) handleDecodeResultIdle(ctx context.Context, dr decodeResult) error {
+	if dr.err != nil || dr.exceeded {
+		decErr := dr.err
+		if dr.exceeded {
+			decErr = fmt.Errorf("decode message: %w", errMessageTooLarge)
+		}
+		return s.handleDecodeError(decErr)
+	}
+
+	s.requestCount++
+	if s.trace {
+		raw, _ := json.Marshal(dr.msg)
+		s.logger.Info("trace_request", "direction", "←", "message", string(raw))
+	}
+
+	// Intercept tools/call for async dispatch when ready.
+	if dr.msg.Method == protocol.MethodToolsCall && s.state == stateReady && len(dr.msg.ID) > 0 {
+		if vErr := protocol.Validate(dr.msg); vErr != nil {
+			return s.encodeResponse(s.errorResponse(dr.msg.ID, vErr))
+		}
+		errResp, started := s.startToolCallAsync(ctx, dr.msg)
+		if !started {
+			return s.encodeResponse(errResp)
+		}
+		return nil
+	}
+
+	// Normal synchronous dispatch for all other messages.
+	resp, respond := s.dispatch(dr.msg)
+	if respond {
+		return s.encodeResponse(resp)
+	}
+	return nil
+}
+
+// encodeResponse writes a JSON-RPC response to stdout with optional trace logging.
+func (s *Server) encodeResponse(resp protocol.Response) error {
+	if s.trace {
+		raw, _ := json.Marshal(resp)
+		s.logger.Info("trace_response", "direction", "→", "message", string(raw))
+	}
+	if err := protocol.Encode(s.enc, resp); err != nil {
+		s.logger.Error("encode_error", "error", err)
+		return fmt.Errorf("encode error: %w", err)
+	}
+	return nil
+}
+
+// handleMessageDuringInFlight processes messages that arrive while a tool
+// handler is executing. Ping is answered immediately; notifications (including
+// cancellation) are handled normally; all other requests are rejected with
+// -32600 since maxInFlight is 1.
+func (s *Server) handleMessageDuringInFlight(msg protocol.Request) error {
+	isNotification := len(msg.ID) == 0
+
+	if vErr := protocol.Validate(msg); vErr != nil {
+		if isNotification {
+			return nil
+		}
+		return s.encodeResponse(s.errorResponse(msg.ID, vErr))
+	}
+
+	if isNotification {
+		s.handleNotification(msg)
+		return nil
+	}
+
+	if msg.Method == protocol.MethodPing {
+		resp, err := protocol.NewResultResponse(msg.ID, json.RawMessage("{}"))
+		if err != nil {
+			return s.encodeResponse(s.errorResponse(msg.ID, protocol.ErrInternalError("failed to marshal ping result")))
+		}
+		return s.encodeResponse(resp)
+	}
+
+	return s.encodeResponse(s.errorResponse(msg.ID, protocol.ErrInvalidRequest("server busy: request in flight (maxInFlight is 1)")))
+}
+
+// startToolCallAsync validates tool call params and, if valid, spawns the
+// handler in a background goroutine. Returns (errorResp, false) if validation
+// fails, or (_, true) if the handler was started successfully.
+func (s *Server) startToolCallAsync(ctx context.Context, msg protocol.Request) (protocol.Response, bool) {
+	var params toolCallParams
+	if err := json.Unmarshal(msg.Params, &params); err != nil {
+		return s.errorResponse(msg.ID, protocol.ErrInvalidParams("invalid tools/call params: "+err.Error())), false
+	}
+	if len(params.Arguments) == 0 || bytes.Equal(params.Arguments, []byte("null")) {
+		params.Arguments = json.RawMessage("{}")
+	}
+	if params.Name == "" {
+		return s.errorResponse(msg.ID, protocol.ErrInvalidParams("tool name is required")), false
+	}
+	tool, ok := s.registry.Lookup(params.Name)
+	if !ok {
+		available := strings.Join(s.registry.Names(), ", ")
+		return s.errorResponse(msg.ID, protocol.ErrInvalidParams("unknown tool: "+params.Name+" (available: "+available+")")), false
+	}
+
+	callCtx, cancel := context.WithCancel(ctx)
+	s.cancelInFlight = cancel
+	s.inFlightID = msg.ID
+	s.inFlightCh = make(chan inFlightResult, 1)
+
+	go func() {
+		defer cancel()
+		resp := s.executeToolCall(callCtx, msg.ID, tool, params)
+		s.inFlightCh <- inFlightResult{isError: resp.Error != nil, resp: resp}
+	}()
+
+	return protocol.Response{}, true
+}
+
+// executeToolCall runs a tool call synchronously (called from a goroutine).
+// It calls dispatchToolCall and processes the result into a protocol.Response.
+func (s *Server) executeToolCall(ctx context.Context, id json.RawMessage, tool tools.Tool, params toolCallParams) protocol.Response {
+	result, toolErr := s.dispatchToolCall(ctx, tool, params.Arguments)
+	if toolErr != nil {
+		data, _ := json.Marshal(toolErr.data)
+		ce := &protocol.CodeError{Code: toolErr.code, Message: toolErr.message}
+		ce.Data = data
+		return protocol.NewErrorResponseFromCodeError(id, ce)
+	}
+
+	resultJSON, err := json.Marshal(result)
+	if err != nil {
+		s.logger.Error("marshal_tool_result", "error", err, "tool_name", params.Name)
+		ce := protocol.ErrInternalError("failed to marshal tool result")
+		return protocol.NewErrorResponseFromCodeError(id, ce)
+	}
+	if len(resultJSON) > maxResultSize {
+		s.logger.Warn("tool_result_truncated", "tool_name", params.Name, "size", len(resultJSON), "limit", maxResultSize)
+		result = tools.TextResult(fmt.Sprintf("[result truncated: exceeded maximum size of %d bytes]", maxResultSize))
+		resultJSON, _ = json.Marshal(result)
+	}
+
+	resp, err := protocol.NewResultResponse(id, json.RawMessage(resultJSON))
+	if err != nil {
+		s.logger.Error("marshal_tool_result", "error", err, "tool_name", params.Name)
+		ce := protocol.ErrInternalError("failed to marshal tool result")
+		return protocol.NewErrorResponseFromCodeError(id, ce)
+	}
+	return resp
+}
+
+// cancelAndAwaitInFlight cancels the in-flight handler and waits for it to
+// complete within the handler timeout + safety margin.
+func (s *Server) cancelAndAwaitInFlight() {
+	if s.cancelInFlight == nil {
+		return
+	}
+	s.cancelInFlight()
+	timer := time.NewTimer(2 * (s.handlerTimeout + s.safetyMargin))
+	defer timer.Stop()
+	select {
+	case <-s.inFlightCh:
+	case <-timer.C:
+		s.logger.Warn("handler_abandoned", "request_id", string(s.inFlightID))
+	}
+	s.clearInFlight()
+}
+
+// processInFlightResult handles a completed tool call result. If the request
+// was cancelled via notifications/cancelled, the response is suppressed per
+// MCP spec (receivers SHOULD NOT send a response for cancelled requests).
+func (s *Server) processInFlightResult(ifr inFlightResult) error {
+	if s.inFlightCancelled {
+		s.clearInFlight()
+		return nil
+	}
+	if ifr.isError {
+		s.errorCount++
+	}
+	if err := s.encodeResponse(ifr.resp); err != nil {
+		s.clearInFlight()
+		return err
+	}
+	s.clearInFlight()
+	return nil
+}
+
+// clearInFlight resets all in-flight state after a tool call completes.
+func (s *Server) clearInFlight() {
+	s.cancelInFlight = nil
+	s.inFlightCancelled = false
+	s.inFlightCh = nil
+	s.inFlightID = nil
 }
 
 // handleDecodeError processes errors from the decoder, returning nil for clean
@@ -170,10 +513,10 @@ func (s *Server) handleDecodeError(err error) error {
 	isTooLarge := errors.Is(err, errMessageTooLarge)
 
 	if !isTooLarge && (errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)) {
-		s.logger.Info("server_shutting_down", "reason", "eof")
 		return nil
 	}
 
+	s.errorCount++
 	msg := err.Error()
 	if isTooLarge {
 		msg = "message exceeds 4MB size limit"
@@ -189,7 +532,7 @@ func (s *Server) handleDecodeError(err error) error {
 
 // dispatch routes a decoded message to the appropriate handler.
 // Returns (response, true) if a response should be sent, or (_, false) for notifications.
-func (s *Server) dispatch(ctx context.Context, msg protocol.Request) (protocol.Response, bool) {
+func (s *Server) dispatch(msg protocol.Request) (protocol.Response, bool) {
 	isNotification := len(msg.ID) == 0
 
 	// Centralized request validation.
@@ -233,7 +576,7 @@ func (s *Server) dispatch(ctx context.Context, msg protocol.Request) (protocol.R
 		if msg.Method == protocol.MethodInitialize {
 			return s.errorResponse(msg.ID, protocol.ErrInvalidRequest("already initialized")), true
 		}
-		return s.handleMethod(ctx, msg), true
+		return s.handleMethod(msg), true
 
 	default:
 		return s.errorResponse(msg.ID, protocol.ErrInternalError("unknown server state")), true
@@ -244,6 +587,7 @@ func (s *Server) dispatch(ctx context.Context, msg protocol.Request) (protocol.R
 // is a *protocol.CodeError, its code and message are used directly.
 // Otherwise, the error falls back to -32603 (internal error).
 func (s *Server) errorResponse(id json.RawMessage, err error) protocol.Response {
+	s.errorCount++
 	pe, ok := errors.AsType[*protocol.CodeError](err)
 	if !ok {
 		return protocol.NewErrorResponse(id, protocol.InternalError, err.Error())
@@ -253,11 +597,33 @@ func (s *Server) errorResponse(id json.RawMessage, err error) protocol.Response 
 
 // handleNotification processes notification messages (no response sent).
 func (s *Server) handleNotification(msg protocol.Request) {
-	if msg.Method == protocol.NotificationInitialized && s.state == stateInitializing {
-		s.state = stateReady
-		s.logger.Info("server_ready")
+	switch msg.Method {
+	case protocol.NotificationCancelled:
+		s.handleCancelledNotification(msg)
+	case protocol.NotificationInitialized:
+		if s.state == stateInitializing {
+			s.state = stateReady
+			s.logger.Info("server_ready")
+		}
 	}
 	// All unknown notifications are silently ignored.
+}
+
+// handleCancelledNotification cancels the in-flight tool handler if the
+// request ID matches. Non-matching or stale cancellations are silently ignored.
+func (s *Server) handleCancelledNotification(msg protocol.Request) {
+	if s.cancelInFlight == nil {
+		return
+	}
+	var params cancelledParams
+	if err := json.Unmarshal(msg.Params, &params); err != nil {
+		return
+	}
+	if !bytes.Equal(params.RequestID, s.inFlightID) {
+		return
+	}
+	s.inFlightCancelled = true
+	s.cancelInFlight()
 }
 
 // initializeResult is the result of the initialize method.
@@ -308,14 +674,20 @@ type capabilityGuidance struct {
 }
 
 // handleMethod dispatches ready-state methods.
-func (s *Server) handleMethod(ctx context.Context, msg protocol.Request) protocol.Response {
+func (s *Server) handleMethod(msg protocol.Request) protocol.Response {
 	switch {
+	case strings.HasPrefix(msg.Method, "completion/"):
+		return s.handleUnsupportedCapability(msg)
+	case strings.HasPrefix(msg.Method, "elicitation/"):
+		return s.handleUnsupportedCapability(msg)
 	case strings.HasPrefix(msg.Method, "prompts/"):
 		return s.handleUnsupportedCapability(msg)
 	case strings.HasPrefix(msg.Method, "resources/"):
 		return s.handleUnsupportedCapability(msg)
 	case msg.Method == protocol.MethodToolsCall:
-		return s.handleToolsCall(ctx, msg)
+		// tools/call in ready state is intercepted by Run for async dispatch.
+		// If we reach here, something unexpected happened.
+		return s.errorResponse(msg.ID, protocol.ErrInternalError("unexpected tools/call in handleMethod"))
 	case msg.Method == protocol.MethodToolsList:
 		return s.handleToolsList(msg)
 	case strings.HasPrefix(msg.Method, "rpc."):
@@ -326,7 +698,7 @@ func (s *Server) handleMethod(ctx context.Context, msg protocol.Request) protoco
 }
 
 // handleUnsupportedCapability returns a -32601 response with guidance data
-// for methods in unsupported MCP namespaces (resources/, prompts/).
+// for methods in unsupported MCP namespaces (completion/, elicitation/, prompts/, resources/).
 func (s *Server) handleUnsupportedCapability(msg protocol.Request) protocol.Response {
 	data, _ := json.Marshal(&capabilityGuidance{
 		Hint:                  "this server supports tools only; use tools/list and tools/call",
@@ -359,56 +731,6 @@ type toolCallParams struct {
 	Name      string          `json:"name"`
 }
 
-// handleToolsCall dispatches a tool call with panic recovery and timeout.
-func (s *Server) handleToolsCall(ctx context.Context, msg protocol.Request) protocol.Response {
-	var params toolCallParams
-	if err := json.Unmarshal(msg.Params, &params); err != nil {
-		return s.errorResponse(msg.ID, protocol.ErrInvalidParams("invalid tools/call params: "+err.Error()))
-	}
-
-	// Normalize absent or null arguments to {}.
-	if len(params.Arguments) == 0 || bytes.Equal(params.Arguments, []byte("null")) {
-		params.Arguments = json.RawMessage("{}")
-	}
-
-	if params.Name == "" {
-		return s.errorResponse(msg.ID, protocol.ErrInvalidParams("tool name is required"))
-	}
-
-	tool, ok := s.registry.Lookup(params.Name)
-	if !ok {
-		available := strings.Join(s.registry.Names(), ", ")
-		return s.errorResponse(msg.ID, protocol.ErrInvalidParams("unknown tool: "+params.Name+" (available: "+available+")"))
-	}
-
-	result, toolErr := s.dispatchToolCall(ctx, tool, params.Arguments)
-	if toolErr != nil {
-		data, _ := json.Marshal(toolErr.data)
-		ce := &protocol.CodeError{Code: toolErr.code, Message: toolErr.message}
-		ce.Data = data
-		return s.errorResponse(msg.ID, ce)
-	}
-
-	// Check result size before marshaling the response.
-	resultJSON, err := json.Marshal(result)
-	if err != nil {
-		s.logger.Error("marshal_tool_result", "error", err, "tool_name", params.Name)
-		return s.errorResponse(msg.ID, protocol.ErrInternalError("failed to marshal tool result"))
-	}
-	if len(resultJSON) > maxResultSize {
-		s.logger.Warn("tool_result_truncated", "tool_name", params.Name, "size", len(resultJSON), "limit", maxResultSize)
-		result = tools.TextResult(fmt.Sprintf("[result truncated: exceeded maximum size of %d bytes]", maxResultSize))
-		resultJSON, _ = json.Marshal(result)
-	}
-
-	resp, err := protocol.NewResultResponse(msg.ID, json.RawMessage(resultJSON))
-	if err != nil {
-		s.logger.Error("marshal_tool_result", "error", err, "tool_name", params.Name)
-		return s.errorResponse(msg.ID, protocol.ErrInternalError("failed to marshal tool result"))
-	}
-	return resp
-}
-
 // panicDiag is the machine-readable diagnostic attached to Error.Data when a
 // tool handler panics. Stack traces are deliberately excluded (security).
 type panicDiag struct {
@@ -434,6 +756,13 @@ type toolError struct {
 // dispatchToolCall invokes a tool handler with panic recovery and timeout.
 // Returns the result and a *toolError if the handler panicked, timed out, or
 // was cancelled.
+//
+// Limitation: Go cannot kill goroutines. If a handler ignores ctx.Done()
+// and exceeds the handler timeout + safety margin, the goroutine is
+// abandoned. Handlers MUST respect context cancellation to guarantee
+// bounded goroutine lifetime. The server proceeds to the next request
+// regardless, but the abandoned goroutine may hold resources until it
+// returns naturally.
 func (s *Server) dispatchToolCall(ctx context.Context, tool tools.Tool, params json.RawMessage) (tools.Result, *toolError) {
 	type outcome struct {
 		err    *toolError

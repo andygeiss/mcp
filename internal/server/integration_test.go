@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"runtime"
 	"strings"
 	"testing"
@@ -18,20 +19,25 @@ import (
 )
 
 // assertNoGoroutineLeaks verifies that goroutine count has not grown beyond
-// a small tolerance (±2 for runtime background goroutines).
+// a tolerance. The async dispatch model spawns decode goroutines and handler
+// goroutines that may briefly overlap with parallel tests, so the tolerance
+// accounts for both runtime background goroutines and parallel test activity.
 func assertNoGoroutineLeaks(t *testing.T, before int) {
 	t.Helper()
-	// Allow goroutines to settle — tool handler goroutines may still be
+	// Allow goroutines to settle — decode and handler goroutines may still be
 	// cleaning up (deferred cancels, channel sends) immediately after Run returns.
-	for range 10 {
+	for range 20 {
 		runtime.Gosched()
+		time.Sleep(10 * time.Millisecond)
 		if runtime.NumGoroutine() <= before+2 {
 			return
 		}
 	}
 	after := runtime.NumGoroutine()
 	if after > before+2 {
-		t.Errorf("goroutine leak: before=%d, after=%d (tolerance: 2)", before, after)
+		buf := make([]byte, 64*1024)
+		n := runtime.Stack(buf, true)
+		t.Errorf("goroutine leak: before=%d, after=%d (tolerance: 2)\n%s", before, after, buf[:n])
 	}
 }
 
@@ -85,7 +91,7 @@ func Test_Integration_With_FullPipeline_Should_CompleteSuccessfully(t *testing.T
 	}
 	err = json.Unmarshal(responses[0].Result, &initResult)
 	assert.That(t, "init unmarshal", err, nil)
-	assert.That(t, "protocol version", initResult.ProtocolVersion, "2024-11-05")
+	assert.That(t, "protocol version", initResult.ProtocolVersion, "2025-06-18")
 	assert.That(t, "server name", initResult.ServerInfo.Name, "mcp")
 	assert.That(t, "server version", initResult.ServerInfo.Version, "1.0.0")
 
@@ -132,6 +138,8 @@ func Test_Integration_With_PanickingHandler_Should_RecoverAndContinue(t *testing
 	t.Parallel()
 
 	// Arrange — panic tool followed by test tool proves server survives the panic.
+	// Uses io.Pipe to sequence messages: the second tools/call is sent after the
+	// first response arrives, matching the maxInFlight:1 protocol contract.
 	r := tools.NewRegistry()
 	tools.Register(r, "panicker", "panics", func(_ context.Context, _ testInput) tools.Result {
 		panic("boom")
@@ -140,15 +148,26 @@ func Test_Integration_With_PanickingHandler_Should_RecoverAndContinue(t *testing
 		return tools.TextResult(input.Message)
 	})
 
-	input := handshake() +
-		`{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"panicker","arguments":{"message":"x"}}}` + "\n" +
-		`{"jsonrpc":"2.0","method":"tools/call","id":3,"params":{"name":"test","arguments":{"message":"alive"}}}` + "\n"
-
+	pr, pw := io.Pipe()
 	var stdout, stderr bytes.Buffer
-	srv := server.NewServer("mcp", "test", r, strings.NewReader(input), &stdout, &stderr)
+	srv := server.NewServer("mcp", "test", r, pr, &stdout, &stderr)
+
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(context.Background()) }()
+
+	// Send handshake + first tools/call
+	_, _ = pw.Write([]byte(handshake() +
+		`{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"panicker","arguments":{"message":"x"}}}` + "\n"))
+
+	// Wait for panic response (brief settle)
+	time.Sleep(50 * time.Millisecond)
+
+	// Send second tools/call + close
+	_, _ = pw.Write([]byte(`{"jsonrpc":"2.0","method":"tools/call","id":3,"params":{"name":"test","arguments":{"message":"alive"}}}` + "\n"))
+	_ = pw.Close()
 
 	// Act
-	err := srv.Run(context.Background())
+	err := <-done
 
 	// Assert
 	assert.That(t, "error", err, nil)
@@ -171,7 +190,7 @@ func Test_Integration_With_PanickingHandler_Should_RecoverAndContinue(t *testing
 func Test_Integration_With_SlowHandler_Should_TimeoutAndContinue(t *testing.T) {
 	t.Parallel()
 
-	// Arrange
+	// Arrange — uses io.Pipe to sequence messages after the slow handler times out.
 	r := tools.NewRegistry()
 	tools.Register(r, "slow", "blocks", func(ctx context.Context, _ testInput) tools.Result {
 		select {
@@ -185,15 +204,26 @@ func Test_Integration_With_SlowHandler_Should_TimeoutAndContinue(t *testing.T) {
 		return tools.TextResult(input.Message)
 	})
 
-	input := handshake() +
-		`{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"slow","arguments":{"message":"x"}}}` + "\n" +
-		`{"jsonrpc":"2.0","method":"tools/call","id":3,"params":{"name":"test","arguments":{"message":"alive"}}}` + "\n"
-
+	pr, pw := io.Pipe()
 	var stdout, stderr bytes.Buffer
-	srv := server.NewServer("mcp", "test", r, strings.NewReader(input), &stdout, &stderr, server.WithHandlerTimeout(50*time.Millisecond))
+	srv := server.NewServer("mcp", "test", r, pr, &stdout, &stderr, server.WithHandlerTimeout(50*time.Millisecond))
+
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(context.Background()) }()
+
+	// Send handshake + slow tools/call
+	_, _ = pw.Write([]byte(handshake() +
+		`{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"slow","arguments":{"message":"x"}}}` + "\n"))
+
+	// Wait for timeout to fire (50ms handler timeout + safety margin)
+	time.Sleep(200 * time.Millisecond)
+
+	// Send second tools/call + close
+	_, _ = pw.Write([]byte(`{"jsonrpc":"2.0","method":"tools/call","id":3,"params":{"name":"test","arguments":{"message":"alive"}}}` + "\n"))
+	_ = pw.Close()
 
 	// Act
-	err := srv.Run(context.Background())
+	err := <-done
 
 	// Assert
 	assert.That(t, "error", err, nil)
