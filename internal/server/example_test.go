@@ -19,7 +19,7 @@ import (
 func ExampleNewServer() {
 	// Build the tool registry.
 	r := tools.NewRegistry()
-	tools.Register(r, "search", "Searches files for a pattern", tools.Search)
+	tools.Register(r, "echo", "Echoes the input message", tools.Echo)
 
 	// Inject buffers instead of real file descriptors.
 	var stdout, stderr bytes.Buffer

@@ -1,32 +1,11 @@
 package tools_test
 
 import (
-	"context"
 	"strings"
 	"testing"
 
 	"github.com/andygeiss/mcp/internal/tools"
 )
-
-func Fuzz_Search_With_ArbitraryInputs(f *testing.F) {
-	f.Add("pattern", "/tmp", ".go")
-	f.Add("", "", "")
-	f.Add("[unclosed", "../../etc", "\x00")
-	f.Add("a{99999}", "/nonexistent", ".txt")
-	f.Add("(?i)hello", ".", ".md")
-	f.Add(strings.Repeat("a", 1000), ".", "")
-	f.Add("foo\x00bar", "../..", ".rs")
-	f.Add("日本語", ".", ".go")
-
-	f.Fuzz(func(_ *testing.T, pattern, path, ext string) {
-		input := tools.SearchInput{
-			Extensions: []string{ext},
-			Path:       path,
-			Pattern:    pattern,
-		}
-		_ = tools.Search(context.Background(), input)
-	})
-}
 
 func Fuzz_ValidatePath_With_ArbitraryInput(f *testing.F) {
 	f.Add("/valid/path")
