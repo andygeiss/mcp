@@ -52,6 +52,14 @@ func Fuzz_Decoder_With_ArbitraryInput(f *testing.F) {
 	f.Add(`{"jsonrpc":"2.0","method":"","id":1,"params":{}}`)
 	// Very long method name
 	f.Add(`{"jsonrpc":"2.0","method":"` + strings.Repeat("a", 1000) + `","id":1,"params":{}}`)
+	// Zero ID — boundary for numeric IDs
+	f.Add(`{"jsonrpc":"2.0","method":"ping","id":0,"params":{}}`)
+	// Response with result field — decoder should handle gracefully
+	f.Add(`{"jsonrpc":"2.0","result":{"success":true},"id":1}`)
+	// Error response object — decoder should handle gracefully
+	f.Add(`{"jsonrpc":"2.0","error":{"code":-32700,"message":"Parse error"},"id":1}`)
+	// Scientific notation ID — must be rejected
+	f.Add(`{"jsonrpc":"2.0","method":"ping","id":1e308,"params":{}}`)
 
 	f.Fuzz(func(_ *testing.T, input string) {
 		dec := json.NewDecoder(strings.NewReader(input))

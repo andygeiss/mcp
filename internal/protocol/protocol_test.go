@@ -670,6 +670,44 @@ func Test_Validate_With_ObjectID_Should_ReturnInvalidRequest(t *testing.T) {
 	assert.That(t, "message", got.Message, "id must be a string, number, or null")
 }
 
+func Test_Validate_With_FloatID_Should_ReturnInvalidRequest(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	req := protocol.Request{
+		ID:      json.RawMessage("1.5"),
+		JSONRPC: "2.0",
+		Method:  "ping",
+		Params:  json.RawMessage("{}"),
+	}
+	// Act
+	got := protocol.Validate(req)
+	// Assert
+	if got == nil {
+		t.Fatal("expected error, got nil")
+	}
+	assert.That(t, "code", got.Code, protocol.InvalidRequest)
+	assert.That(t, "message", got.Message, "id must not contain fractional or exponent parts")
+}
+
+func Test_Validate_With_ScientificNotationID_Should_ReturnInvalidRequest(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	req := protocol.Request{
+		ID:      json.RawMessage("1e308"),
+		JSONRPC: "2.0",
+		Method:  "ping",
+		Params:  json.RawMessage("{}"),
+	}
+	// Act
+	got := protocol.Validate(req)
+	// Assert
+	if got == nil {
+		t.Fatal("expected error, got nil")
+	}
+	assert.That(t, "code", got.Code, protocol.InvalidRequest)
+	assert.That(t, "message", got.Message, "id must not contain fractional or exponent parts")
+}
+
 func Test_Validate_With_NullID_Should_ReturnNil(t *testing.T) {
 	t.Parallel()
 	// Arrange
