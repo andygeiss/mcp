@@ -1,67 +1,87 @@
 # Project Overview
 
-**Project:** mcp
-**Repository:** [github.com/andygeiss/mcp](https://github.com/andygeiss/mcp)
-**License:** MIT (Andreas Geiss)
-**Generated:** 2026-04-07
+## Summary
 
-## Executive Summary
+**mcp** is a minimal, zero-dependency Go implementation of the [Model Context Protocol](https://modelcontextprotocol.io) (MCP). It provides a fully compliant MCP server as a single CLI binary communicating over stdin/stdout using JSON-RPC 2.0.
 
-A minimal, zero-dependency Go implementation of the [Model Context Protocol](https://modelcontextprotocol.io) (MCP). The server communicates exclusively over stdin/stdout using JSON-RPC 2.0 -- no HTTP, no WebSocket. It serves as both a working MCP server and a template for scaffolding custom MCP servers.
+The project serves dual purposes:
+1. **Working MCP server** — Ready to use with tools like Claude Code
+2. **Template repository** — Scaffold your own MCP server via `make init MODULE=github.com/yourorg/yourproject`
 
-## Purpose
+## Key Facts
 
-Prove that MCP servers need nothing beyond the standard library: a fully compliant MCP server in pure Go with automatic tool schema derivation and a three-state initialization handshake. Fork or clone the repository, run `make init MODULE=...`, and get a clean project with all template references rewritten.
-
-## Technology Stack
-
-| Category | Technology | Version | Notes |
-|---|---|---|---|
-| Language | Go | 1.26 | Green Tea GC, `reflect.Type.Fields` iterators, `errors.AsType[T]` |
-| Protocol | JSON-RPC 2.0 | — | Newline-delimited, no LSP framing |
-| MCP Version | MCP | 2025-06-18 | Tools capability only |
-| JSON | encoding/json | v1 | `GOEXPERIMENT=jsonv2` not supported |
-| Logging | log/slog | — | `slog.JSONHandler` to stderr |
-| Dependencies | None | — | Standard library only |
+| Property | Value |
+|---|---|
+| **Module Path** | `github.com/andygeiss/mcp` |
+| **Language** | Go 1.26 |
+| **MCP Version** | `2025-06-18` |
+| **Transport** | stdin/stdout (JSON-RPC 2.0, newline-delimited) |
+| **External Dependencies** | None (stdlib only) |
+| **License** | MIT |
+| **Author** | Andreas Geiß |
 
 ## Architecture
 
-- **Type:** Monolith
-- **Pattern:** Flat and simple -- no hexagonal layers, no bounded contexts
-- **Entry Point:** `cmd/mcp/main.go`
-- **Dependency Flow:** `cmd/mcp/ -> server/ -> protocol/`, `server/ -> tools/`
-- **Transport:** stdin (persistent `json.Decoder`) / stdout (protocol-only JSON-RPC) / stderr (`slog.JSONHandler`)
+Flat, simple dependency chain — no hexagonal layers:
 
-## Key Features
+```
+cmd/mcp/ → internal/server/ → internal/protocol/
+                            → internal/tools/
+```
 
-- Automatic input schema derived from Go struct tags via reflection
-- Three-state lifecycle: uninitialized -> initializing -> ready
-- Graceful shutdown on SIGINT, SIGTERM, or EOF
-- Per-message 4MB size limits and 30s handler timeouts with panic recovery
-- Async tool dispatch with cancellation support (`notifications/cancelled`)
-- Sequential dispatch (maxInFlight: 1)
-- Fuzz-tested JSON decoder (in-repo + OSS-Fuzz)
+| Package | Responsibility |
+|---|---|
+| `cmd/mcp/` | Binary entry point — wiring only |
+| `cmd/init/` | Template rewriter — self-deleting |
+| `internal/protocol/` | JSON-RPC 2.0 codec, types, constants |
+| `internal/server/` | Lifecycle, dispatch, capability negotiation |
+| `internal/tools/` | Tool registry, reflection-based schema derivation |
+| `internal/pkg/assert/` | Test assertion helpers |
 
-## Registered Tools
+## Features
 
-| Tool | Description | Annotations |
-|---|---|---|
-| `echo` | Echoes the input message | — |
-| `search` | Searches files for a pattern | `readOnlyHint: true` |
+- **JSON-RPC 2.0** over stdin/stdout — newline-delimited, no LSP framing
+- **Automatic input schema** derived from Go struct tags via reflection
+- **Three-state lifecycle** (uninitialized / initializing / ready) per MCP spec
+- **Graceful shutdown** on SIGINT, SIGTERM, or EOF
+- **Async tool dispatch** with cancellation support (`notifications/cancelled`)
+- **Per-message size limits** (4 MB) and handler timeouts (30s) with panic recovery
+- **Structured logging** to stderr via `slog.JSONHandler`
+- **Fuzz-tested** JSON decoder with OSS-Fuzz integration
+- **60+ linter rules** enforced via golangci-lint with zero suppression policy
 
-## Template System
+## Quality Gates
 
-The `cmd/init/` tool rewrites the project for new consumers:
-1. Replaces module path in `go.mod` and all `.go` imports
-2. Rewrites references in text files (Makefile, README, configs)
-3. Renames `cmd/mcp/` to `cmd/<projectName>/`
-4. Runs `go mod tidy`
-5. Self-deletes `cmd/init/`
-6. Verifies zero template fingerprint remains
+- Race detector mandatory on all test runs
+- 75% code coverage threshold enforced in CI
+- Benchmark regression detection (20% threshold)
+- Nightly fuzz testing (5 minutes per target)
+- CodeQL and OpenSSF Scorecard for security
+- Pre-commit hook runs full quality pipeline
 
-## Links
+## Repository Structure
 
-- [Architecture](./architecture.md)
-- [Source Tree Analysis](./source-tree-analysis.md)
-- [Development Guide](./development-guide.md)
-- [Deployment Guide](./deployment-guide.md)
+| Path | Purpose |
+|---|---|
+| `cmd/` | Binary entry points |
+| `internal/` | Core packages (not importable externally) |
+| `oss-fuzz/` | Google OSS-Fuzz integration |
+| `testdata/` | Test fixtures and benchmark baselines |
+| `.github/workflows/` | CI/CD pipelines (5 workflows) |
+| `docs/` | Project documentation |
+
+## Quick Start
+
+```bash
+# Build
+go build -ldflags "-X main.version=$(git describe --tags --always --dirty)" ./cmd/mcp/
+
+# Run
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}' | ./mcp
+
+# Use as template
+go run ./cmd/init github.com/yourorg/yourproject
+
+# Full quality check
+make check
+```
