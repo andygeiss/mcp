@@ -62,14 +62,17 @@ func Test_Integration_With_TemplateConsumer_Should_PassAllQualityGates(t *testin
 	err = os.WriteFile(filepath.Join(toolsDir, "greet.go"), fixtureData, 0o600) //nolint:gosec // test-only: writing to t.TempDir()
 	assert.That(t, "write greet.go", err, nil)
 
-	// Register greet tool in main.go (before search, alphabetical order)
+	// Register greet tool in main.go (after echo, alphabetical order)
 	mainGoPath := filepath.Join(projectDir, "cmd", "testserver", "main.go")
 	mainData, err := os.ReadFile(filepath.Clean(mainGoPath))
 	assert.That(t, "read main.go", err, nil)
 
-	searchLine := []byte(`tools.Register(registry, "search"`)
-	greetLine := append([]byte("tools.Register(registry, \"greet\", \"Greets a person by name\", tools.Greet)\n\t"), searchLine...)
-	mainData = bytes.Replace(mainData, searchLine, greetLine, 1)
+	echoLine := []byte(`tools.Register(registry, "echo", "Echoes the input message", tools.Echo)`)
+	greetReg := []byte("\n\ttools.Register(registry, \"greet\", \"Greets a person by name\", tools.Greet)")
+	echoAndGreet := make([]byte, 0, len(echoLine)+len(greetReg))
+	echoAndGreet = append(echoAndGreet, echoLine...)
+	echoAndGreet = append(echoAndGreet, greetReg...)
+	mainData = bytes.Replace(mainData, echoLine, echoAndGreet, 1)
 	err = os.WriteFile(mainGoPath, mainData, 0o600) //nolint:gosec // test-only: writing to t.TempDir()
 	assert.That(t, "write main.go", err, nil)
 
