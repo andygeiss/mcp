@@ -77,6 +77,9 @@ func Test_Integration_With_FullPipeline_Should_CompleteSuccessfully(t *testing.T
 	}
 
 	assert.That(t, "response count", len(responses), 3)
+	assert.That(t, "init id", string(responses[0].ID), "1")
+	assert.That(t, "list id", string(responses[1].ID), "2")
+	assert.That(t, "call id", string(responses[2].ID), "3")
 
 	// Response 1: initialize
 	var initResult struct {
@@ -174,6 +177,9 @@ func Test_Integration_With_PanickingHandler_Should_RecoverAndContinue(t *testing
 
 	responses := parseResponses(t, &stdout)
 	assert.That(t, "response count", len(responses), 3) // init + panic + test
+	assert.That(t, "init id", string(responses[0].ID), "1")
+	assert.That(t, "panic id", string(responses[1].ID), "2")
+	assert.That(t, "test id", string(responses[2].ID), "3")
 
 	assert.That(t, "panic error code", responses[1].Error.Code, protocol.InternalError)
 
@@ -230,6 +236,9 @@ func Test_Integration_With_SlowHandler_Should_TimeoutAndContinue(t *testing.T) {
 
 	responses := parseResponses(t, &stdout)
 	assert.That(t, "response count", len(responses), 3) // init + slow + test
+	assert.That(t, "init id", string(responses[0].ID), "1")
+	assert.That(t, "slow id", string(responses[1].ID), "2")
+	assert.That(t, "test id", string(responses[2].ID), "3")
 
 	// Slow tool returns protocol-level error with timing diagnostics
 	assert.That(t, "slow error code", responses[1].Error.Code, protocol.InternalError)
@@ -268,6 +277,7 @@ func Test_Integration_With_OversizedMessage_Should_Reject(t *testing.T) {
 
 	responses := parseResponses(t, &stdout)
 	assert.That(t, "response count", len(responses), 1)
+	assert.That(t, "error id", string(responses[0].ID), "null")
 	assert.That(t, "error code", responses[0].Error.Code, protocol.ParseError)
 }
 
@@ -289,6 +299,8 @@ func Test_Integration_With_UnknownTool_Should_Return32602(t *testing.T) {
 
 	responses := parseResponses(t, &stdout)
 	assert.That(t, "response count", len(responses), 2) // init + error
+	assert.That(t, "init id", string(responses[0].ID), "1")
+	assert.That(t, "error id", string(responses[1].ID), "2")
 	assert.That(t, "error code", responses[1].Error.Code, protocol.InvalidParams)
 	if !strings.Contains(responses[1].Error.Message, "nonexistent") {
 		t.Errorf("expected tool name in error, got: %s", responses[1].Error.Message)

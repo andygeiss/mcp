@@ -51,7 +51,11 @@ func Validate(req Request) *CodeError {
 	if len(req.ID) > 0 {
 		switch req.ID[0] {
 		case '"', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '-', 'n':
-			// valid: string, number, null
+			// valid: string, integer, null
+			// JSON-RPC 2.0: "Fractional parts MUST NOT be used"
+			if bytes.ContainsAny(req.ID, ".eE") {
+				return ErrInvalidRequest("id must not contain fractional or exponent parts")
+			}
 		default:
 			return ErrInvalidRequest("id must be a string, number, or null")
 		}

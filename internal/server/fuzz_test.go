@@ -31,6 +31,15 @@ func Fuzz_Server_Pipeline(f *testing.F) {
 	f.Add(strings.Repeat("A", 100) + "\n")
 	f.Add("\x00\x01\x02\x03\x04\x05" + "\n")
 	f.Add(`{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"echo","arguments":{"text":"hello"}}}` + "\n")
+	// Initialize → shutdown sequence
+	f.Add(`{"jsonrpc":"2.0","method":"initialize","id":1,"params":{"capabilities":{}}}` + "\n" +
+		`{"jsonrpc":"2.0","method":"notifications/initialized"}` + "\n" +
+		`{"jsonrpc":"2.0","method":"shutdown","id":2}` + "\n")
+	// Duplicate request IDs — server must handle gracefully
+	f.Add(`{"jsonrpc":"2.0","method":"ping","id":1,"params":{}}` + "\n" +
+		`{"jsonrpc":"2.0","method":"ping","id":1,"params":{}}` + "\n")
+	// Rapid-fire pings — stress test sequential dispatch
+	f.Add(strings.Repeat(`{"jsonrpc":"2.0","method":"ping","id":1,"params":{}}`+"\n", 100))
 
 	f.Fuzz(func(t *testing.T, input string) {
 		r := tools.NewRegistry()
