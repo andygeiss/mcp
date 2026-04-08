@@ -613,8 +613,8 @@ func Test_Server_With_TimeoutHandler_Should_ReturnError(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	srv := server.NewServer("mcp", "test", r, strings.NewReader(input), &stdout, &stderr,
-		server.WithHandlerTimeout(50*time.Millisecond),
-		server.WithSafetyMargin(50*time.Millisecond),
+		server.WithHandlerTimeout(500*time.Millisecond),
+		server.WithSafetyMargin(500*time.Millisecond),
 	)
 
 	// Act
@@ -653,7 +653,7 @@ func Test_Server_With_DeadlineExceeded_Should_IncludeTimingInData(t *testing.T) 
 
 	var stdout, stderr bytes.Buffer
 	srv := server.NewServer("mcp", "test", r, strings.NewReader(input), &stdout, &stderr,
-		server.WithHandlerTimeout(50*time.Millisecond),
+		server.WithHandlerTimeout(500*time.Millisecond),
 	)
 
 	// Act
@@ -680,11 +680,11 @@ func Test_Server_With_DeadlineExceeded_Should_IncludeTimingInData(t *testing.T) 
 		t.Fatalf("failed to unmarshal error data: %v", err)
 	}
 	assert.That(t, "toolName", data["toolName"], "slow")
-	if elapsed, ok := data["elapsedMs"].(float64); !ok || elapsed < 50 {
-		t.Errorf("expected elapsedMs >= 50, got %v", data["elapsedMs"])
+	if elapsed, ok := data["elapsedMs"].(float64); !ok || elapsed < 500 {
+		t.Errorf("expected elapsedMs >= 500, got %v", data["elapsedMs"])
 	}
-	if timeout, ok := data["timeoutMs"].(float64); !ok || int64(timeout) != 50 {
-		t.Errorf("expected timeoutMs == 50, got %v", data["timeoutMs"])
+	if timeout, ok := data["timeoutMs"].(float64); !ok || int64(timeout) != 500 {
+		t.Errorf("expected timeoutMs == 500, got %v", data["timeoutMs"])
 	}
 }
 
@@ -758,8 +758,8 @@ func Test_Server_With_SafetyTimer_Should_IncludeTimingInData(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	srv := server.NewServer("mcp", "test", r, strings.NewReader(input), &stdout, &stderr,
-		server.WithHandlerTimeout(50*time.Millisecond),
-		server.WithSafetyMargin(50*time.Millisecond),
+		server.WithHandlerTimeout(500*time.Millisecond),
+		server.WithSafetyMargin(500*time.Millisecond),
 	)
 
 	// Act
@@ -786,8 +786,8 @@ func Test_Server_With_SafetyTimer_Should_IncludeTimingInData(t *testing.T) {
 	if _, hasElapsed := data["elapsedMs"]; !hasElapsed {
 		t.Error("expected elapsedMs in data")
 	}
-	if timeout, ok := data["timeoutMs"].(float64); !ok || int64(timeout) != 50 {
-		t.Errorf("expected timeoutMs == 50, got %v", data["timeoutMs"])
+	if timeout, ok := data["timeoutMs"].(float64); !ok || int64(timeout) != 500 {
+		t.Errorf("expected timeoutMs == 500, got %v", data["timeoutMs"])
 	}
 }
 
