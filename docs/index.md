@@ -1,25 +1,18 @@
 # Project Documentation Index
 
-**Project:** mcp
-**Generated:** 2026-04-07
-**Scan Level:** Exhaustive
-
 ## Project Overview
 
-- **Type:** Monolith (single CLI binary)
+- **Type:** Monolith CLI
 - **Primary Language:** Go 1.26
-- **Architecture:** Flat — `cmd/mcp/ -> server/ -> protocol/`, `server/ -> tools/`
-- **Protocol:** MCP 2025-06-18 over JSON-RPC 2.0 (stdin/stdout)
-- **Dependencies:** None (standard library only)
+- **Architecture:** Flat dependency chain, single binary, stdin/stdout transport
+- **MCP Version:** 2025-06-18
+- **Dependencies:** None (stdlib only)
 
 ## Quick Reference
 
-- **Tech Stack:** Go 1.26, encoding/json, log/slog
+- **Tech Stack:** Go 1.26, encoding/json, log/slog, testing (fuzz + race)
 - **Entry Point:** `cmd/mcp/main.go`
-- **Architecture Pattern:** Flat, sequential dispatch, three-state lifecycle
-- **Tools:** echo, search
-- **Build:** `make check` (build + test + lint)
-- **Test:** `go test -race ./...`
+- **Architecture Pattern:** Sequential dispatch, three-state lifecycle, JSON-RPC 2.0
 
 ## Generated Documentation
 
@@ -31,33 +24,35 @@
 
 ## Existing Documentation
 
-- [README.md](../README.md) — Project introduction, quickstart, feature list
-- [CONTRIBUTING.md](../CONTRIBUTING.md) — Dev setup, testing requirements, PR process
-- [SECURITY.md](../SECURITY.md) — Vulnerability reporting policy
-- [CLAUDE.md](../CLAUDE.md) — AI-facing engineering instructions and guardrails
-- [LICENSE](../LICENSE) — MIT License
+- [README](../README.md) — Project overview, quickstart, feature summary
+- [CONTRIBUTING](../CONTRIBUTING.md) — Prerequisites, dev setup, testing requirements, PR process
+- [SECURITY](../SECURITY.md) — Vulnerability reporting and response timeline
+- [CLAUDE.md](../CLAUDE.md) — AI agent instructions and engineering conventions
+- [LICENSE](../LICENSE) — MIT license
 
 ## Getting Started
 
-### Build and Run
+1. **Clone and setup:**
+   ```bash
+   git clone https://github.com/andygeiss/mcp.git
+   cd mcp && make setup
+   ```
 
-```bash
-make check                    # Full quality pipeline
-make build                    # Compile only
-go run ./cmd/mcp/             # Run the MCP server
-```
+2. **Build and test:**
+   ```bash
+   make check   # build + test + lint
+   ```
 
-### Add a New Tool
+3. **Run the server:**
+   ```bash
+   echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}' | go run ./cmd/mcp/
+   ```
 
-1. Create input struct + handler in `internal/tools/`
-2. Register in `cmd/mcp/main.go` via `tools.Register[T]()`
-3. Schema is auto-derived from struct tags
-4. Write tests (unit + integration)
+4. **Use as a template:**
+   ```bash
+   go run ./cmd/init github.com/yourorg/yourproject
+   ```
 
-### Use as Template
+---
 
-```bash
-git clone https://github.com/andygeiss/mcp.git my-server
-cd my-server
-make init MODULE=github.com/myorg/my-server
-```
+*Generated: 2026-04-08 | Scan level: exhaustive | Project type: CLI*
