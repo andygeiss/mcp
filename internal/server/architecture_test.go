@@ -27,7 +27,7 @@ func Test_Architecture_With_ImportGraph_Should_MatchDocumentation(t *testing.T) 
 		{"internal/protocol", []string{module}},
 		{"internal/tools", []string{module + "server"}},
 		{"internal/server", []string{"github.com/andygeiss/mcp/cmd/"}},
-		{"internal/pkg/assert", []string{module}},
+		{"internal/assert", []string{module}},
 	}
 
 	for _, rule := range rules {

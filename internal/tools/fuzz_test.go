@@ -15,6 +15,8 @@ func Fuzz_ValidatePath_With_ArbitraryInput(f *testing.F) {
 	f.Add(strings.Repeat("a", 5000))
 	f.Add("日本語/パス")
 	f.Add("/tmp/../../../etc/shadow")
+	f.Add("foo/../../etc/passwd")
+	f.Add("..")
 	f.Add("")
 
 	f.Fuzz(func(_ *testing.T, path string) {

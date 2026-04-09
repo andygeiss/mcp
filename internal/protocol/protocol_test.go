@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/andygeiss/mcp/internal/pkg/assert"
+	"github.com/andygeiss/mcp/internal/assert"
 	"github.com/andygeiss/mcp/internal/protocol"
 )
 

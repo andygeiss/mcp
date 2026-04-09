@@ -15,9 +15,12 @@ func ExampleRegister() {
 	}
 
 	r := tools.NewRegistry()
-	tools.Register(r, "greet", "Says hello", func(_ context.Context, input GreetInput) tools.Result {
+	if err := tools.Register(r, "greet", "Says hello", func(_ context.Context, input GreetInput) tools.Result {
 		return tools.TextResult("Hello, " + input.Name + "!")
-	})
+	}); err != nil {
+		fmt.Println("error:", err)
+		return
+	}
 
 	t, ok := r.Lookup("greet")
 	fmt.Println("found:", ok)

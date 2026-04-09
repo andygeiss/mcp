@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/andygeiss/mcp/internal/pkg/assert"
+	"github.com/andygeiss/mcp/internal/assert"
 	"github.com/andygeiss/mcp/internal/protocol"
 	"github.com/andygeiss/mcp/internal/server"
 	"github.com/andygeiss/mcp/internal/tools"
@@ -25,9 +25,11 @@ type testInput struct {
 // testRegistry creates a registry with a single tool for protocol tests.
 func testRegistry() *tools.Registry {
 	r := tools.NewRegistry()
-	tools.Register(r, "test", "test tool", func(_ context.Context, input testInput) tools.Result {
+	if err := tools.Register(r, "test", "test tool", func(_ context.Context, input testInput) tools.Result {
 		return tools.TextResult(input.Message)
-	})
+	}); err != nil {
+		panic("testRegistry: " + err.Error())
+	}
 	return r
 }
 
@@ -118,7 +120,7 @@ func Test_Server_With_UninitializedRequest_Should_Return32600(t *testing.T) {
 	// Assert
 	assert.That(t, "error", err, nil)
 	assert.That(t, "response count", len(responses), 1)
-	assert.That(t, "error code", responses[0].Error.Code, protocol.InvalidRequest)
+	assert.That(t, "error code", responses[0].Error.Code, protocol.ServerError)
 	assert.That(t, "error message", responses[0].Error.Message, "server not initialized (send initialize first)")
 }
 
@@ -134,7 +136,7 @@ func Test_Server_With_InitializingStateRequest_Should_ReturnAwaitingMessage(t *t
 	// Assert
 	assert.That(t, "error", err, nil)
 	assert.That(t, "response count", len(responses), 2)
-	assert.That(t, "error code", responses[1].Error.Code, protocol.InvalidRequest)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.ServerError)
 	assert.That(t, "error message", responses[1].Error.Message, "server initializing, awaiting notifications/initialized")
 }
 
@@ -150,7 +152,7 @@ func Test_Server_With_DuplicateInitialize_Should_Return32600(t *testing.T) {
 	// Assert
 	assert.That(t, "error", err, nil)
 	assert.That(t, "response count", len(responses), 2)
-	assert.That(t, "second error code", responses[1].Error.Code, protocol.InvalidRequest)
+	assert.That(t, "second error code", responses[1].Error.Code, protocol.ServerError)
 	assert.That(t, "second error message", responses[1].Error.Message, "already initialized")
 }
 
@@ -184,12 +186,16 @@ func Test_Server_With_ToolsList_Should_ReturnAlphabetically(t *testing.T) {
 
 	// Arrange
 	r := tools.NewRegistry()
-	tools.Register(r, "zeta", "z tool", func(_ context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "zeta", "z tool", func(_ context.Context, _ testInput) tools.Result {
 		return tools.TextResult("z")
-	})
-	tools.Register(r, "alpha", "a tool", func(_ context.Context, _ testInput) tools.Result {
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tools.Register(r, "alpha", "a tool", func(_ context.Context, _ testInput) tools.Result {
 		return tools.TextResult("a")
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	input := handshake() + `{"jsonrpc":"2.0","method":"tools/list","id":2,"params":{}}` + "\n"
 
@@ -272,9 +278,11 @@ func Test_Server_With_PanickingHandler_Should_Return32603(t *testing.T) {
 
 			// Arrange
 			r := testRegistry()
-			tools.Register(r, tt.toolName, "panics", func(_ context.Context, _ testInput) tools.Result {
+			if err := tools.Register(r, tt.toolName, "panics", func(_ context.Context, _ testInput) tools.Result {
 				panic(tt.panicValue)
-			})
+			}); err != nil {
+				t.Fatal(err)
+			}
 
 			input := handshake() + `{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"` + tt.toolName + `","arguments":{"message":"boom"}}}` + "\n"
 
@@ -297,9 +305,11 @@ func Test_Server_With_PanickingHandler_Should_IncludeDataFields(t *testing.T) {
 
 	// Arrange
 	r := tools.NewRegistry()
-	tools.Register(r, "panicker", "panics", func(_ context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "panicker", "panics", func(_ context.Context, _ testInput) tools.Result {
 		panic("test-panic-value")
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	input := handshake() + `{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"panicker","arguments":{"message":"boom"}}}` + "\n"
 
@@ -315,20 +325,24 @@ func Test_Server_With_PanickingHandler_Should_IncludeDataFields(t *testing.T) {
 		t.Fatalf("failed to unmarshal error data: %v", err)
 	}
 	assert.That(t, "toolName", data["toolName"], "panicker")
-	assert.That(t, "panicValue", data["panicValue"], "test-panic-value")
+	if _, hasPanic := data["panicValue"]; hasPanic {
+		t.Error("Error.Data must not contain panicValue (security: leak risk)")
+	}
 	if _, hasStack := data["stack"]; hasStack {
 		t.Error("Error.Data must not contain stack trace")
 	}
 }
 
-func Test_Server_With_PanickingHandler_Should_LogStackToStderr(t *testing.T) {
+func Test_Server_With_PanickingHandler_Should_LogPanicToStderr(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
 	r := tools.NewRegistry()
-	tools.Register(r, "panicker", "panics", func(_ context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "panicker", "panics", func(_ context.Context, _ testInput) tools.Result {
 		panic("test-panic-value")
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	input := handshake() + `{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"panicker","arguments":{"message":"boom"}}}` + "\n"
 
@@ -354,9 +368,8 @@ func Test_Server_With_PanickingHandler_Should_LogStackToStderr(t *testing.T) {
 			if entry["panic"] != "test-panic-value" {
 				t.Errorf("expected panic=test-panic-value, got %v", entry["panic"])
 			}
-			stack, ok := entry["stack"].(string)
-			if !ok || len(stack) == 0 {
-				t.Error("expected non-empty stack trace in stderr log")
+			if _, hasStack := entry["stack"]; hasStack {
+				t.Error("stack trace must not be logged to stderr (information disclosure)")
 			}
 			break
 		}
@@ -539,9 +552,11 @@ func Test_Server_With_ErrorResult_Should_ReturnSuccessEnvelope(t *testing.T) {
 
 	// Arrange — handler returns ErrorResult (tool-level failure, not protocol error)
 	r := tools.NewRegistry()
-	tools.Register(r, "failing", "returns error result", func(_ context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "failing", "returns error result", func(_ context.Context, _ testInput) tools.Result {
 		return tools.ErrorResult("something went wrong")
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	input := handshake() + `{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"failing","arguments":{"message":"x"}}}` + "\n"
 
@@ -570,14 +585,16 @@ func Test_Server_With_DefaultTimeout_Should_AllowSlowHandler(t *testing.T) {
 
 	// Arrange — handler that takes 100ms succeeds under the default 30s timeout.
 	r := tools.NewRegistry()
-	tools.Register(r, "slow", "takes 100ms", func(ctx context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "slow", "takes 100ms", func(ctx context.Context, _ testInput) tools.Result {
 		select {
 		case <-time.After(100 * time.Millisecond):
 			return tools.TextResult("done")
 		case <-ctx.Done():
 			return tools.ErrorResult("cancelled")
 		}
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	input := handshake() + `{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"slow","arguments":{"message":"x"}}}` + "\n"
 
@@ -605,9 +622,11 @@ func Test_Server_With_TimeoutHandler_Should_ReturnError(t *testing.T) {
 
 	// Arrange — handler that ignores context and blocks forever
 	r := tools.NewRegistry()
-	tools.Register(r, "hang", "blocks forever", func(_ context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "hang", "blocks forever", func(_ context.Context, _ testInput) tools.Result {
 		select {} //nolint:gosimple // intentionally block forever to test timeout
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	input := handshake() + `{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"hang","arguments":{"message":"test"}}}` + "\n"
 
@@ -633,7 +652,7 @@ func Test_Server_With_TimeoutHandler_Should_ReturnError(t *testing.T) {
 		responses = append(responses, resp)
 	}
 	assert.That(t, "response count", len(responses), 2) // init + tool call
-	assert.That(t, "error code", responses[1].Error.Code, protocol.InternalError)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.ServerTimeout)
 	if !strings.Contains(responses[1].Error.Message, "hang") {
 		t.Errorf("expected tool name in error message, got: %s", responses[1].Error.Message)
 	}
@@ -644,10 +663,12 @@ func Test_Server_With_DeadlineExceeded_Should_IncludeTimingInData(t *testing.T) 
 
 	// Arrange — handler that respects context and returns on deadline
 	r := tools.NewRegistry()
-	tools.Register(r, "slow", "blocks until timeout", func(ctx context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "slow", "blocks until timeout", func(ctx context.Context, _ testInput) tools.Result {
 		<-ctx.Done()
 		return tools.ErrorResult(ctx.Err().Error())
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	input := handshake() + `{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"slow","arguments":{"message":"x"}}}` + "\n"
 
@@ -670,7 +691,7 @@ func Test_Server_With_DeadlineExceeded_Should_IncludeTimingInData(t *testing.T) 
 		responses = append(responses, resp)
 	}
 	assert.That(t, "response count", len(responses), 2)
-	assert.That(t, "error code", responses[1].Error.Code, protocol.InternalError)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.ServerTimeout)
 	if !strings.Contains(responses[1].Error.Message, "slow") {
 		t.Errorf("expected tool name in message, got: %s", responses[1].Error.Message)
 	}
@@ -693,10 +714,12 @@ func Test_Server_With_ContextCanceled_Should_IncludeElapsedOnly(t *testing.T) {
 
 	// Arrange — handler that blocks until cancelled
 	r := tools.NewRegistry()
-	tools.Register(r, "blocker", "blocks forever", func(ctx context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "blocker", "blocks forever", func(ctx context.Context, _ testInput) tools.Result {
 		<-ctx.Done()
 		return tools.ErrorResult(ctx.Err().Error())
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	input := handshake() + `{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"blocker","arguments":{"message":"x"}}}` + "\n"
 
@@ -727,7 +750,7 @@ func Test_Server_With_ContextCanceled_Should_IncludeElapsedOnly(t *testing.T) {
 		responses = append(responses, resp)
 	}
 	assert.That(t, "response count", len(responses), 2)
-	assert.That(t, "error code", responses[1].Error.Code, protocol.InternalError)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.ServerTimeout)
 	if !strings.Contains(responses[1].Error.Message, "blocker") {
 		t.Errorf("expected tool name in message, got: %s", responses[1].Error.Message)
 	}
@@ -750,9 +773,11 @@ func Test_Server_With_SafetyTimer_Should_IncludeTimingInData(t *testing.T) {
 
 	// Arrange — handler that ignores context completely
 	r := tools.NewRegistry()
-	tools.Register(r, "hang", "ignores context", func(_ context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "hang", "ignores context", func(_ context.Context, _ testInput) tools.Result {
 		select {} //nolint:gosimple // intentionally block forever
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	input := handshake() + `{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"hang","arguments":{"message":"x"}}}` + "\n"
 
@@ -776,7 +801,7 @@ func Test_Server_With_SafetyTimer_Should_IncludeTimingInData(t *testing.T) {
 		responses = append(responses, resp)
 	}
 	assert.That(t, "response count", len(responses), 2)
-	assert.That(t, "error code", responses[1].Error.Code, protocol.InternalError)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.ServerTimeout)
 
 	var data map[string]any
 	if err := json.Unmarshal(responses[1].Error.Data, &data); err != nil {
@@ -1205,7 +1230,7 @@ func Test_Server_With_InitializedNotification_In_Each_State_Should_Transition_Or
 			if tt.expectReady {
 				assert.That(t, "tools/list success", lastResp.Error == nil, true)
 			} else {
-				assert.That(t, "error code", lastResp.Error.Code, protocol.InvalidRequest)
+				assert.That(t, "error code", lastResp.Error.Code, protocol.ServerError)
 			}
 
 			// Check warn log
@@ -1227,10 +1252,12 @@ func Test_Server_With_Malformed_Cancelled_Notification_Should_Log_Warn(t *testin
 	// Arrange — register a blocking handler so there's an in-flight request
 	// when the malformed cancel notification arrives
 	r := tools.NewRegistry()
-	tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) tools.Result {
 		<-ctx.Done()
 		return tools.ErrorResult("cancelled")
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	input := handshake() +
 		`{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"blocker","arguments":{"message":"x"}}}` + "\n" +
@@ -1260,11 +1287,13 @@ func Test_Server_With_CancelledNotification_Should_CancelInFlightContext(t *test
 	// Arrange — handler that blocks until context cancelled
 	cancelled := make(chan struct{})
 	r := tools.NewRegistry()
-	tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) tools.Result {
 		<-ctx.Done()
 		close(cancelled)
 		return tools.ErrorResult("cancelled")
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	input := handshake() +
 		`{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"blocker","arguments":{"message":"x"}}}` + "\n" +
@@ -1294,10 +1323,12 @@ func Test_Server_With_CancelledNotification_Should_SuppressResponse(t *testing.T
 
 	// Arrange
 	r := tools.NewRegistry()
-	tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) tools.Result {
 		<-ctx.Done()
 		return tools.ErrorResult("cancelled")
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	input := handshake() +
 		`{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"blocker","arguments":{"message":"x"}}}` + "\n" +
@@ -1333,15 +1364,21 @@ func Test_Server_With_ToolsListMultipleTools_Should_ReturnAlphabeticalOrder(t *t
 
 	// Arrange — three tools in non-alphabetical order
 	r := tools.NewRegistry()
-	tools.Register(r, "zeta", "z tool", func(_ context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "zeta", "z tool", func(_ context.Context, _ testInput) tools.Result {
 		return tools.TextResult("z")
-	})
-	tools.Register(r, "alpha", "a tool", func(_ context.Context, _ testInput) tools.Result {
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tools.Register(r, "alpha", "a tool", func(_ context.Context, _ testInput) tools.Result {
 		return tools.TextResult("a")
-	})
-	tools.Register(r, "mid", "m tool", func(_ context.Context, _ testInput) tools.Result {
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tools.Register(r, "mid", "m tool", func(_ context.Context, _ testInput) tools.Result {
 		return tools.TextResult("m")
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	input := handshake() + `{"jsonrpc":"2.0","method":"tools/list","id":2,"params":{}}` + "\n"
 
@@ -1404,9 +1441,11 @@ func Test_Server_With_ToolsListAnnotations_Should_IncludeAnnotations(t *testing.
 
 	// Arrange
 	r := tools.NewRegistry()
-	tools.Register(r, "readonly", "read-only tool", func(_ context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "readonly", "read-only tool", func(_ context.Context, _ testInput) tools.Result {
 		return tools.TextResult("ok")
-	}, tools.WithAnnotations(tools.Annotations{ReadOnlyHint: true}))
+	}, tools.WithAnnotations(tools.Annotations{ReadOnlyHint: true})); err != nil {
+		t.Fatal(err)
+	}
 
 	input := handshake() + `{"jsonrpc":"2.0","method":"tools/list","id":2,"params":{}}` + "\n"
 
@@ -1464,10 +1503,12 @@ func Test_Server_With_RequestDuringInFlight_Should_ReturnServerBusy(t *testing.T
 
 	// Arrange — handler that blocks until context cancelled, second request arrives while in flight
 	r := tools.NewRegistry()
-	tools.Register(r, "blocker", "blocks", func(ctx context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "blocker", "blocks", func(ctx context.Context, _ testInput) tools.Result {
 		<-ctx.Done()
 		return tools.TextResult("done")
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	input := handshake() +
 		`{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"blocker","arguments":{"message":"x"}}}` + "\n" +
@@ -1505,7 +1546,7 @@ func Test_Server_With_RequestDuringInFlight_Should_ReturnServerBusy(t *testing.T
 	if busyResp == nil {
 		t.Fatal("expected response for request id 3")
 	}
-	assert.That(t, "error code", busyResp.Error.Code, protocol.InvalidRequest)
+	assert.That(t, "error code", busyResp.Error.Code, protocol.ServerError)
 	if !strings.Contains(busyResp.Error.Message, "server busy") {
 		t.Errorf("expected server busy message, got: %s", busyResp.Error.Message)
 	}

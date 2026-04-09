@@ -25,9 +25,11 @@ func Benchmark_SchemaDerivation_With_SimpleStruct(b *testing.B) {
 	b.ResetTimer()
 	for b.Loop() {
 		r := tools.NewRegistry()
-		tools.Register(r, "bench", "bench tool", func(_ context.Context, _ simpleBenchInput) tools.Result {
+		if err := tools.Register(r, "bench", "bench tool", func(_ context.Context, _ simpleBenchInput) tools.Result {
 			return tools.TextResult("ok")
-		})
+		}); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
@@ -36,8 +38,10 @@ func Benchmark_SchemaDerivation_With_ComplexStruct(b *testing.B) {
 	b.ResetTimer()
 	for b.Loop() {
 		r := tools.NewRegistry()
-		tools.Register(r, "bench", "bench tool", func(_ context.Context, _ complexBenchInput) tools.Result {
+		if err := tools.Register(r, "bench", "bench tool", func(_ context.Context, _ complexBenchInput) tools.Result {
 			return tools.TextResult("ok")
-		})
+		}); err != nil {
+			b.Fatal(err)
+		}
 	}
 }

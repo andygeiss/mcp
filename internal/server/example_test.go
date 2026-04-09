@@ -19,7 +19,10 @@ import (
 func ExampleNewServer() {
 	// Build the tool registry.
 	r := tools.NewRegistry()
-	tools.Register(r, "echo", "Echoes the input message", tools.Echo)
+	if err := tools.Register(r, "echo", "Echoes the input message", tools.Echo); err != nil {
+		fmt.Println("error:", err)
+		return
+	}
 
 	// Inject buffers instead of real file descriptors.
 	var stdout, stderr bytes.Buffer
@@ -39,7 +42,10 @@ func ExampleNewServer() {
 // read human-readable summaries of each response.
 func Example_fullToolLifecycle() {
 	r := tools.NewRegistry()
-	tools.Register(r, "echo", "Echoes the message back", tools.Echo)
+	if err := tools.Register(r, "echo", "Echoes the message back", tools.Echo); err != nil {
+		fmt.Println("error:", err)
+		return
+	}
 
 	input := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`,

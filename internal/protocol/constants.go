@@ -9,6 +9,12 @@ const (
 	ParseError     = -32700
 )
 
+// Implementation-defined server error codes (JSON-RPC 2.0 reserves -32000 to -32099).
+const (
+	ServerError   = -32000 // server state prevents processing a structurally valid request
+	ServerTimeout = -32001 // tool handler timed out or was cancelled
+)
+
 // MaxConcurrentRequests advertises the server's sequential dispatch limit.
 const MaxConcurrentRequests = 1
 

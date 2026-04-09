@@ -60,7 +60,7 @@ func rewriteProject(dir, modulePath string) error {
 	}
 
 	if err := verifyZeroFingerprint(dir); err != nil {
-		return err
+		return fmt.Errorf("verify zero fingerprint: %w", err)
 	}
 
 	return nil
@@ -120,7 +120,7 @@ func rewriteGoFiles(dir, modulePath string) error {
 func rewriteImportsInFile(path, modulePath string) error {
 	data, err := readFile(path)
 	if err != nil {
-		return err
+		return fmt.Errorf("read %s: %w", path, err)
 	}
 	replaced := bytes.ReplaceAll(data,
 		[]byte(`"`+templateModulePath+`/`),
@@ -156,9 +156,9 @@ func rewriteTextFile(path, modulePath, projectName string) error {
 	data, err := readFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil
+			return nil // File removed by prior step — idempotent.
 		}
-		return err
+		return fmt.Errorf("read %s: %w", path, err)
 	}
 	replaced := bytes.ReplaceAll(data, []byte(templateModulePath), []byte(modulePath))
 	replaced = bytes.ReplaceAll(replaced, []byte("cmd/"+templateBinaryName+"/"), []byte("cmd/"+projectName+"/"))

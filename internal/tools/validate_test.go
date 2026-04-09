@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/andygeiss/mcp/internal/pkg/assert"
+	"github.com/andygeiss/mcp/internal/assert"
 	"github.com/andygeiss/mcp/internal/tools"
 )
 
@@ -15,6 +15,28 @@ func Test_ValidatePath_With_TraversalSegment_Should_ReturnError(t *testing.T) {
 
 	if err == nil {
 		t.Fatal("expected error for path traversal")
+	}
+	assert.That(t, "message", err.Error(), "path traversal not allowed")
+}
+
+func Test_ValidatePath_With_DotDotOnly_Should_ReturnError(t *testing.T) {
+	t.Parallel()
+
+	err := tools.ValidatePath("..")
+
+	if err == nil {
+		t.Fatal("expected error for path traversal")
+	}
+	assert.That(t, "message", err.Error(), "path traversal not allowed")
+}
+
+func Test_ValidatePath_With_NormalizedTraversal_Should_ReturnError(t *testing.T) {
+	t.Parallel()
+
+	err := tools.ValidatePath("foo/../../etc/passwd")
+
+	if err == nil {
+		t.Fatal("expected error for normalized path traversal")
 	}
 	assert.That(t, "message", err.Error(), "path traversal not allowed")
 }
@@ -44,6 +66,15 @@ func Test_ValidatePath_With_ValidPath_Should_ReturnNil(t *testing.T) {
 	t.Parallel()
 
 	err := tools.ValidatePath("src/main.go")
+
+	assert.That(t, "error", err, nil)
+}
+
+func Test_ValidatePath_With_DotDotInFilename_Should_ReturnNil(t *testing.T) {
+	t.Parallel()
+
+	// A file literally named "foo..bar" is not traversal.
+	err := tools.ValidatePath("foo..bar")
 
 	assert.That(t, "error", err, nil)
 }

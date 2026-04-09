@@ -56,22 +56,24 @@ func Benchmark_Encode_SuccessResponse(b *testing.B) {
 		JSONRPC: "2.0",
 		Result:  json.RawMessage(`{"content":[{"type":"text","text":"hello"}]}`),
 	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		var buf bytes.Buffer
-		enc := json.NewEncoder(&buf)
+		buf.Reset()
 		_ = protocol.Encode(enc, resp)
 	}
 }
 
 func Benchmark_Encode_ErrorResponse(b *testing.B) {
 	resp := protocol.NewErrorResponse(json.RawMessage("1"), protocol.InvalidParams, "unknown tool: nonexistent")
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		var buf bytes.Buffer
-		enc := json.NewEncoder(&buf)
+		buf.Reset()
 		_ = protocol.Encode(enc, resp)
 	}
 }

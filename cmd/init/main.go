@@ -18,12 +18,12 @@ func main() {
 func run() error {
 	if len(os.Args) < 2 {
 		fmt.Fprintln(os.Stderr, "usage: go run ./cmd/init <module-path>")
-		return errors.New("missing module path argument")
+		return errors.New("run: missing module path argument")
 	}
 
 	modulePath := strings.TrimRight(os.Args[1], "/")
 	if !strings.Contains(modulePath, "/") {
-		return errors.New("invalid module path: must contain at least one '/'")
+		return fmt.Errorf("run: invalid module path %q: must contain at least one '/'", modulePath)
 	}
 
 	dir, err := os.Getwd()

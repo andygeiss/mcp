@@ -36,7 +36,7 @@ cmd/mcp/ → internal/server/ → internal/protocol/
 | `internal/protocol/` | JSON-RPC 2.0 codec, types, constants |
 | `internal/server/` | Lifecycle, dispatch, capability negotiation |
 | `internal/tools/` | Tool registry, reflection-based schema derivation |
-| `internal/pkg/assert/` | Test assertion helpers |
+| `internal/assert/` | Test assertion helpers |
 
 ## Features
 

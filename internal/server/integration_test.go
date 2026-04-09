@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/andygeiss/mcp/internal/pkg/assert"
+	"github.com/andygeiss/mcp/internal/assert"
 	"github.com/andygeiss/mcp/internal/protocol"
 	"github.com/andygeiss/mcp/internal/server"
 	"github.com/andygeiss/mcp/internal/tools"
@@ -52,9 +52,11 @@ func Test_Integration_With_FullPipeline_Should_CompleteSuccessfully(t *testing.T
 		`{"jsonrpc":"2.0","method":"tools/call","id":3,"params":{"name":"test","arguments":{"message":"integration test"}}}` + "\n"
 
 	r := tools.NewRegistry()
-	tools.Register(r, "test", "test tool", func(_ context.Context, input testInput) tools.Result {
+	if err := tools.Register(r, "test", "test tool", func(_ context.Context, input testInput) tools.Result {
 		return tools.TextResult(input.Message)
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	var stdout, stderr bytes.Buffer
 	srv := server.NewServer("mcp", "1.0.0", r, strings.NewReader(input), &stdout, &stderr)
@@ -144,12 +146,16 @@ func Test_Integration_With_PanickingHandler_Should_RecoverAndContinue(t *testing
 	// Uses io.Pipe to sequence messages: the second tools/call is sent after the
 	// first response arrives, matching the maxInFlight:1 protocol contract.
 	r := tools.NewRegistry()
-	tools.Register(r, "panicker", "panics", func(_ context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "panicker", "panics", func(_ context.Context, _ testInput) tools.Result {
 		panic("boom")
-	})
-	tools.Register(r, "test", "test tool", func(_ context.Context, input testInput) tools.Result {
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tools.Register(r, "test", "test tool", func(_ context.Context, input testInput) tools.Result {
 		return tools.TextResult(input.Message)
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	pr, pw := io.Pipe()
 	var stdout, stderr bytes.Buffer
@@ -198,17 +204,21 @@ func Test_Integration_With_SlowHandler_Should_TimeoutAndContinue(t *testing.T) {
 
 	// Arrange — uses io.Pipe to sequence messages after the slow handler times out.
 	r := tools.NewRegistry()
-	tools.Register(r, "slow", "blocks", func(ctx context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "slow", "blocks", func(ctx context.Context, _ testInput) tools.Result {
 		select {
 		case <-time.After(10 * time.Second):
 			return tools.TextResult("unreachable")
 		case <-ctx.Done():
 			return tools.ErrorResult("context cancelled")
 		}
-	})
-	tools.Register(r, "test", "test tool", func(_ context.Context, input testInput) tools.Result {
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tools.Register(r, "test", "test tool", func(_ context.Context, input testInput) tools.Result {
 		return tools.TextResult(input.Message)
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	pr, pw := io.Pipe()
 	var stdout, stderr bytes.Buffer
@@ -241,7 +251,7 @@ func Test_Integration_With_SlowHandler_Should_TimeoutAndContinue(t *testing.T) {
 	assert.That(t, "test id", string(responses[2].ID), "3")
 
 	// Slow tool returns protocol-level error with timing diagnostics
-	assert.That(t, "slow error code", responses[1].Error.Code, protocol.InternalError)
+	assert.That(t, "slow error code", responses[1].Error.Code, protocol.ServerTimeout)
 	if !strings.Contains(responses[1].Error.Message, "slow") {
 		t.Errorf("expected tool name in error message, got: %s", responses[1].Error.Message)
 	}

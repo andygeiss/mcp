@@ -67,7 +67,7 @@ This rewrites all imports, renames `cmd/mcp/` to `cmd/yourproject/`, runs `go mo
 - **Structure**: `// Arrange` / `// Act` / `// Assert`
 - **Parallelism**: Every test calls `t.Parallel()`
 - **Package**: Black-box (`package foo_test`) by default; white-box only for unexported internals
-- **Assertions**: `assert.That(t, "description", got, expected)` from `internal/pkg/assert`
+- **Assertions**: `assert.That(t, "description", got, expected)` from `internal/assert`
 - **I/O testing**: Inject `bytes.Buffer` for stdin/stdout, write JSON-RPC requests + EOF, read responses from output buffer
 
 ### Coverage
@@ -107,7 +107,9 @@ func YourTool(_ context.Context, input YourInput) Result {
 2. Register in `cmd/mcp/main.go`:
 
 ```go
-tools.Register(registry, "your-tool", "Description", tools.YourTool)
+if err := tools.Register(registry, "your-tool", "Description", tools.YourTool); err != nil {
+    return fmt.Errorf("register your-tool: %w", err)
+}
 ```
 
 3. The input schema is auto-derived from struct tags via reflection. No manual JSON Schema needed.

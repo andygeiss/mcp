@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/andygeiss/mcp/internal/pkg/assert"
+	"github.com/andygeiss/mcp/internal/assert"
 )
 
 func buildBinary(t *testing.T, ldflags string) string {

@@ -39,8 +39,7 @@ Flat and simple — no hexagonal layers, no bounded contexts. Complexity is adde
 cmd/mcp/                  # main.go — wiring only: parse flags, inject os.Stdin/os.Stdout/os.Stderr, call server.Run, os.Exit
 cmd/init/                 # template rewriter — for template-repo consumers: rewrites module path, renames binary dir, then self-deletes; not part of normal builds
 internal/
-  pkg/
-    assert/               # lightweight test assertion helpers (assert.That) — stdlib only
+  assert/                 # lightweight test assertion helpers (assert.That) — stdlib only
   protocol/               # JSON-RPC 2.0 types, message codec, constants
   server/                 # MCP server: lifecycle, capability negotiation, method dispatch, CLAUDE.md self-test
   tools/                  # tool registry, reflection-based schema derivation, individual tool handler implementations
@@ -67,11 +66,11 @@ Three states: **uninitialized** → **initializing** → **ready**.
 
 | State | Allowed | Rejected with |
 |---|---|---|
-| **Uninitialized** | `initialize`, `ping` | `-32600` ("server not initialized") |
-| **Initializing** | `ping` | `-32600` ("server not initialized") |
+| **Uninitialized** | `initialize`, `ping` | `-32000` ("server not initialized") |
+| **Initializing** | `ping` | `-32000` ("server not initialized") |
 | **Ready** | All methods | — |
 
-- `initialize` → respond with capabilities, transition to **initializing**. Duplicate → `-32600`.
+- `initialize` → respond with capabilities, transition to **initializing**. Duplicate → `-32000`.
 - `notifications/initialized` in **initializing** → transition to **ready**. Other states → silently ignore.
 - `ping` always works. Unknown notifications are silently ignored — never respond, never log.
 
@@ -88,10 +87,12 @@ Three states: **uninitialized** → **initializing** → **ready**.
 | Code | Meaning |
 |---|---|
 | `-32700` | Parse error — malformed JSON, size limit exceeded |
-| `-32600` | Invalid request — bad structure, not initialized, already initialized, `params` not an object |
+| `-32600` | Invalid request — bad structure, `params` not an object, wrong jsonrpc version |
 | `-32601` | Method not found — unknown method, `rpc.*` reserved methods |
 | `-32602` | Invalid params — wrong types, missing required fields, unknown tool name |
 | `-32603` | Internal error — should not happen in normal operation |
+| `-32000` | Server error — state prevents processing (not initialized, already initialized, server busy) |
+| `-32001` | Server timeout — tool handler timed out or was cancelled |
 
 ### JSON Package
 
@@ -116,7 +117,7 @@ Follow the simplest existing tool in `internal/tools/` as the template. Define a
 - **Naming**: `Test_<Unit>_With_<Condition>_Should_<Outcome>`
 - **Structure**: `// Arrange` / `// Act` / `// Assert`. Every test calls `t.Parallel()`.
 - **Package**: Black-box (`package foo_test`) by default. White-box only for unexported internals.
-- **Assertions**: `assert.That(t, "description", got, expected)` from `internal/pkg/assert`.
+- **Assertions**: `assert.That(t, "description", got, expected)` from `internal/assert`.
 - **I/O**: Inject `bytes.Buffer`. Write JSON-RPC requests + EOF, run server, read responses from output buffer.
 - **Golden tests**: Byte-for-byte JSON comparison for protocol correctness.
 - **Fuzz**: `Fuzz_<Unit>_<Aspect>` targets for the decoder/parser.

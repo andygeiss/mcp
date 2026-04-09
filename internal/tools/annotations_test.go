@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/andygeiss/mcp/internal/pkg/assert"
+	"github.com/andygeiss/mcp/internal/assert"
 	"github.com/andygeiss/mcp/internal/tools"
 )
 
@@ -17,9 +17,11 @@ func Test_WithAnnotations_With_ReadOnlyHint_Should_SetAnnotation(t *testing.T) {
 	r := tools.NewRegistry()
 
 	// Act
-	tools.Register(r, "annotated", "test", func(_ context.Context, _ struct{}) tools.Result {
+	if err := tools.Register(r, "annotated", "test", func(_ context.Context, _ struct{}) tools.Result {
 		return tools.TextResult("ok")
-	}, tools.WithAnnotations(tools.Annotations{ReadOnlyHint: true}))
+	}, tools.WithAnnotations(tools.Annotations{ReadOnlyHint: true})); err != nil {
+		t.Fatal(err)
+	}
 
 	// Assert
 	tool, ok := r.Lookup("annotated")
@@ -37,9 +39,11 @@ func Test_Register_With_NoOptions_Should_HaveNilAnnotations(t *testing.T) {
 	r := tools.NewRegistry()
 
 	// Act
-	tools.Register(r, "plain", "test", func(_ context.Context, _ struct{}) tools.Result {
+	if err := tools.Register(r, "plain", "test", func(_ context.Context, _ struct{}) tools.Result {
 		return tools.TextResult("ok")
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	// Assert
 	tool, ok := r.Lookup("plain")

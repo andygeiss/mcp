@@ -17,7 +17,7 @@ check: build test lint
 
 ## Generate test coverage report and enforce threshold
 coverage:
-	go test -race -coverprofile=coverage.out ./internal/...
+	go test -race -coverprofile=coverage.out ./...
 	go tool cover -func=coverage.out
 	@total=$$(go tool cover -func=coverage.out | grep '^total:' | awk '{print $$NF}' | tr -d '%'); \
 	threshold=75; \

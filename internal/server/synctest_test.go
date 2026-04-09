@@ -25,7 +25,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/andygeiss/mcp/internal/pkg/assert"
+	"github.com/andygeiss/mcp/internal/assert"
 	"github.com/andygeiss/mcp/internal/protocol"
 	"github.com/andygeiss/mcp/internal/server"
 	"github.com/andygeiss/mcp/internal/tools"
@@ -41,10 +41,12 @@ func Test_Server_With_SynctestHandlerTimeout_Should_TimeoutDeterministically(t *
 	synctest.Test(t, func(t *testing.T) {
 		// Arrange — handler blocks until its timeout context fires
 		r := tools.NewRegistry()
-		tools.Register(r, "blocker", "blocks until timed out", func(ctx context.Context, _ testInput) tools.Result {
+		if err := tools.Register(r, "blocker", "blocks until timed out", func(ctx context.Context, _ testInput) tools.Result {
 			<-ctx.Done()
 			return tools.ErrorResult("handler context expired")
-		})
+		}); err != nil {
+			t.Fatal(err)
+		}
 
 		input := handshake() +
 			`{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"blocker","arguments":{"message":"x"}}}` + "\n"
@@ -72,7 +74,7 @@ func Test_Server_With_SynctestHandlerTimeout_Should_TimeoutDeterministically(t *
 		assert.That(t, "response count", len(responses), 2) // init + tool call
 
 		// Timeout now returns protocol-level error with timing diagnostics
-		assert.That(t, "error code", responses[1].Error.Code, protocol.InternalError)
+		assert.That(t, "error code", responses[1].Error.Code, protocol.ServerTimeout)
 		if !strings.Contains(responses[1].Error.Message, "blocker") {
 			t.Errorf("expected tool name in error message, got: %s", responses[1].Error.Message)
 		}
@@ -91,10 +93,12 @@ func Test_Server_With_SynctestContextCancellation_Should_ShutdownCleanly(t *test
 		ctx, cancel := context.WithCancel(t.Context())
 
 		r := tools.NewRegistry()
-		tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) tools.Result {
+		if err := tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) tools.Result {
 			<-ctx.Done()
 			return tools.ErrorResult("cancelled")
-		})
+		}); err != nil {
+			t.Fatal(err)
+		}
 
 		go func() {
 			time.Sleep(1 * time.Second)
@@ -121,10 +125,12 @@ func Test_Server_With_ConcurrentRequest_Should_RejectWithServerBusy(t *testing.T
 	synctest.Test(t, func(t *testing.T) {
 		// Arrange
 		r := tools.NewRegistry()
-		tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) tools.Result {
+		if err := tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) tools.Result {
 			<-ctx.Done()
 			return tools.ErrorResult("cancelled")
-		})
+		}); err != nil {
+			t.Fatal(err)
+		}
 
 		input := handshake() +
 			`{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"blocker","arguments":{"message":"first"}}}` + "\n" +
@@ -155,7 +161,7 @@ func Test_Server_With_ConcurrentRequest_Should_RejectWithServerBusy(t *testing.T
 		for _, resp := range responses {
 			if string(resp.ID) == "3" {
 				found = true
-				assert.That(t, "error code", resp.Error.Code, protocol.InvalidRequest)
+				assert.That(t, "error code", resp.Error.Code, protocol.ServerError)
 				if !strings.Contains(resp.Error.Message, "server busy") {
 					t.Errorf("expected 'server busy' in message, got: %s", resp.Error.Message)
 				}
