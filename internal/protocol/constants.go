@@ -15,7 +15,8 @@ const (
 	ServerTimeout = -32001 // tool handler timed out or was cancelled
 )
 
-// MaxConcurrentRequests advertises the server's sequential dispatch limit.
+// MaxConcurrentRequests is a protocol-level constraint advertising sequential
+// dispatch to clients. Not configurable — the server processes one request at a time.
 const MaxConcurrentRequests = 1
 
 // MCP method constants.
