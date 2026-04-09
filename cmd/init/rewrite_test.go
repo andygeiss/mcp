@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/andygeiss/mcp/internal/pkg/assert"
+	"github.com/andygeiss/mcp/internal/assert"
 )
 
 func Test_DeriveProjectName_With_ModulePath_Should_ReturnLastSegment(t *testing.T) {

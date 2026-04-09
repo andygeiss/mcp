@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -31,7 +32,9 @@ func run() error {
 	registry := tools.NewRegistry()
 	// Register tools here. The echo tool is a minimal reference (~5 lines).
 	// Replace or extend with your own. See internal/tools/echo.go for the pattern.
-	tools.Register(registry, "echo", "Echoes the input message", tools.Echo)
+	if err := tools.Register(registry, "echo", "Echoes the input message", tools.Echo); err != nil {
+		return fmt.Errorf("register echo: %w", err)
+	}
 
 	srv := server.NewServer("mcp", version, registry, os.Stdin, os.Stdout, os.Stderr,
 		server.WithTrace(os.Getenv("MCP_TRACE") == "1"),

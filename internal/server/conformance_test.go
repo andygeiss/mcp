@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/andygeiss/mcp/internal/pkg/assert"
+	"github.com/andygeiss/mcp/internal/assert"
 	"github.com/andygeiss/mcp/internal/protocol"
 	"github.com/andygeiss/mcp/internal/server"
 	"github.com/andygeiss/mcp/internal/tools"
@@ -63,9 +63,11 @@ func runConformanceTest(t *testing.T, reqFile string) {
 
 	// Create server with a test tool
 	r := tools.NewRegistry()
-	tools.Register(r, "test", "test tool", func(_ context.Context, input testInput) tools.Result {
+	if err := tools.Register(r, "test", "test tool", func(_ context.Context, input testInput) tools.Result {
 		return tools.TextResult(input.Message)
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	var stdout, stderr bytes.Buffer
 	srv := server.NewServer("mcp", "test", r, bytes.NewReader(reqData), &stdout, &stderr)

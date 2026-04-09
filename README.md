@@ -73,7 +73,9 @@ func Greet(_ context.Context, input GreetInput) Result {
 
 ```go
 // cmd/mcp/main.go
-tools.Register(registry, "greet", "Greets someone by name", tools.Greet)
+if err := tools.Register(registry, "greet", "Greets someone by name", tools.Greet); err != nil {
+    return fmt.Errorf("register greet: %w", err)
+}
 ```
 
 The input schema (`{"type":"object","properties":{"name":{"type":"string","description":"Name to greet"}},"required":["name"]}`) is derived automatically from struct tags. No manual schema definition needed.
@@ -87,7 +89,7 @@ internal/
   protocol/        JSON-RPC 2.0 codec, types, constants
   server/          lifecycle, dispatch, capability negotiation
   tools/           registry, schema derivation, tool handlers
-  pkg/assert/      test assertion helpers
+  assert/          test assertion helpers
 ```
 
 **Dependency direction:** `cmd/mcp/ -> server/ -> protocol/`, `server/ -> tools/`. Protocol has zero internal dependencies. Tools may import protocol but never server.
@@ -128,7 +130,7 @@ Full project documentation lives in [`docs/`](docs/index.md):
 
 - [Project Overview](docs/project-overview.md)
 - [Architecture](docs/architecture.md)
-- [API Contracts](docs/api-contracts.md)
+- [Source Tree Analysis](docs/source-tree-analysis.md)
 - [Development Guide](docs/development-guide.md)
 - [Deployment Guide](docs/deployment-guide.md)
 

@@ -43,12 +43,14 @@ func Fuzz_Server_Pipeline(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, input string) {
 		r := tools.NewRegistry()
-		tools.Register(r, "echo", "echo tool", func(_ context.Context, in struct {
+		if err := tools.Register(r, "echo", "echo tool", func(_ context.Context, in struct {
 			Text string `json:"text" description:"text to echo"`
 		},
 		) tools.Result {
 			return tools.TextResult(in.Text)
-		})
+		}); err != nil {
+			t.Fatal(err)
+		}
 
 		var stdout, stderr bytes.Buffer
 		srv := server.NewServer("fuzz", "test", r, strings.NewReader(input), &stdout, &stderr)

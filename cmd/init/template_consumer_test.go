@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/andygeiss/mcp/internal/pkg/assert"
+	"github.com/andygeiss/mcp/internal/assert"
 )
 
 func Test_Integration_With_TemplateConsumer_Should_PassAllQualityGates(t *testing.T) {
@@ -67,12 +67,14 @@ func Test_Integration_With_TemplateConsumer_Should_PassAllQualityGates(t *testin
 	mainData, err := os.ReadFile(filepath.Clean(mainGoPath))
 	assert.That(t, "read main.go", err, nil)
 
-	echoLine := []byte(`tools.Register(registry, "echo", "Echoes the input message", tools.Echo)`)
-	greetReg := []byte("\n\ttools.Register(registry, \"greet\", \"Greets a person by name\", tools.Greet)")
-	echoAndGreet := make([]byte, 0, len(echoLine)+len(greetReg))
-	echoAndGreet = append(echoAndGreet, echoLine...)
+	echoBlock := []byte(`if err := tools.Register(registry, "echo", "Echoes the input message", tools.Echo); err != nil {
+		return fmt.Errorf("register echo: %w", err)
+	}`)
+	greetReg := []byte("\n\tif err := tools.Register(registry, \"greet\", \"Greets a person by name\", tools.Greet); err != nil {\n\t\treturn fmt.Errorf(\"register greet: %w\", err)\n\t}")
+	echoAndGreet := make([]byte, 0, len(echoBlock)+len(greetReg))
+	echoAndGreet = append(echoAndGreet, echoBlock...)
 	echoAndGreet = append(echoAndGreet, greetReg...)
-	mainData = bytes.Replace(mainData, echoLine, echoAndGreet, 1)
+	mainData = bytes.Replace(mainData, echoBlock, echoAndGreet, 1)
 	err = os.WriteFile(mainGoPath, mainData, 0o600) //nolint:gosec // test-only: writing to t.TempDir()
 	assert.That(t, "write main.go", err, nil)
 

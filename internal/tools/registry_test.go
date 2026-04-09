@@ -2,9 +2,11 @@ package tools_test
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
-	"github.com/andygeiss/mcp/internal/pkg/assert"
+	"github.com/andygeiss/mcp/internal/assert"
 	"github.com/andygeiss/mcp/internal/tools"
 )
 
@@ -12,26 +14,29 @@ type stubInput struct {
 	Message string `json:"message" description:"test message"`
 }
 
-func Test_Register_With_DuplicateName_Should_Panic(t *testing.T) {
+func Test_Register_With_DuplicateName_Should_ReturnError(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
 	r := tools.NewRegistry()
-	tools.Register(r, "dup", "desc", func(_ context.Context, _ stubInput) tools.Result {
+	if err := tools.Register(r, "dup", "desc", func(_ context.Context, _ stubInput) tools.Result {
 		return tools.TextResult("ok")
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
-	// Act / Assert
-	defer func() {
-		rec := recover()
-		if rec == nil {
-			t.Fatal("expected panic for duplicate tool name")
-		}
-		assert.That(t, "panic message", rec, "duplicate tool name: dup")
-	}()
-	tools.Register(r, "dup", "dup", func(_ context.Context, _ stubInput) tools.Result {
+	// Act
+	err := tools.Register(r, "dup", "dup", func(_ context.Context, _ stubInput) tools.Result {
 		return tools.TextResult("dup")
 	})
+
+	// Assert
+	if err == nil {
+		t.Fatal("expected error for duplicate tool name")
+	}
+	if !strings.Contains(err.Error(), "duplicate tool name: dup") {
+		t.Errorf("error should mention duplicate, got: %s", err.Error())
+	}
 }
 
 func Test_Tools_With_MultipleTools_Should_ReturnAlphabetically(t *testing.T) {
@@ -39,12 +44,16 @@ func Test_Tools_With_MultipleTools_Should_ReturnAlphabetically(t *testing.T) {
 
 	// Arrange
 	r := tools.NewRegistry()
-	tools.Register(r, "zeta", "z desc", func(_ context.Context, _ stubInput) tools.Result {
+	if err := tools.Register(r, "zeta", "z desc", func(_ context.Context, _ stubInput) tools.Result {
 		return tools.TextResult("z")
-	})
-	tools.Register(r, "alpha", "a desc", func(_ context.Context, _ stubInput) tools.Result {
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tools.Register(r, "alpha", "a desc", func(_ context.Context, _ stubInput) tools.Result {
 		return tools.TextResult("a")
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	// Act
 	result := r.Tools()
@@ -60,9 +69,11 @@ func Test_Lookup_With_ExistingTool_Should_ReturnTool(t *testing.T) {
 
 	// Arrange
 	r := tools.NewRegistry()
-	tools.Register(r, "stub", "stub tool", func(_ context.Context, input stubInput) tools.Result {
+	if err := tools.Register(r, "stub", "stub tool", func(_ context.Context, input stubInput) tools.Result {
 		return tools.TextResult(input.Message)
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	// Act
 	tool, ok := r.Lookup("stub")
@@ -90,12 +101,16 @@ func Test_Names_With_MultipleTools_Should_ReturnAlphabetical(t *testing.T) {
 
 	// Arrange
 	r := tools.NewRegistry()
-	tools.Register(r, "beta", "b desc", func(_ context.Context, _ stubInput) tools.Result {
+	if err := tools.Register(r, "beta", "b desc", func(_ context.Context, _ stubInput) tools.Result {
 		return tools.TextResult("b")
-	})
-	tools.Register(r, "alpha", "a desc", func(_ context.Context, _ stubInput) tools.Result {
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tools.Register(r, "alpha", "a desc", func(_ context.Context, _ stubInput) tools.Result {
 		return tools.TextResult("a")
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	// Act
 	names := r.Names()
@@ -133,6 +148,77 @@ func Test_TextResult_Should_SetContentType(t *testing.T) {
 	assert.That(t, "type", result.Content[0].Type, "text")
 	assert.That(t, "text", result.Content[0].Text, "hello")
 	assert.That(t, "isError", result.IsError, false)
+}
+
+func Test_Handler_With_MissingRequiredField_Should_ReturnError(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := tools.NewRegistry()
+	if err := tools.Register(r, "greet", "greets", func(_ context.Context, input stubInput) tools.Result {
+		return tools.TextResult("hello " + input.Message)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	tool, _ := r.Lookup("greet")
+
+	// Act — "message" is required (no omitempty) but missing from params
+	_, err := tool.Handler(context.Background(), json.RawMessage(`{}`))
+
+	// Assert
+	if err == nil {
+		t.Fatal("expected error for missing required field")
+	}
+	if !strings.Contains(err.Error(), "missing required field") {
+		t.Errorf("error should mention missing required field, got: %s", err.Error())
+	}
+}
+
+func Test_Handler_With_AllRequiredFields_Should_Succeed(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := tools.NewRegistry()
+	if err := tools.Register(r, "greet", "greets", func(_ context.Context, input stubInput) tools.Result {
+		return tools.TextResult("hello " + input.Message)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	tool, _ := r.Lookup("greet")
+
+	// Act
+	result, err := tool.Handler(context.Background(), json.RawMessage(`{"message":"world"}`))
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "text", result.Content[0].Text, "hello world")
+}
+
+type optionalInput struct {
+	Name string `json:"name,omitempty" description:"optional name"`
+}
+
+func Test_Handler_With_MissingOptionalField_Should_Succeed(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := tools.NewRegistry()
+	if err := tools.Register(r, "opt", "optional", func(_ context.Context, input optionalInput) tools.Result {
+		if input.Name == "" {
+			return tools.TextResult("anonymous")
+		}
+		return tools.TextResult(input.Name)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	tool, _ := r.Lookup("opt")
+
+	// Act — "name" is optional (has omitempty), so {} should succeed
+	result, err := tool.Handler(context.Background(), json.RawMessage(`{}`))
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "text", result.Content[0].Text, "anonymous")
 }
 
 func Test_ErrorResult_Should_SetIsError(t *testing.T) {

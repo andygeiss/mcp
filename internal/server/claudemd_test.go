@@ -25,13 +25,13 @@ func Test_ClaudeMD_Claims_Should_HaveMatchingTests(t *testing.T) {
 		testPattern string // regex to match in test file content
 	}{
 		{
-			"uninitialized requests return -32600",
-			`(?i)uninitial.*-32600`,
-			`(?i)uninitiali.*32600`,
+			"uninitialized requests return -32000",
+			`(?i)uninitial.*-32000`,
+			`(?i)uninitiali.*ServerError`,
 		},
 		{
-			"duplicate initialize returns -32600",
-			`(?i)duplicate.*-32600`,
+			"duplicate initialize returns -32000",
+			`(?i)duplicate.*-32000`,
 			`(?i)duplicate.*init`,
 		},
 		{
@@ -114,6 +114,8 @@ func Test_ClaudeMD_ErrorCodeConstants_Should_HaveTestCoverage(t *testing.T) {
 		"InvalidRequest",
 		"MethodNotFound",
 		"ParseError",
+		"ServerError",
+		"ServerTimeout",
 	}
 
 	for _, name := range constants {

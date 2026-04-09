@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/andygeiss/mcp/internal/pkg/assert"
+	"github.com/andygeiss/mcp/internal/assert"
 	"github.com/andygeiss/mcp/internal/tools"
 )
 
@@ -18,9 +18,11 @@ func Test_DeriveSchema_With_SingleField_Should_ProduceCorrectSchema(t *testing.T
 
 	// Arrange
 	r := tools.NewRegistry()
-	tools.Register(r, "stub", "stub tool", func(_ context.Context, input singleFieldInput) tools.Result {
+	if err := tools.Register(r, "stub", "stub tool", func(_ context.Context, input singleFieldInput) tools.Result {
 		return tools.TextResult(input.Message)
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	// Act
 	tool, ok := r.Lookup("stub")
@@ -48,9 +50,11 @@ func Test_DeriveSchema_With_MultipleFields_Should_DeriveAllTypes(t *testing.T) {
 
 	// Arrange
 	r := tools.NewRegistry()
-	tools.Register(r, "multi", "multi-field tool", func(_ context.Context, _ multiFieldInput) tools.Result {
+	if err := tools.Register(r, "multi", "multi-field tool", func(_ context.Context, _ multiFieldInput) tools.Result {
 		return tools.TextResult("ok")
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	// Act
 	tool, ok := r.Lookup("multi")
@@ -81,9 +85,11 @@ func Test_DeriveSchema_With_SliceField_Should_ProduceArrayType(t *testing.T) {
 
 	// Arrange
 	r := tools.NewRegistry()
-	tools.Register(r, "tagger", "tags tool", func(_ context.Context, _ sliceFieldInput) tools.Result {
+	if err := tools.Register(r, "tagger", "tags tool", func(_ context.Context, _ sliceFieldInput) tools.Result {
 		return tools.TextResult("ok")
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	// Act
 	tool, _ := r.Lookup("tagger")
@@ -106,9 +112,11 @@ func Test_DeriveSchema_With_MapField_Should_ProduceObjectType(t *testing.T) {
 
 	// Arrange
 	r := tools.NewRegistry()
-	tools.Register(r, "mapper", "map tool", func(_ context.Context, _ mapFieldInput) tools.Result {
+	if err := tools.Register(r, "mapper", "map tool", func(_ context.Context, _ mapFieldInput) tools.Result {
 		return tools.TextResult("ok")
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	// Act
 	tool, _ := r.Lookup("mapper")
@@ -136,9 +144,11 @@ func Test_DeriveSchema_With_NestedStruct_Should_ProduceNestedObject(t *testing.T
 
 	// Arrange
 	r := tools.NewRegistry()
-	tools.Register(r, "nested", "nested tool", func(_ context.Context, _ nestedStructInput) tools.Result {
+	if err := tools.Register(r, "nested", "nested tool", func(_ context.Context, _ nestedStructInput) tools.Result {
 		return tools.TextResult("ok")
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	// Act
 	tool, _ := r.Lookup("nested")
@@ -159,32 +169,27 @@ type unsupportedInput struct {
 	Ch chan int `json:"ch"`
 }
 
-func Test_DeriveSchema_With_UnsupportedType_Should_Panic(t *testing.T) {
+func Test_DeriveSchema_With_UnsupportedType_Should_ReturnError(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
 	r := tools.NewRegistry()
 
-	// Act / Assert
-	defer func() {
-		rec := recover()
-		if rec == nil {
-			t.Fatal("expected panic for unsupported type")
-		}
-		msg, ok := rec.(string)
-		if !ok {
-			t.Fatalf("expected string panic, got %T", rec)
-		}
-		if !strings.Contains(msg, "Ch") {
-			t.Errorf("panic message should contain field name \"Ch\", got: %s", msg)
-		}
-		if !strings.Contains(msg, "chan") {
-			t.Errorf("panic message should contain type \"chan\", got: %s", msg)
-		}
-	}()
-	tools.Register(r, "bad", "bad tool", func(_ context.Context, _ unsupportedInput) tools.Result {
+	// Act
+	err := tools.Register(r, "bad", "bad tool", func(_ context.Context, _ unsupportedInput) tools.Result {
 		return tools.TextResult("ok")
 	})
+
+	// Assert
+	if err == nil {
+		t.Fatal("expected error for unsupported type")
+	}
+	if !strings.Contains(err.Error(), "Ch") {
+		t.Errorf("error message should contain field name \"Ch\", got: %s", err.Error())
+	}
+	if !strings.Contains(err.Error(), "chan") {
+		t.Errorf("error message should contain type \"chan\", got: %s", err.Error())
+	}
 }
 
 type pointerFieldInput struct {
@@ -196,9 +201,11 @@ func Test_DeriveSchema_With_PointerField_Should_UnwrapToUnderlyingType(t *testin
 
 	// Arrange
 	r := tools.NewRegistry()
-	tools.Register(r, "ptr", "pointer tool", func(_ context.Context, _ pointerFieldInput) tools.Result {
+	if err := tools.Register(r, "ptr", "pointer tool", func(_ context.Context, _ pointerFieldInput) tools.Result {
 		return tools.TextResult("ok")
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	// Act
 	tool, _ := r.Lookup("ptr")
@@ -218,9 +225,11 @@ func Test_DeriveSchema_With_NestedSlice_Should_ProduceNestedArraySchema(t *testi
 
 	// Arrange
 	r := tools.NewRegistry()
-	tools.Register(r, "matrix", "nested slice", func(_ context.Context, _ nestedSliceInput) tools.Result {
+	if err := tools.Register(r, "matrix", "nested slice", func(_ context.Context, _ nestedSliceInput) tools.Result {
 		return tools.TextResult("ok")
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	// Act
 	tool, _ := r.Lookup("matrix")
@@ -248,9 +257,11 @@ func Test_DeriveSchema_With_DashTag_Should_ExcludeField(t *testing.T) {
 
 	// Arrange
 	r := tools.NewRegistry()
-	tools.Register(r, "dash", "dash tag", func(_ context.Context, _ dashTagInput) tools.Result {
+	if err := tools.Register(r, "dash", "dash tag", func(_ context.Context, _ dashTagInput) tools.Result {
 		return tools.TextResult("ok")
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	// Act
 	tool, _ := r.Lookup("dash")
@@ -273,9 +284,11 @@ func Test_DeriveSchema_With_BareCommaTag_Should_ExcludeField(t *testing.T) {
 
 	// Arrange — field with tag ",omitempty" has empty name, which causes skip
 	r := tools.NewRegistry()
-	tools.Register(r, "comma", "bare comma", func(_ context.Context, _ bareCommaTagInput) tools.Result {
+	if err := tools.Register(r, "comma", "bare comma", func(_ context.Context, _ bareCommaTagInput) tools.Result {
 		return tools.TextResult("ok")
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	// Act
 	tool, _ := r.Lookup("comma")
@@ -326,29 +339,24 @@ type excessiveDepthInput struct {
 	Root depth1 `json:"root"`
 }
 
-func Test_DeriveSchema_With_ExcessiveDepth_Should_Panic(t *testing.T) {
+func Test_DeriveSchema_With_ExcessiveDepth_Should_ReturnError(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
 	r := tools.NewRegistry()
 
-	// Act / Assert
-	defer func() {
-		rec := recover()
-		if rec == nil {
-			t.Fatal("expected panic for excessive depth")
-		}
-		msg, ok := rec.(string)
-		if !ok {
-			t.Fatalf("expected string panic, got %T", rec)
-		}
-		if !strings.Contains(msg, "exceeded max depth") {
-			t.Errorf("panic message should contain \"exceeded max depth\", got: %s", msg)
-		}
-	}()
-	tools.Register(r, "deep", "deep tool", func(_ context.Context, _ excessiveDepthInput) tools.Result {
+	// Act
+	err := tools.Register(r, "deep", "deep tool", func(_ context.Context, _ excessiveDepthInput) tools.Result {
 		return tools.TextResult("ok")
 	})
+
+	// Assert
+	if err == nil {
+		t.Fatal("expected error for excessive depth")
+	}
+	if !strings.Contains(err.Error(), "exceeded max depth") {
+		t.Errorf("error message should contain \"exceeded max depth\", got: %s", err.Error())
+	}
 }
 
 type selfRef struct {
@@ -359,29 +367,24 @@ type selfRefInput struct {
 	Root selfRef `json:"root"`
 }
 
-func Test_DeriveSchema_With_SelfReferentialType_Should_Panic(t *testing.T) {
+func Test_DeriveSchema_With_SelfReferentialType_Should_ReturnError(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
 	r := tools.NewRegistry()
 
-	// Act / Assert
-	defer func() {
-		rec := recover()
-		if rec == nil {
-			t.Fatal("expected panic for self-referential type")
-		}
-		msg, ok := rec.(string)
-		if !ok {
-			t.Fatalf("expected string panic, got %T", rec)
-		}
-		if !strings.Contains(msg, "exceeded max depth") {
-			t.Errorf("panic message should contain \"exceeded max depth\", got: %s", msg)
-		}
-	}()
-	tools.Register(r, "selfref", "self-ref tool", func(_ context.Context, _ selfRefInput) tools.Result {
+	// Act
+	err := tools.Register(r, "selfref", "self-ref tool", func(_ context.Context, _ selfRefInput) tools.Result {
 		return tools.TextResult("ok")
 	})
+
+	// Assert
+	if err == nil {
+		t.Fatal("expected error for self-referential type")
+	}
+	if !strings.Contains(err.Error(), "exceeded max depth") {
+		t.Errorf("error message should contain \"exceeded max depth\", got: %s", err.Error())
+	}
 }
 
 // Exact depth limit types (10 levels: exact1 -> exact2 -> ... -> exact10 with a string leaf)
@@ -427,10 +430,12 @@ func Test_DeriveSchema_With_ExactDepthLimit_Should_Succeed(t *testing.T) {
 	// Arrange
 	r := tools.NewRegistry()
 
-	// Act — should not panic
-	tools.Register(r, "exact", "exact depth tool", func(_ context.Context, _ exactDepthInput) tools.Result {
+	// Act — should not error
+	if err := tools.Register(r, "exact", "exact depth tool", func(_ context.Context, _ exactDepthInput) tools.Result {
 		return tools.TextResult("ok")
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	// Assert
 	tool, ok := r.Lookup("exact")
@@ -446,29 +451,24 @@ type mixedDepthInput struct {
 	Data []map[string][]map[string][]map[string][]map[string][]map[string]mixedLeaf `json:"data"`
 }
 
-func Test_DeriveSchema_With_MixedNestingExceedingDepth_Should_Panic(t *testing.T) {
+func Test_DeriveSchema_With_MixedNestingExceedingDepth_Should_ReturnError(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
 	r := tools.NewRegistry()
 
-	// Act / Assert
-	defer func() {
-		rec := recover()
-		if rec == nil {
-			t.Fatal("expected panic for mixed nesting exceeding depth")
-		}
-		msg, ok := rec.(string)
-		if !ok {
-			t.Fatalf("expected string panic, got %T", rec)
-		}
-		if !strings.Contains(msg, "exceeded max depth") {
-			t.Errorf("panic message should contain \"exceeded max depth\", got: %s", msg)
-		}
-	}()
-	tools.Register(r, "mixed", "mixed depth tool", func(_ context.Context, _ mixedDepthInput) tools.Result {
+	// Act
+	err := tools.Register(r, "mixed", "mixed depth tool", func(_ context.Context, _ mixedDepthInput) tools.Result {
 		return tools.TextResult("ok")
 	})
+
+	// Assert
+	if err == nil {
+		t.Fatal("expected error for mixed nesting exceeding depth")
+	}
+	if !strings.Contains(err.Error(), "exceeded max depth") {
+		t.Errorf("error message should contain \"exceeded max depth\", got: %s", err.Error())
+	}
 }
 
 // Embedding test types
@@ -488,9 +488,11 @@ func Test_DeriveSchema_With_EmbeddedStruct_Should_PromoteFields(t *testing.T) {
 
 	// Arrange
 	r := tools.NewRegistry()
-	tools.Register(r, "embed", "embed tool", func(_ context.Context, _ embeddedInput) tools.Result {
+	if err := tools.Register(r, "embed", "embed tool", func(_ context.Context, _ embeddedInput) tools.Result {
 		return tools.TextResult("ok")
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	// Act
 	tool, ok := r.Lookup("embed")
@@ -526,9 +528,11 @@ func Test_DeriveSchema_With_TaggedEmbeddedStruct_Should_NestFields(t *testing.T)
 
 	// Arrange
 	r := tools.NewRegistry()
-	tools.Register(r, "tagged-embed", "tagged embed tool", func(_ context.Context, _ taggedEmbeddedInput) tools.Result {
+	if err := tools.Register(r, "tagged-embed", "tagged embed tool", func(_ context.Context, _ taggedEmbeddedInput) tools.Result {
 		return tools.TextResult("ok")
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	// Act
 	tool, ok := r.Lookup("tagged-embed")
@@ -569,9 +573,11 @@ func Test_DeriveSchema_With_DeepEmbedding_Should_PromoteAllLevels(t *testing.T) 
 
 	// Arrange
 	r := tools.NewRegistry()
-	tools.Register(r, "deep-embed", "deep embed tool", func(_ context.Context, _ deepEmbeddedInput) tools.Result {
+	if err := tools.Register(r, "deep-embed", "deep embed tool", func(_ context.Context, _ deepEmbeddedInput) tools.Result {
 		return tools.TextResult("ok")
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	// Act
 	tool, ok := r.Lookup("deep-embed")
@@ -600,9 +606,11 @@ func Test_DeriveSchema_With_EmbeddedPointerStruct_Should_PromoteFields(t *testin
 
 	// Arrange
 	r := tools.NewRegistry()
-	tools.Register(r, "ptr-embed", "ptr embed tool", func(_ context.Context, _ ptrEmbeddedInput) tools.Result {
+	if err := tools.Register(r, "ptr-embed", "ptr embed tool", func(_ context.Context, _ ptrEmbeddedInput) tools.Result {
 		return tools.TextResult("ok")
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	// Act
 	tool, ok := r.Lookup("ptr-embed")
@@ -630,9 +638,11 @@ func Test_DeriveSchema_With_ShadowedField_Should_PreferParent(t *testing.T) {
 
 	// Arrange
 	r := tools.NewRegistry()
-	tools.Register(r, "shadow", "shadow tool", func(_ context.Context, _ shadowInput) tools.Result {
+	if err := tools.Register(r, "shadow", "shadow tool", func(_ context.Context, _ shadowInput) tools.Result {
 		return tools.TextResult("ok")
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	// Act
 	tool, ok := r.Lookup("shadow")
@@ -658,9 +668,11 @@ func Test_DeriveSchema_With_UnexportedEmbeddedStruct_Should_NotPromote(t *testin
 
 	// Arrange
 	r := tools.NewRegistry()
-	tools.Register(r, "unexported", "unexported tool", func(_ context.Context, _ unexportedEmbedInput) tools.Result {
+	if err := tools.Register(r, "unexported", "unexported tool", func(_ context.Context, _ unexportedEmbedInput) tools.Result {
 		return tools.TextResult("ok")
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	// Act
 	tool, ok := r.Lookup("unexported")
@@ -686,9 +698,11 @@ func Test_DeriveSchema_With_EmbeddedNonStructType_Should_NotPanic(t *testing.T) 
 
 	// Arrange
 	r := tools.NewRegistry()
-	tools.Register(r, "nonstruct", "nonstruct tool", func(_ context.Context, _ nonStructEmbedInput) tools.Result {
+	if err := tools.Register(r, "nonstruct", "nonstruct tool", func(_ context.Context, _ nonStructEmbedInput) tools.Result {
 		return tools.TextResult("ok")
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	// Act
 	tool, ok := r.Lookup("nonstruct")
@@ -699,34 +713,199 @@ func Test_DeriveSchema_With_EmbeddedNonStructType_Should_NotPanic(t *testing.T) 
 	assert.That(t, "label present", hasLabel, true)
 }
 
-type nonStringMapKeyInput struct {
-	Data map[int]string `json:"data"`
+type float64FieldInput struct {
+	Score float64 `json:"score" description:"A floating point score"`
 }
 
-func Test_DeriveSchema_With_NonStringMapKey_Should_Panic(t *testing.T) {
+func Test_DeriveSchema_With_Float64Field_Should_ProduceNumberType(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := tools.NewRegistry()
+	if err := tools.Register(r, "floater", "float tool", func(_ context.Context, _ float64FieldInput) tools.Result {
+		return tools.TextResult("ok")
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	tool, ok := r.Lookup("floater")
+
+	// Assert
+	assert.That(t, "found", ok, true)
+	scoreProp := tool.InputSchema.Properties["score"]
+	assert.That(t, "score type", scoreProp.Type, "number")
+	assert.That(t, "score description", scoreProp.Description, "A floating point score")
+	assert.That(t, "required", tool.InputSchema.Required, []string{"score"})
+}
+
+type uintFieldInput struct {
+	Count uint `json:"count" description:"An unsigned integer count"`
+}
+
+func Test_DeriveSchema_With_UintField_Should_ProduceIntegerType(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := tools.NewRegistry()
+	if err := tools.Register(r, "uinter", "uint tool", func(_ context.Context, _ uintFieldInput) tools.Result {
+		return tools.TextResult("ok")
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	tool, ok := r.Lookup("uinter")
+
+	// Assert
+	assert.That(t, "found", ok, true)
+	countProp := tool.InputSchema.Properties["count"]
+	assert.That(t, "count type", countProp.Type, "integer")
+	assert.That(t, "count description", countProp.Description, "An unsigned integer count")
+	assert.That(t, "required", tool.InputSchema.Required, []string{"count"})
+}
+
+type emptyStructInput struct{}
+
+func Test_DeriveSchema_With_EmptyStruct_Should_ProduceEmptyProperties(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := tools.NewRegistry()
+	if err := tools.Register(r, "empty", "empty tool", func(_ context.Context, _ emptyStructInput) tools.Result {
+		return tools.TextResult("ok")
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	tool, ok := r.Lookup("empty")
+
+	// Assert
+	assert.That(t, "found", ok, true)
+	assert.That(t, "schema type", tool.InputSchema.Type, "object")
+	assert.That(t, "properties count", len(tool.InputSchema.Properties), 0)
+	assert.That(t, "required count", len(tool.InputSchema.Required), 0)
+}
+
+type allOmitemptyInput struct {
+	Foo string `json:"foo,omitempty"`
+	Bar int    `json:"bar,omitempty"`
+}
+
+func Test_DeriveSchema_With_AllOmitemptyFields_Should_ProduceEmptyRequired(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := tools.NewRegistry()
+	if err := tools.Register(r, "allopt", "all optional tool", func(_ context.Context, _ allOmitemptyInput) tools.Result {
+		return tools.TextResult("ok")
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	tool, ok := r.Lookup("allopt")
+
+	// Assert
+	assert.That(t, "found", ok, true)
+	assert.That(t, "properties count", len(tool.InputSchema.Properties), 2)
+	assert.That(t, "required count", len(tool.InputSchema.Required), 0)
+	fooProp := tool.InputSchema.Properties["foo"]
+	assert.That(t, "foo type", fooProp.Type, "string")
+	barProp := tool.InputSchema.Properties["bar"]
+	assert.That(t, "bar type", barProp.Type, "integer")
+}
+
+// pointer-type T tests
+
+type pointerTypeInput struct {
+	Label string `json:"label" description:"A label"`
+}
+
+func Test_DeriveSchema_With_PointerTypeT_Should_UnwrapAndDeriveSchema(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
 	r := tools.NewRegistry()
 
-	// Act / Assert
-	defer func() {
-		rec := recover()
-		if rec == nil {
-			t.Fatal("expected panic for non-string map key")
+	// Act
+	err := tools.Register(r, "ptrtype", "pointer type T", func(_ context.Context, input *pointerTypeInput) tools.Result {
+		if input == nil {
+			return tools.TextResult("")
 		}
-		msg, ok := rec.(string)
-		if !ok {
-			t.Fatalf("expected string panic, got %T", rec)
-		}
-		if !strings.Contains(msg, "Data") {
-			t.Errorf("panic message should contain field name \"Data\", got: %s", msg)
-		}
-		if !strings.Contains(msg, "must be string") {
-			t.Errorf("panic message should contain \"must be string\", got: %s", msg)
-		}
-	}()
-	tools.Register(r, "badmap", "bad map", func(_ context.Context, _ nonStringMapKeyInput) tools.Result {
+		return tools.TextResult(input.Label)
+	})
+	// Assert
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	tool, ok := r.Lookup("ptrtype")
+	assert.That(t, "found", ok, true)
+	assert.That(t, "schema type", tool.InputSchema.Type, "object")
+	labelProp, exists := tool.InputSchema.Properties["label"]
+	assert.That(t, "label property exists", exists, true)
+	assert.That(t, "label type", labelProp.Type, "string")
+	assert.That(t, "label description", labelProp.Description, "A label")
+}
+
+// embedded struct with unsupported field — triggers collectFields error on promotion
+
+type EmbeddedUnsupported struct {
+	Bad chan int `json:"bad"`
+}
+
+type embeddedUnsupportedInput struct {
+	EmbeddedUnsupported
+	Good string `json:"good"`
+}
+
+func Test_DeriveSchema_With_EmbeddedStructContainingUnsupportedType_Should_ReturnError(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := tools.NewRegistry()
+
+	// Act
+	err := tools.Register(r, "embedbad", "embedded bad", func(_ context.Context, _ embeddedUnsupportedInput) tools.Result {
 		return tools.TextResult("ok")
 	})
+
+	// Assert
+	if err == nil {
+		t.Fatal("expected error for embedded struct containing unsupported type")
+	}
+	if !strings.Contains(err.Error(), "Bad") {
+		t.Errorf("error message should contain field name \"Bad\", got: %s", err.Error())
+	}
+	if !strings.Contains(err.Error(), "chan") {
+		t.Errorf("error message should contain type \"chan\", got: %s", err.Error())
+	}
+}
+
+type nonStringMapKeyInput struct {
+	Data map[int]string `json:"data"`
+}
+
+func Test_DeriveSchema_With_NonStringMapKey_Should_ReturnError(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := tools.NewRegistry()
+
+	// Act
+	err := tools.Register(r, "badmap", "bad map", func(_ context.Context, _ nonStringMapKeyInput) tools.Result {
+		return tools.TextResult("ok")
+	})
+
+	// Assert
+	if err == nil {
+		t.Fatal("expected error for non-string map key")
+	}
+	if !strings.Contains(err.Error(), "Data") {
+		t.Errorf("error message should contain field name \"Data\", got: %s", err.Error())
+	}
+	if !strings.Contains(err.Error(), "must be string") {
+		t.Errorf("error message should contain \"must be string\", got: %s", err.Error())
+	}
 }

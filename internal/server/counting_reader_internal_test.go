@@ -6,7 +6,7 @@ import (
 	"io"
 	"testing"
 
-	"github.com/andygeiss/mcp/internal/pkg/assert"
+	"github.com/andygeiss/mcp/internal/assert"
 )
 
 func Test_countingReader_With_ExactLimit_Should_Accept(t *testing.T) {

@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"runtime"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/andygeiss/mcp/internal/protocol"
@@ -40,7 +40,7 @@ type Server struct {
 	counting          *countingReader
 	dec               *json.Decoder
 	enc               *json.Encoder
-	errorCount        int
+	errorCount        atomic.Int64
 	handlerTimeout    time.Duration
 	inFlightCancelled bool
 	inFlightCh        chan inFlightResult
@@ -48,7 +48,7 @@ type Server struct {
 	logger            *slog.Logger
 	name              string
 	registry          *tools.Registry
-	requestCount      int
+	requestCount      atomic.Int64
 	safetyMargin      time.Duration
 	state             int
 	trace             bool
@@ -108,10 +108,12 @@ func WithSafetyMargin(d time.Duration) Option {
 // diagnostics are logged to stderr via slog.JSONHandler.
 func NewServer(name, version string, registry *tools.Registry, stdin io.Reader, stdout, stderr io.Writer, opts ...Option) *Server {
 	cr := newCountingReader(stdin, maxMessageSize)
+	enc := json.NewEncoder(stdout)
+	enc.SetEscapeHTML(false)
 	s := &Server{
 		counting:       cr,
 		dec:            json.NewDecoder(cr),
-		enc:            json.NewEncoder(stdout),
+		enc:            enc,
 		handlerTimeout: defaultHandlerTimeout,
 		safetyMargin:   defaultSafetyMargin,
 		logger:         slog.New(slog.NewJSONHandler(stderr, &slog.HandlerOptions{Level: slog.LevelInfo})),
@@ -248,9 +250,9 @@ func (s *Server) logShutdown(ctx context.Context, runErr error, startTime time.T
 		reason = "eof"
 	}
 	s.logger.Info("server_stopped",
-		"errors", s.errorCount,
+		"errors", s.errorCount.Load(),
 		"reason", reason,
-		"requests", s.requestCount,
+		"requests", s.requestCount.Load(),
 		"uptime_ms", time.Since(startTime).Milliseconds(),
 	)
 }
@@ -263,12 +265,13 @@ func (s *Server) handleDecodeResultDuringInFlight(ctx context.Context, dr decode
 		return s.handleDecodeErrorDuringInFlight(dr)
 	}
 
-	s.requestCount++
+	s.requestCount.Add(1)
 	if s.trace {
-		// Marshal cannot fail: protocol.Request contains only JSON-safe fields
-		// (string, json.RawMessage).
-		raw, _ := json.Marshal(dr.msg)
-		s.logger.Info("trace_request", "direction", "←", "message", string(raw))
+		if raw, err := json.Marshal(dr.msg); err != nil {
+			s.logger.Warn("trace_marshal_request", "error", err)
+		} else {
+			s.logger.Info("trace_request", "direction", "←", "message", string(raw))
+		}
 	}
 
 	// Check if handler completed concurrently with the decode.
@@ -304,10 +307,10 @@ func (s *Server) handleDecodeErrorDuringInFlight(dr decodeResult) error {
 		timer.Stop()
 		if !s.inFlightCancelled {
 			if ifr.isError {
-				s.errorCount++
+				s.errorCount.Add(1)
 			}
-			if encErr := s.encodeResponse(ifr.resp); encErr != nil && decodeRunErr == nil {
-				decodeRunErr = encErr
+			if encErr := s.encodeResponse(ifr.resp); encErr != nil {
+				decodeRunErr = errors.Join(decodeRunErr, encErr)
 			}
 		}
 	case <-timer.C:
@@ -328,12 +331,13 @@ func (s *Server) handleDecodeResultIdle(ctx context.Context, dr decodeResult) er
 		return s.handleDecodeError(decErr)
 	}
 
-	s.requestCount++
+	s.requestCount.Add(1)
 	if s.trace {
-		// Marshal cannot fail: protocol.Request contains only JSON-safe fields
-		// (string, json.RawMessage).
-		raw, _ := json.Marshal(dr.msg)
-		s.logger.Info("trace_request", "direction", "←", "message", string(raw))
+		if raw, err := json.Marshal(dr.msg); err != nil {
+			s.logger.Warn("trace_marshal_request", "error", err)
+		} else {
+			s.logger.Info("trace_request", "direction", "←", "message", string(raw))
+		}
 	}
 
 	// Intercept tools/call for async dispatch when ready.
@@ -359,10 +363,11 @@ func (s *Server) handleDecodeResultIdle(ctx context.Context, dr decodeResult) er
 // encodeResponse writes a JSON-RPC response to stdout with optional trace logging.
 func (s *Server) encodeResponse(resp protocol.Response) error {
 	if s.trace {
-		// Marshal cannot fail: protocol.Response contains only JSON-safe fields
-		// (string, int, json.RawMessage).
-		raw, _ := json.Marshal(resp)
-		s.logger.Info("trace_response", "direction", "→", "message", string(raw))
+		if raw, err := json.Marshal(resp); err != nil {
+			s.logger.Warn("trace_marshal_response", "error", err)
+		} else {
+			s.logger.Info("trace_response", "direction", "→", "message", string(raw))
+		}
 	}
 	if err := protocol.Encode(s.enc, resp); err != nil {
 		s.logger.Error("encode_error", "error", err)
@@ -398,7 +403,7 @@ func (s *Server) handleMessageDuringInFlight(msg protocol.Request) error {
 		return s.encodeResponse(resp)
 	}
 
-	return s.encodeResponse(s.errorResponse(msg.ID, protocol.ErrInvalidRequest("server busy: request in flight (maxInFlight is 1)")))
+	return s.encodeResponse(s.errorResponse(msg.ID, protocol.ErrServerError("server busy: request in flight (maxInFlight is 1)")))
 }
 
 // startToolCallAsync validates tool call params and, if valid, spawns the
@@ -407,7 +412,8 @@ func (s *Server) handleMessageDuringInFlight(msg protocol.Request) error {
 func (s *Server) startToolCallAsync(ctx context.Context, msg protocol.Request) (protocol.Response, bool) {
 	var params toolCallParams
 	if err := json.Unmarshal(msg.Params, &params); err != nil {
-		return s.errorResponse(msg.ID, protocol.ErrInvalidParams("invalid tools/call params: "+err.Error())), false
+		s.logger.Warn("invalid_tools_call_params", "error", err)
+		return s.errorResponse(msg.ID, protocol.ErrInvalidParams("invalid tools/call params")), false
 	}
 	if len(params.Arguments) == 0 || bytes.Equal(params.Arguments, []byte("null")) {
 		params.Arguments = json.RawMessage("{}")
@@ -442,7 +448,7 @@ func (s *Server) executeToolCall(ctx context.Context, id json.RawMessage, tool t
 	if toolErr != nil {
 		data, err := json.Marshal(toolErr.data)
 		if err != nil {
-			slog.Warn("marshal tool error data failed", "error", err)
+			s.logger.Warn("marshal_tool_error_data", "error", err)
 			data = nil
 		}
 		ce := &protocol.CodeError{Code: toolErr.code, Message: toolErr.message}
@@ -459,8 +465,11 @@ func (s *Server) executeToolCall(ctx context.Context, id json.RawMessage, tool t
 	if len(resultJSON) > maxResultSize {
 		s.logger.Warn("tool_result_truncated", "tool_name", params.Name, "size", len(resultJSON), "limit", maxResultSize)
 		result = tools.TextResult(fmt.Sprintf("[result truncated: exceeded maximum size of %d bytes]", maxResultSize))
-		// Marshal cannot fail: tools.TextResult contains only string fields.
-		resultJSON, _ = json.Marshal(result)
+		if resultJSON, err = json.Marshal(result); err != nil {
+			s.logger.Error("marshal_truncated_result", "error", err, "tool_name", params.Name)
+			ce := protocol.ErrInternalError("failed to marshal truncated result")
+			return protocol.NewErrorResponseFromCodeError(id, ce)
+		}
 	}
 
 	resp, err := protocol.NewResultResponse(id, json.RawMessage(resultJSON))
@@ -498,7 +507,7 @@ func (s *Server) processInFlightResult(ifr inFlightResult) error {
 		return nil
 	}
 	if ifr.isError {
-		s.errorCount++
+		s.errorCount.Add(1)
 	}
 	if err := s.encodeResponse(ifr.resp); err != nil {
 		s.clearInFlight()
@@ -527,7 +536,7 @@ func (s *Server) handleDecodeError(err error) error {
 		return nil
 	}
 
-	s.errorCount++
+	s.errorCount.Add(1)
 	msg := err.Error()
 	if isTooLarge {
 		msg = "message exceeds 4MB size limit"
@@ -569,28 +578,32 @@ func (s *Server) dispatch(msg protocol.Request) (protocol.Response, bool) {
 		return resp, true
 	}
 
-	// State machine enforcement.
+	return s.dispatchByState(msg), true
+}
+
+// dispatchByState enforces the initialization state machine for non-ping requests.
+func (s *Server) dispatchByState(msg protocol.Request) protocol.Response {
 	switch s.state {
 	case stateUninitialized:
 		if msg.Method != protocol.MethodInitialize {
-			return s.errorResponse(msg.ID, protocol.ErrInvalidRequest("server not initialized (send initialize first)")), true
+			return s.errorResponse(msg.ID, protocol.ErrServerError("server not initialized (send initialize first)"))
 		}
-		return s.handleInitialize(msg), true
+		return s.handleInitialize(msg)
 
 	case stateInitializing:
 		if msg.Method == protocol.MethodInitialize {
-			return s.errorResponse(msg.ID, protocol.ErrInvalidRequest("already initialized")), true
+			return s.errorResponse(msg.ID, protocol.ErrServerError("already initialized"))
 		}
-		return s.errorResponse(msg.ID, protocol.ErrInvalidRequest("server initializing, awaiting notifications/initialized")), true
+		return s.errorResponse(msg.ID, protocol.ErrServerError("server initializing, awaiting notifications/initialized"))
 
 	case stateReady:
 		if msg.Method == protocol.MethodInitialize {
-			return s.errorResponse(msg.ID, protocol.ErrInvalidRequest("already initialized")), true
+			return s.errorResponse(msg.ID, protocol.ErrServerError("already initialized"))
 		}
-		return s.handleMethod(msg), true
+		return s.handleMethod(msg)
 
 	default:
-		return s.errorResponse(msg.ID, protocol.ErrInternalError("unknown server state")), true
+		return s.errorResponse(msg.ID, protocol.ErrInternalError("unknown server state"))
 	}
 }
 
@@ -598,10 +611,11 @@ func (s *Server) dispatch(msg protocol.Request) (protocol.Response, bool) {
 // is a *protocol.CodeError, its code and message are used directly.
 // Otherwise, the error falls back to -32603 (internal error).
 func (s *Server) errorResponse(id json.RawMessage, err error) protocol.Response {
-	s.errorCount++
+	s.errorCount.Add(1)
 	pe, ok := errors.AsType[*protocol.CodeError](err)
 	if !ok {
-		return protocol.NewErrorResponse(id, protocol.InternalError, err.Error())
+		s.logger.Error("internal_error", "error", err)
+		return protocol.NewErrorResponse(id, protocol.InternalError, "internal error")
 	}
 	return protocol.NewErrorResponseFromCodeError(id, pe)
 }
@@ -648,8 +662,12 @@ type initializeResult struct {
 }
 
 type initializeCapabilities struct {
-	Experimental map[string]any `json:"experimental,omitempty"`
-	Tools        struct{}       `json:"tools"`
+	Experimental map[string]any  `json:"experimental,omitempty"`
+	Tools        toolsCapability `json:"tools"`
+}
+
+type toolsCapability struct {
+	ListChanged bool `json:"listChanged"`
 }
 
 type serverInfo struct {
@@ -714,8 +732,6 @@ func (s *Server) handleMethod(msg protocol.Request) protocol.Response {
 // handleUnsupportedCapability returns a -32601 response with guidance data
 // for methods in unsupported MCP namespaces (completion/, elicitation/, prompts/, resources/).
 func (s *Server) handleUnsupportedCapability(msg protocol.Request) protocol.Response {
-	// Marshal cannot fail: capabilityGuidance contains only JSON-safe fields
-	// (string, []string).
 	data, _ := json.Marshal(&capabilityGuidance{
 		Hint:                  "this server supports tools only; use tools/list and tools/call",
 		SupportedCapabilities: []string{"tools"},
@@ -748,10 +764,10 @@ type toolCallParams struct {
 }
 
 // panicDiag is the machine-readable diagnostic attached to Error.Data when a
-// tool handler panics. Stack traces are deliberately excluded (security).
+// tool handler panics. The actual panic value is logged to stderr only —
+// never sent to the client (security).
 type panicDiag struct {
-	PanicValue string `json:"panicValue"`
-	ToolName   string `json:"toolName"`
+	ToolName string `json:"toolName"`
 }
 
 // timingDiag is the machine-readable diagnostic attached to Error.Data for
@@ -762,6 +778,12 @@ type timingDiag struct {
 	ToolName  string `json:"toolName"`
 }
 
+// toolOutcome carries the result of an async tool handler goroutine.
+type toolOutcome struct {
+	err    *toolError
+	result tools.Result
+}
+
 // toolError carries the error code, message, and structured data from dispatchToolCall.
 type toolError struct {
 	code    int
@@ -769,32 +791,17 @@ type toolError struct {
 	message string
 }
 
-// dispatchToolCall invokes a tool handler with panic recovery and timeout.
-// Returns the result and a *toolError if the handler panicked, timed out, or
-// was cancelled.
-//
-// Limitation: Go cannot kill goroutines. If a handler ignores ctx.Done()
-// and exceeds the handler timeout + safety margin, the goroutine is
-// abandoned. Handlers MUST respect context cancellation to guarantee
-// bounded goroutine lifetime. The server proceeds to the next request
-// regardless, but the abandoned goroutine may hold resources until it
-// returns naturally.
-func (s *Server) dispatchToolCall(ctx context.Context, tool tools.Tool, params json.RawMessage) (tools.Result, *toolError) {
-	type outcome struct {
-		err    *toolError
-		result tools.Result
-	}
-	start := time.Now()
-	ch := make(chan outcome, 1)
+// runToolHandler executes the tool handler in a goroutine with panic recovery
+// and timeout. Sends the outcome on the returned channel.
+func (s *Server) runToolHandler(ctx context.Context, tool tools.Tool, params json.RawMessage, start time.Time) chan toolOutcome {
+	ch := make(chan toolOutcome, 1)
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				buf := make([]byte, 4096)
-				n := runtime.Stack(buf, false)
-				s.logger.Error("tool_handler_panicked", "tool_name", tool.Name, "panic", r, "stack", string(buf[:n]))
-				ch <- outcome{err: &toolError{
+				s.logger.Error("tool_handler_panicked", "tool_name", tool.Name, "panic", r)
+				ch <- toolOutcome{err: &toolError{
 					code:    protocol.InternalError,
-					data:    &panicDiag{PanicValue: fmt.Sprint(r), ToolName: tool.Name},
+					data:    &panicDiag{ToolName: tool.Name},
 					message: fmt.Sprintf("internal error: tool %q panicked", tool.Name),
 				}}
 			}
@@ -805,57 +812,68 @@ func (s *Server) dispatchToolCall(ctx context.Context, tool tools.Tool, params j
 		if err != nil {
 			var pe *protocol.CodeError
 			if errors.As(err, &pe) {
-				ch <- outcome{err: &toolError{
-					code:    pe.Code,
-					data:    pe.Data,
-					message: pe.Message,
-				}}
+				ch <- toolOutcome{err: &toolError{code: pe.Code, data: pe.Data, message: pe.Message}}
 			} else {
-				ch <- outcome{err: &toolError{
+				s.logger.Error("tool_handler_error", "tool_name", tool.Name, "error", err)
+				ch <- toolOutcome{err: &toolError{
 					code:    protocol.InternalError,
-					message: err.Error(),
+					message: fmt.Sprintf("internal error: tool %q failed", tool.Name),
 				}}
 			}
 			return
 		}
 		if errors.Is(hctx.Err(), context.DeadlineExceeded) {
-			ch <- outcome{err: &toolError{
-				code: protocol.InternalError,
-				data: &timingDiag{
-					ElapsedMs: time.Since(start).Milliseconds(),
-					TimeoutMs: s.handlerTimeout.Milliseconds(),
-					ToolName:  tool.Name,
-				},
+			ch <- toolOutcome{err: &toolError{
+				code:    protocol.ServerTimeout,
+				data:    &timingDiag{ElapsedMs: time.Since(start).Milliseconds(), TimeoutMs: s.handlerTimeout.Milliseconds(), ToolName: tool.Name},
 				message: fmt.Sprintf("tool %q execution timed out", tool.Name),
 			}}
 			return
 		}
-		ch <- outcome{result: result}
+		ch <- toolOutcome{result: result}
 	}()
+	return ch
+}
+
+// dispatchToolCall invokes a tool handler with timeout enforcement and context
+// cancellation. Returns the result and a *toolError if the handler timed out or
+// was cancelled.
+//
+// Limitation: Go cannot kill goroutines. If a handler ignores ctx.Done()
+// and exceeds the handler timeout + safety margin, the goroutine is
+// abandoned. Handlers MUST respect context cancellation to guarantee
+// bounded goroutine lifetime. The server proceeds to the next request
+// regardless, but the abandoned goroutine may hold resources until it
+// returns naturally.
+func (s *Server) dispatchToolCall(ctx context.Context, tool tools.Tool, params json.RawMessage) (tools.Result, *toolError) {
+	start := time.Now()
+	ch := s.runToolHandler(ctx, tool, params, start)
 	deadline := time.NewTimer(s.handlerTimeout + s.safetyMargin)
 	defer deadline.Stop()
+	cancelErr := func() *toolError {
+		s.logger.Error("tool_handler_cancelled", "tool_name", tool.Name)
+		return &toolError{
+			code:    protocol.ServerTimeout,
+			data:    &timingDiag{ElapsedMs: time.Since(start).Milliseconds(), ToolName: tool.Name},
+			message: fmt.Sprintf("tool %q execution cancelled", tool.Name),
+		}
+	}
 	select {
 	case o := <-ch:
 		return o.result, o.err
 	case <-ctx.Done():
-		s.logger.Error("tool_handler_cancelled", "tool_name", tool.Name)
-		return tools.Result{}, &toolError{
-			code: protocol.InternalError,
-			data: &timingDiag{
-				ElapsedMs: time.Since(start).Milliseconds(),
-				ToolName:  tool.Name,
-			},
-			message: fmt.Sprintf("tool %q execution cancelled", tool.Name),
-		}
+		return tools.Result{}, cancelErr()
 	case <-deadline.C:
+		// Prefer cancellation over safety-timer timeout when both fire.
+		select {
+		case <-ctx.Done():
+			return tools.Result{}, cancelErr()
+		default:
+		}
 		s.logger.Error("tool_handler_timeout", "tool_name", tool.Name)
 		return tools.Result{}, &toolError{
-			code: protocol.InternalError,
-			data: &timingDiag{
-				ElapsedMs: time.Since(start).Milliseconds(),
-				TimeoutMs: s.handlerTimeout.Milliseconds(),
-				ToolName:  tool.Name,
-			},
+			code:    protocol.ServerTimeout,
+			data:    &timingDiag{ElapsedMs: time.Since(start).Milliseconds(), TimeoutMs: s.handlerTimeout.Milliseconds(), ToolName: tool.Name},
 			message: fmt.Sprintf("tool %q execution timed out", tool.Name),
 		}
 	}

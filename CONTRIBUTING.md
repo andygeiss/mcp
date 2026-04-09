@@ -15,7 +15,7 @@ make build          # compile all packages
 make test           # run tests with race detector
 make fuzz           # fuzz the protocol decoder (30s default)
 make lint           # lint with zero issues required
-make cover          # run tests with coverage report
+make coverage       # run tests with coverage report
 ```
 
 ## Testing Requirements
@@ -26,7 +26,7 @@ make cover          # run tests with coverage report
 - Test naming: `Test_<Unit>_With_<Condition>_Should_<Outcome>`
 - Structure: `// Arrange` / `// Act` / `// Assert`
 - Every test calls `t.Parallel()`
-- Use `assert.That(t, "description", got, expected)` from `internal/pkg/assert`
+- Use `assert.That(t, "description", got, expected)` from `internal/assert`
 
 ## Pull Request Process
 

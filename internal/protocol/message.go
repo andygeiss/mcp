@@ -49,6 +49,18 @@ func ErrParseError(msg string) *CodeError {
 	return &CodeError{Code: ParseError, Message: msg}
 }
 
+// ErrServerError creates a CodeError with the ServerError code for state-related
+// rejections (not initialized, already initialized, server busy).
+func ErrServerError(msg string) *CodeError {
+	return &CodeError{Code: ServerError, Message: msg}
+}
+
+// ErrServerTimeout creates a CodeError with the ServerTimeout code for tool
+// handler timeouts and cancellations.
+func ErrServerTimeout(msg string) *CodeError {
+	return &CodeError{Code: ServerTimeout, Message: msg}
+}
+
 // Request represents a JSON-RPC 2.0 request or notification.
 type Request struct {
 	ID      json.RawMessage `json:"id,omitempty"`

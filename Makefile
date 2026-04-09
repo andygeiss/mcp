@@ -20,7 +20,7 @@ coverage:
 	go test -race -coverprofile=coverage.out ./internal/...
 	go tool cover -func=coverage.out
 	@total=$$(go tool cover -func=coverage.out | grep '^total:' | awk '{print $$NF}' | tr -d '%'); \
-	threshold=75; \
+	threshold=90; \
 	if [ "$$(echo "$$total < $$threshold" | bc)" -eq 1 ]; then \
 		echo "FAIL: coverage $${total}% is below threshold $${threshold}%"; \
 		exit 1; \

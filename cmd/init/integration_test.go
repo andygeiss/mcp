@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/andygeiss/mcp/internal/pkg/assert"
+	"github.com/andygeiss/mcp/internal/assert"
 )
 
 func Test_Integration_With_FullInit_Should_ProduceWorkingProject(t *testing.T) {

@@ -8,19 +8,22 @@ on:
 permissions:
   contents: read
 
-env:
-  GO_VERSION: "1.26" # Must match go.mod
+concurrency:
+  cancel-in-progress: true
+  group: ci-${{ github.ref }}
 
 jobs:
   bench:
     needs: [build]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
       BENCH_THRESHOLD: 20
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
+          cache: true
           go-version-file: go.mod
       - name: Install benchstat
         run: go install golang.org/x/perf/cmd/benchstat@v0.0.0-20260312031701-16a31bc5fbd0
@@ -47,20 +50,27 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
-          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          go-version-file: go.mod
+      - name: Verify go.mod is tidy
+        run: go mod tidy && git diff --exit-code go.mod
       - run: make build
 
   fuzz:
+    needs: [build]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
-          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          go-version-file: go.mod
       - run: make fuzz FUZZTIME=2m
 
   integration:
@@ -71,32 +81,70 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
-          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          go-version-file: go.mod
       - run: go test -race -tags=integration ./...
 
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
-          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          go-version-file: go.mod
       - uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # v9.2.0
         with:
           args: ./...
 
-  test:
+  vulncheck:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
+          cache: true
           go-version-file: go.mod
-      - name: Run tests with coverage
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+      - name: Run govulncheck
+        run: govulncheck ./...
+
+  test:
+    strategy:
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          cache: true
+          go-version-file: go.mod
+      - name: Run tests
+        run: go test -race ./...
+      - name: Check coverage threshold
+        if: matrix.os != 'windows-latest'
         run: make coverage
       - name: Upload coverage to Codecov
+        if: matrix.os == 'ubuntu-latest'
         uses: codecov/codecov-action@18283e04ce6e62d37312384ff67231eb8fd56d24 # v5.4.3
         with:
           fail_ci_if_error: true
           files: coverage.out
           token: ${{ secrets.CODECOV_TOKEN }}
+
+  ci-ok:
+    if: always()
+    needs: [bench, build, fuzz, integration, lint, test, vulncheck]
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - run: |
+          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
+            echo "One or more jobs failed"
+            exit 1
+          fi

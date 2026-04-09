@@ -99,7 +99,7 @@ mcp/
 | `internal/protocol/` | JSON-RPC 2.0 wire format | `codec.go`, `message.go`, `constants.go` |
 | `internal/server/` | Server lifecycle and dispatch | `server.go` — 863 lines, the core of the project |
 | `internal/tools/` | Tool registry and schema | `registry.go`, `schema.go` — reflection-based schema derivation |
-| `internal/pkg/assert/` | Test assertion helpers | `assert.go` — single generic function |
+| `internal/assert/` | Test assertion helpers | `assert.go` — single generic function |
 | `oss-fuzz/` | Continuous fuzzing harness | `build.sh` — OSS-Fuzz build integration |
 | `.github/workflows/` | CI/CD pipelines | 5 workflows covering build, test, fuzz, release, security |
 
