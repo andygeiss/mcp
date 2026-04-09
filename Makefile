@@ -29,7 +29,7 @@ coverage:
 
 ## Run fuzz tests (override duration with FUZZTIME=2m)
 fuzz:
-	go test -fuzz Fuzz_Decoder ./internal/protocol -fuzztime=$(FUZZTIME)
+	go test -fuzz Fuzz_Decoder ./internal/protocol -fuzztime=$(FUZZTIME) -timeout=0
 
 ## Initialize template with new module path (MODULE=github.com/org/repo)
 init:
