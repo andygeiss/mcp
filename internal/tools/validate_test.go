@@ -1,6 +1,8 @@
 package tools_test
 
 import (
+	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -105,4 +107,35 @@ func Test_ValidateInput_With_ValidInput_Should_ReturnNil(t *testing.T) {
 	err := tools.ValidateInput("func main()")
 
 	assert.That(t, "error", err, nil)
+}
+
+type decodeErrorInput struct {
+	Value string `json:"value"`
+}
+
+func Test_UnmarshalAndValidate_With_InvalidJSON_Should_ReturnDecodeError(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := tools.NewRegistry()
+	if err := tools.Register(r, "decode-err", "decode error tool", func(_ context.Context, _ decodeErrorInput) tools.Result {
+		return tools.TextResult("ok")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	tool, ok := r.Lookup("decode-err")
+	if !ok {
+		t.Fatal("tool not found")
+	}
+
+	// Act
+	_, err := tool.Handler(context.Background(), json.RawMessage(`not json`))
+
+	// Assert
+	if err == nil {
+		t.Fatal("expected error for invalid JSON params")
+	}
+	if !strings.Contains(err.Error(), "invalid arguments") {
+		t.Errorf("error message should contain \"invalid arguments\", got: %s", err.Error())
+	}
 }

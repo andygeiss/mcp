@@ -817,6 +817,72 @@ func Test_DeriveSchema_With_AllOmitemptyFields_Should_ProduceEmptyRequired(t *te
 	assert.That(t, "bar type", barProp.Type, "integer")
 }
 
+// pointer-type T tests
+
+type pointerTypeInput struct {
+	Label string `json:"label" description:"A label"`
+}
+
+func Test_DeriveSchema_With_PointerTypeT_Should_UnwrapAndDeriveSchema(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := tools.NewRegistry()
+
+	// Act
+	err := tools.Register(r, "ptrtype", "pointer type T", func(_ context.Context, input *pointerTypeInput) tools.Result {
+		if input == nil {
+			return tools.TextResult("")
+		}
+		return tools.TextResult(input.Label)
+	})
+	// Assert
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	tool, ok := r.Lookup("ptrtype")
+	assert.That(t, "found", ok, true)
+	assert.That(t, "schema type", tool.InputSchema.Type, "object")
+	labelProp, exists := tool.InputSchema.Properties["label"]
+	assert.That(t, "label property exists", exists, true)
+	assert.That(t, "label type", labelProp.Type, "string")
+	assert.That(t, "label description", labelProp.Description, "A label")
+}
+
+// embedded struct with unsupported field — triggers collectFields error on promotion
+
+type EmbeddedUnsupported struct {
+	Bad chan int `json:"bad"`
+}
+
+type embeddedUnsupportedInput struct {
+	EmbeddedUnsupported
+	Good string `json:"good"`
+}
+
+func Test_DeriveSchema_With_EmbeddedStructContainingUnsupportedType_Should_ReturnError(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := tools.NewRegistry()
+
+	// Act
+	err := tools.Register(r, "embedbad", "embedded bad", func(_ context.Context, _ embeddedUnsupportedInput) tools.Result {
+		return tools.TextResult("ok")
+	})
+
+	// Assert
+	if err == nil {
+		t.Fatal("expected error for embedded struct containing unsupported type")
+	}
+	if !strings.Contains(err.Error(), "Bad") {
+		t.Errorf("error message should contain field name \"Bad\", got: %s", err.Error())
+	}
+	if !strings.Contains(err.Error(), "chan") {
+		t.Errorf("error message should contain type \"chan\", got: %s", err.Error())
+	}
+}
+
 type nonStringMapKeyInput struct {
 	Data map[int]string `json:"data"`
 }
