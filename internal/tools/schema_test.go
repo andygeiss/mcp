@@ -713,6 +713,110 @@ func Test_DeriveSchema_With_EmbeddedNonStructType_Should_NotPanic(t *testing.T) 
 	assert.That(t, "label present", hasLabel, true)
 }
 
+type float64FieldInput struct {
+	Score float64 `json:"score" description:"A floating point score"`
+}
+
+func Test_DeriveSchema_With_Float64Field_Should_ProduceNumberType(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := tools.NewRegistry()
+	if err := tools.Register(r, "floater", "float tool", func(_ context.Context, _ float64FieldInput) tools.Result {
+		return tools.TextResult("ok")
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	tool, ok := r.Lookup("floater")
+
+	// Assert
+	assert.That(t, "found", ok, true)
+	scoreProp := tool.InputSchema.Properties["score"]
+	assert.That(t, "score type", scoreProp.Type, "number")
+	assert.That(t, "score description", scoreProp.Description, "A floating point score")
+	assert.That(t, "required", tool.InputSchema.Required, []string{"score"})
+}
+
+type uintFieldInput struct {
+	Count uint `json:"count" description:"An unsigned integer count"`
+}
+
+func Test_DeriveSchema_With_UintField_Should_ProduceIntegerType(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := tools.NewRegistry()
+	if err := tools.Register(r, "uinter", "uint tool", func(_ context.Context, _ uintFieldInput) tools.Result {
+		return tools.TextResult("ok")
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	tool, ok := r.Lookup("uinter")
+
+	// Assert
+	assert.That(t, "found", ok, true)
+	countProp := tool.InputSchema.Properties["count"]
+	assert.That(t, "count type", countProp.Type, "integer")
+	assert.That(t, "count description", countProp.Description, "An unsigned integer count")
+	assert.That(t, "required", tool.InputSchema.Required, []string{"count"})
+}
+
+type emptyStructInput struct{}
+
+func Test_DeriveSchema_With_EmptyStruct_Should_ProduceEmptyProperties(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := tools.NewRegistry()
+	if err := tools.Register(r, "empty", "empty tool", func(_ context.Context, _ emptyStructInput) tools.Result {
+		return tools.TextResult("ok")
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	tool, ok := r.Lookup("empty")
+
+	// Assert
+	assert.That(t, "found", ok, true)
+	assert.That(t, "schema type", tool.InputSchema.Type, "object")
+	assert.That(t, "properties count", len(tool.InputSchema.Properties), 0)
+	assert.That(t, "required count", len(tool.InputSchema.Required), 0)
+}
+
+type allOmitemptyInput struct {
+	Foo string `json:"foo,omitempty"`
+	Bar int    `json:"bar,omitempty"`
+}
+
+func Test_DeriveSchema_With_AllOmitemptyFields_Should_ProduceEmptyRequired(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := tools.NewRegistry()
+	if err := tools.Register(r, "allopt", "all optional tool", func(_ context.Context, _ allOmitemptyInput) tools.Result {
+		return tools.TextResult("ok")
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	tool, ok := r.Lookup("allopt")
+
+	// Assert
+	assert.That(t, "found", ok, true)
+	assert.That(t, "properties count", len(tool.InputSchema.Properties), 2)
+	assert.That(t, "required count", len(tool.InputSchema.Required), 0)
+	fooProp := tool.InputSchema.Properties["foo"]
+	assert.That(t, "foo type", fooProp.Type, "string")
+	barProp := tool.InputSchema.Properties["bar"]
+	assert.That(t, "bar type", barProp.Type, "integer")
+}
+
 type nonStringMapKeyInput struct {
 	Data map[int]string `json:"data"`
 }

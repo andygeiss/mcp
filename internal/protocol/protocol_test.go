@@ -781,3 +781,69 @@ func Test_Validate_With_NotificationNoID_Should_SkipValidation(t *testing.T) {
 	// Assert
 	assert.That(t, "error", got, (*protocol.CodeError)(nil))
 }
+
+// --- Error branch tests ---
+
+func Test_Encode_With_FailingWriter_Should_ReturnError(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	enc := json.NewEncoder(&failWriter{})
+	resp := protocol.Response{
+		ID:      json.RawMessage("1"),
+		JSONRPC: "2.0",
+		Result:  json.RawMessage(`{}`),
+	}
+
+	// Act
+	err := protocol.Encode(enc, resp)
+
+	// Assert
+	if err == nil {
+		t.Fatal("expected error from failing writer, got nil")
+	}
+}
+
+func Test_NewResultResponse_With_UnmarshalableValue_Should_ReturnError(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	ch := make(chan int)
+
+	// Act
+	_, err := protocol.NewResultResponse(json.RawMessage("1"), ch)
+
+	// Assert
+	if err == nil {
+		t.Fatal("expected marshal error for channel type, got nil")
+	}
+}
+
+func Test_ErrServerError_Should_ReturnCorrectCode(t *testing.T) {
+	t.Parallel()
+
+	// Act
+	err := protocol.ErrServerError("server not initialized")
+
+	// Assert
+	assert.That(t, "code", err.Code, protocol.ServerError)
+	assert.That(t, "message", err.Message, "server not initialized")
+}
+
+func Test_ErrServerTimeout_Should_ReturnCorrectCode(t *testing.T) {
+	t.Parallel()
+
+	// Act
+	err := protocol.ErrServerTimeout("tool handler timed out")
+
+	// Assert
+	assert.That(t, "code", err.Code, protocol.ServerTimeout)
+	assert.That(t, "message", err.Message, "tool handler timed out")
+}
+
+// failWriter is a writer that always returns an error.
+type failWriter struct{}
+
+func (f *failWriter) Write(_ []byte) (int, error) {
+	return 0, errors.New("write error")
+}
