@@ -15,6 +15,9 @@ _bmad-output/
 # Claude Code local config
 .claude/
 
+# Graphify
+graphify-out/
+
 # macOS
 .DS_Store
 ._*
