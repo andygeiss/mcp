@@ -34,6 +34,7 @@ signs:
     args:
       - sign-blob
       - --yes
-      - --output-signature=${signature}
+      - --bundle=${signature}
       - ${artifact}
     artifacts: checksum
+    signature: ${artifact}.bundle
