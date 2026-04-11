@@ -36,5 +36,5 @@ signs:
       - --yes
       - --bundle=${signature}
       - ${artifact}
-    artifacts: checksum
+    artifacts: all
     signature: ${artifact}.bundle
