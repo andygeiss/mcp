@@ -133,3 +133,56 @@ func TestTextResult_Should_ReturnCorrectContent(t *testing.T) {
 	assert.That(t, "uri", result.Contents[0].URI, "config://app")
 	assert.That(t, "text", result.Contents[0].Text, "hello")
 }
+
+func TestBlobResult_Should_ReturnCorrectContent(t *testing.T) {
+	t.Parallel()
+
+	// Act
+	result := resources.BlobResult("file://img.png", "aGVsbG8=", "image/png")
+
+	// Assert
+	assert.That(t, "content count", len(result.Contents), 1)
+	assert.That(t, "uri", result.Contents[0].URI, "file://img.png")
+	assert.That(t, "blob", result.Contents[0].Blob, "aGVsbG8=")
+	assert.That(t, "mime", result.Contents[0].MimeType, "image/png")
+}
+
+func TestRegisterTemplate_With_MimeType_Should_ApplyOption(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := resources.NewRegistry()
+
+	// Act
+	err := resources.RegisterTemplate(r, "file://{path}", "File", "Read a file",
+		func(_ context.Context, uri string) (resources.Result, error) {
+			return resources.TextResult(uri, "content"), nil
+		},
+		resources.WithMimeType("text/plain"),
+	)
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "template count", len(r.Templates()), 1)
+	assert.That(t, "mime type", r.Templates()[0].MimeType, "text/plain")
+}
+
+func TestTemplates_Should_ReturnSortedByURITemplate(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := resources.NewRegistry()
+	handler := func(_ context.Context, uri string) (resources.Result, error) {
+		return resources.TextResult(uri, "data"), nil
+	}
+	_ = resources.RegisterTemplate(r, "z://{id}", "Z", "desc", handler)
+	_ = resources.RegisterTemplate(r, "a://{id}", "A", "desc", handler)
+
+	// Act
+	all := r.Templates()
+
+	// Assert
+	assert.That(t, "count", len(all), 2)
+	assert.That(t, "first", all[0].URITemplate, "a://{id}")
+	assert.That(t, "second", all[1].URITemplate, "z://{id}")
+}

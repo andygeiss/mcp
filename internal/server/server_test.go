@@ -3130,6 +3130,59 @@ func Test_Server_With_ProgressToken_Should_EmitProgressNotification(t *testing.T
 	assert.That(t, "total", notif.Params.Total, 10)
 }
 
+func Test_Server_With_InvalidMetaObject_Should_IgnoreProgressToken(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — _meta is not a valid JSON object (it's a string)
+	r := tools.NewRegistry()
+	if err := tools.Register(r, "meta-test", "meta test tool", func(_ context.Context, _ testInput) tools.Result {
+		return tools.TextResult("ok")
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	input := handshake() +
+		`{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"meta-test","arguments":{"message":"test"},"_meta":"not-an-object"}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, r, input)
+
+	// Assert — should succeed without progress
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+}
+
+func Test_Server_With_ProgressTokenAndTrace_Should_EmitTracedProgress(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — tool reports progress with trace enabled
+	r := tools.NewRegistry()
+	if err := tools.Register(r, "traced", "traced tool", func(ctx context.Context, _ testInput) tools.Result {
+		p := server.ProgressFromContext(ctx)
+		p.Report(5, 10)
+		p.Log("info", "tracer", "traced log")
+		return tools.TextResult("traced done")
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	input := handshake() +
+		`{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"traced","arguments":{"message":"test"},"_meta":{"progressToken":"tok-trace"}}}` + "\n"
+
+	var stdout, stderr bytes.Buffer
+	srv := server.NewServer("mcp", "test", r, strings.NewReader(input), &stdout, &stderr, server.WithTrace(true))
+
+	// Act
+	err := srv.Run(context.Background())
+	assert.That(t, "error", err, nil)
+
+	// Assert — stderr should contain trace log entries for notifications
+	stderrStr := stderr.String()
+	if !strings.Contains(stderrStr, "trace_notification") {
+		t.Error("expected trace_notification log in stderr")
+	}
+}
+
 func Test_Server_Without_ProgressToken_Should_NotEmitProgress(t *testing.T) {
 	t.Parallel()
 
@@ -3232,6 +3285,277 @@ func Test_Server_With_ToolHandler_Log_Should_EmitLogNotification(t *testing.T) {
 	assert.That(t, "level", notif.Params.Level, "info")
 	assert.That(t, "logger", notif.Params.Logger, "test-logger")
 	assert.That(t, "data", notif.Params.Data, "hello from tool")
+}
+
+// --- Resources/Prompts error-path and edge-case tests ---
+
+func Test_Server_With_ResourcesReadInvalidParams_Should_ReturnInvalidParams(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — params has wrong types for expected fields
+	input := handshake() + `{"jsonrpc":"2.0","method":"resources/read","id":2,"params":{"uri":123}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input, server.WithResources(testResourcesRegistry()))
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.InvalidParams)
+}
+
+func Test_Server_With_ResourcesReadEmptyURI_Should_ReturnInvalidParams(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — empty URI
+	input := handshake() + `{"jsonrpc":"2.0","method":"resources/read","id":2,"params":{"uri":""}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input, server.WithResources(testResourcesRegistry()))
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.InvalidParams)
+}
+
+func Test_Server_With_ResourcesReadHandlerError_Should_ReturnInternalError(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — register a resource with a handler that returns an error
+	reg := resources.NewRegistry()
+	_ = resources.Register(reg, "err://fail", "Failing", "fails",
+		func(_ context.Context, _ string) (resources.Result, error) {
+			return resources.Result{}, errors.New("read failed")
+		},
+	)
+
+	input := handshake() + `{"jsonrpc":"2.0","method":"resources/read","id":2,"params":{"uri":"err://fail"}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input, server.WithResources(reg))
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.InternalError)
+}
+
+func Test_Server_With_UnknownResourcesMethod_Should_ReturnMethodNotFound(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	input := handshake() + `{"jsonrpc":"2.0","method":"resources/unknown","id":2,"params":{}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input, server.WithResources(testResourcesRegistry()))
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.MethodNotFound)
+}
+
+func Test_Server_With_PromptsGetInvalidParams_Should_ReturnInvalidParams(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — params has wrong type for name field
+	input := handshake() + `{"jsonrpc":"2.0","method":"prompts/get","id":2,"params":{"name":123}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input, server.WithPrompts(testPromptsRegistry()))
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.InvalidParams)
+}
+
+func Test_Server_With_PromptsGetEmptyName_Should_ReturnInvalidParams(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — empty name
+	input := handshake() + `{"jsonrpc":"2.0","method":"prompts/get","id":2,"params":{"name":""}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input, server.WithPrompts(testPromptsRegistry()))
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.InvalidParams)
+}
+
+func Test_Server_With_UnknownPromptsMethod_Should_ReturnMethodNotFound(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	input := handshake() + `{"jsonrpc":"2.0","method":"prompts/unknown","id":2,"params":{}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input, server.WithPrompts(testPromptsRegistry()))
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.MethodNotFound)
+}
+
+func Test_Server_With_LoggingSetLevelInvalidParams_Should_ReturnInvalidParams(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — params has wrong type for level field
+	input := handshake() + `{"jsonrpc":"2.0","method":"logging/setLevel","id":2,"params":{"level":123}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input)
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.InvalidParams)
+}
+
+func Test_Server_With_LoggingSetLevelEmptyLevel_Should_ReturnInvalidParams(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — empty level
+	input := handshake() + `{"jsonrpc":"2.0","method":"logging/setLevel","id":2,"params":{"level":""}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input)
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.InvalidParams)
+}
+
+func Test_Server_With_PromptsAndResourcesCapabilities_Should_AdvertiseAll(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — tools + prompts + resources
+	input := initRequest
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input,
+		server.WithPrompts(testPromptsRegistry()),
+		server.WithResources(testResourcesRegistry()),
+	)
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 1)
+
+	var result struct {
+		Capabilities map[string]any `json:"capabilities"`
+	}
+	err = json.Unmarshal(responses[0].Result, &result)
+	assert.That(t, "unmarshal error", err, nil)
+	_, hasPrompts := result.Capabilities["prompts"]
+	assert.That(t, "has prompts", hasPrompts, true)
+	_, hasTools := result.Capabilities["tools"]
+	assert.That(t, "has tools", hasTools, true)
+	_, hasResources := result.Capabilities["resources"]
+	assert.That(t, "has resources", hasResources, true)
+}
+
+func Test_Server_Without_Resources_With_Prompts_Should_RejectResourcesMethods(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — tools + prompts but no resources
+	input := handshake() + `{"jsonrpc":"2.0","method":"resources/list","id":2,"params":{}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input, server.WithPrompts(testPromptsRegistry()))
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.MethodNotFound)
+}
+
+func Test_Server_Without_Prompts_With_Resources_Should_RejectPromptsMethods(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — tools + resources but no prompts
+	input := handshake() + `{"jsonrpc":"2.0","method":"prompts/list","id":2,"params":{}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input, server.WithResources(testResourcesRegistry()))
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.MethodNotFound)
+}
+
+func Test_Server_With_PromptsGetNoArguments_Should_DefaultToEmpty(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — prompts/get without arguments field
+	input := handshake() + `{"jsonrpc":"2.0","method":"prompts/get","id":2,"params":{"name":"greet"}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input, server.WithPrompts(testPromptsRegistry()))
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	// Should succeed with empty arguments (defaulting to empty map)
+	if responses[1].Error != nil {
+		t.Fatalf("expected no error, got %v", responses[1].Error)
+	}
+}
+
+func Test_Server_With_NilProgressReport_Should_NotPanic(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — nil Progress receiver
+	var p *server.Progress
+
+	// Act — should be no-op, not panic
+	p.Report(1, 10)
+}
+
+func Test_Server_With_NilProgressLog_Should_NotPanic(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — nil Progress receiver
+	var p *server.Progress
+
+	// Act — should be no-op, not panic
+	p.Log("info", "test", "hello")
+}
+
+func Test_Server_With_SendRequestFromContextWithoutHandler_Should_ReturnError(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — plain context without Progress
+	ctx := context.Background()
+
+	// Act
+	_, err := server.SendRequestFromContext(ctx, "test/method", nil)
+
+	// Assert
+	if err == nil {
+		t.Fatal("expected error when calling SendRequestFromContext outside handler context")
+	}
+}
+
+func Test_Server_With_ProgressFromContextWithoutValue_Should_ReturnNil(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	ctx := context.Background()
+
+	// Act
+	p := server.ProgressFromContext(ctx)
+
+	// Assert
+	if p != nil {
+		t.Fatal("expected nil Progress from context without value")
+	}
 }
 
 // --- SendRequest (bidirectional) tests ---

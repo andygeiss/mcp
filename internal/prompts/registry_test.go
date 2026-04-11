@@ -147,6 +147,30 @@ func TestRegister_With_Handler_Should_ExecuteCorrectly(t *testing.T) {
 	assert.That(t, "message text", result.Messages[0].Content.Text, "Hello Andy")
 }
 
+// unsupportedInput contains a chan field which cannot be derived into a schema.
+type unsupportedInput struct {
+	Ch chan int `json:"ch"`
+}
+
+func TestRegister_With_UnsupportedInputType_Should_ReturnError(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := prompts.NewRegistry()
+
+	// Act
+	err := prompts.Register(r, "bad", "desc",
+		func(_ context.Context, _ unsupportedInput) prompts.Result {
+			return prompts.Result{}
+		},
+	)
+
+	// Assert
+	if err == nil {
+		t.Fatal("expected error for unsupported input type")
+	}
+}
+
 func TestAssistantMessage_Should_ReturnCorrectContent(t *testing.T) {
 	t.Parallel()
 
