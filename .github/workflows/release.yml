@@ -31,4 +31,4 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
         with:
-          subject-path: "dist/*.tar.gz,dist/checksums.txt"
+          subject-path: "dist/*.tar.gz,dist/*.sbom.json,dist/checksums.txt"
