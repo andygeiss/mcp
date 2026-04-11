@@ -43,6 +43,7 @@ signs:
     cmd: cosign
     args:
       - sign-blob
+      - --new-bundle-format=false
       - --yes
       - --output-signature=${signature}
       - ${artifact}
