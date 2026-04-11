@@ -11,8 +11,13 @@ import (
 	"github.com/andygeiss/mcp/internal/protocol"
 )
 
-// ContentTypeText is the MIME content type for plain text tool results.
-const ContentTypeText = "text"
+// Content type constants for tool result content blocks.
+const (
+	ContentTypeAudio        = "audio"
+	ContentTypeImage        = "image"
+	ContentTypeResourceLink = "resource_link"
+	ContentTypeText         = "text"
+)
 
 const (
 	// SchemaTypeArray is the JSON Schema type for array values.
@@ -30,9 +35,14 @@ const (
 )
 
 // ContentBlock represents a single content item in a tool result.
+// Text content uses [Text] and [Type]. Image and audio content use [Data],
+// [MimeType], and [Type]. Resource links use [URI] and [Type].
 type ContentBlock struct {
-	Text string `json:"text"`
-	Type string `json:"type"`
+	Data     string `json:"data,omitempty"`
+	MimeType string `json:"mimeType,omitempty"`
+	Text     string `json:"text,omitempty"`
+	Type     string `json:"type"`
+	URI      string `json:"uri,omitempty"`
 }
 
 // InputSchema describes the JSON Schema for a tool's input parameters.
@@ -52,6 +62,13 @@ type Property struct {
 	Type                 string              `json:"type"`
 }
 
+// OutputSchema describes the JSON Schema for a tool's structured output.
+type OutputSchema struct {
+	Properties map[string]Property `json:"properties,omitempty"`
+	Required   []string            `json:"required,omitempty"`
+	Type       string              `json:"type"`
+}
+
 // Registry holds registered tools sorted alphabetically by name.
 // Not safe for concurrent use — register all tools before starting the server.
 type Registry struct {
@@ -61,17 +78,20 @@ type Registry struct {
 
 // Result represents the outcome of a tool handler invocation.
 type Result struct {
-	Content []ContentBlock `json:"content"`
-	IsError bool           `json:"isError"`
+	Content           []ContentBlock  `json:"content"`
+	IsError           bool            `json:"isError,omitempty"`
+	StructuredContent json.RawMessage `json:"structuredContent,omitempty"`
 }
 
 // Tool represents a registered MCP tool with its handler.
 type Tool struct {
-	Annotations *Annotations `json:"annotations,omitempty"`
-	Description string       `json:"description"`
-	Handler     toolHandler  `json:"-"`
-	InputSchema InputSchema  `json:"inputSchema"`
-	Name        string       `json:"name"`
+	Annotations  *Annotations  `json:"annotations,omitempty"`
+	Description  string        `json:"description"`
+	Handler      toolHandler   `json:"-"`
+	InputSchema  InputSchema   `json:"inputSchema"`
+	Name         string        `json:"name"`
+	OutputSchema *OutputSchema `json:"outputSchema,omitempty"`
+	Title        string        `json:"title,omitempty"`
 }
 
 // toolHandler is the low-level function signature used internally by the
@@ -163,6 +183,16 @@ func Register[T any](r *Registry, name, description string, handler func(ctx con
 		r.index[t.Name] = i
 	}
 	return nil
+}
+
+// StructuredResult creates a successful Result with both a human-readable text
+// content block and machine-readable structured content. The structured JSON
+// should conform to the tool's OutputSchema.
+func StructuredResult(text string, structured json.RawMessage) Result {
+	return Result{
+		Content:           []ContentBlock{{Text: text, Type: ContentTypeText}},
+		StructuredContent: structured,
+	}
 }
 
 // TextResult creates a successful Result with a text content block.

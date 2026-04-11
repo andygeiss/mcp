@@ -221,6 +221,29 @@ func Test_Handler_With_MissingOptionalField_Should_Succeed(t *testing.T) {
 	assert.That(t, "text", result.Content[0].Text, "anonymous")
 }
 
+func Test_ContentBlock_With_TextType_Should_OmitDataAndMimeType(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	block := tools.ContentBlock{Text: "hello", Type: "text"}
+
+	// Act
+	data, err := json.Marshal(block)
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	s := string(data)
+	if strings.Contains(s, "data") {
+		t.Fatalf("expected no data key in text block, got: %s", s)
+	}
+	if strings.Contains(s, "mimeType") {
+		t.Fatalf("expected no mimeType key in text block, got: %s", s)
+	}
+	if strings.Contains(s, "uri") {
+		t.Fatalf("expected no uri key in text block, got: %s", s)
+	}
+}
+
 func Test_ErrorResult_Should_SetIsError(t *testing.T) {
 	t.Parallel()
 
@@ -232,4 +255,61 @@ func Test_ErrorResult_Should_SetIsError(t *testing.T) {
 	assert.That(t, "type", result.Content[0].Type, "text")
 	assert.That(t, "text", result.Content[0].Text, "something went wrong")
 	assert.That(t, "isError", result.IsError, true)
+}
+
+func Test_TextResult_With_Success_Should_OmitIsErrorFromJSON(t *testing.T) {
+	t.Parallel()
+
+	// Act
+	data, err := json.Marshal(tools.TextResult("ok"))
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	if strings.Contains(string(data), "isError") {
+		t.Fatalf("expected no isError key in success result, got: %s", data)
+	}
+}
+
+func Test_StructuredResult_With_ValidJSON_Should_IncludeStructuredContent(t *testing.T) {
+	t.Parallel()
+
+	// Act
+	result := tools.StructuredResult("summary", json.RawMessage(`{"count":42}`))
+	data, err := json.Marshal(result)
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	s := string(data)
+	if !strings.Contains(s, `"structuredContent":{"count":42}`) {
+		t.Fatalf("expected structuredContent in JSON, got: %s", s)
+	}
+	if !strings.Contains(s, `"text":"summary"`) {
+		t.Fatalf("expected text content in JSON, got: %s", s)
+	}
+}
+
+func Test_TextResult_With_Success_Should_OmitStructuredContent(t *testing.T) {
+	t.Parallel()
+
+	// Act
+	data, err := json.Marshal(tools.TextResult("ok"))
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	if strings.Contains(string(data), "structuredContent") {
+		t.Fatalf("expected no structuredContent key, got: %s", data)
+	}
+}
+
+func Test_ErrorResult_With_Failure_Should_IncludeIsErrorInJSON(t *testing.T) {
+	t.Parallel()
+
+	// Act
+	data, err := json.Marshal(tools.ErrorResult("fail"))
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	if !strings.Contains(string(data), `"isError":true`) {
+		t.Fatalf("expected isError:true in error result, got: %s", data)
+	}
 }
