@@ -669,6 +669,37 @@ func Test_handlePromptsGet_With_HandlerError_Should_ReturnInternalError(t *testi
 	assert.That(t, "error code", resp.Error.Code, protocol.InternalError)
 }
 
+// Test_handleResourcesRead_With_HandlerCodeError_Should_PassthroughCode covers
+// handleResourcesRead: when the resource handler returns a *protocol.CodeError,
+// its code and message are used instead of falling back to InternalError.
+func Test_handleResourcesRead_With_HandlerCodeError_Should_PassthroughCode(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	s := newTestServer(t)
+	reg := resources.NewRegistry()
+	_ = resources.Register(reg, "err://code", "CodeErr", "returns CodeError",
+		func(_ context.Context, _ string) (resources.Result, error) {
+			return resources.Result{}, protocol.ErrInvalidParams("bad resource uri format")
+		},
+	)
+	s.resources = reg
+
+	msg := protocol.Request{
+		JSONRPC: "2.0",
+		ID:      json.RawMessage(`1`),
+		Method:  "resources/read",
+		Params:  json.RawMessage(`{"uri":"err://code"}`),
+	}
+
+	// Act
+	resp := s.handleResourcesRead(msg)
+
+	// Assert
+	assert.That(t, "error code", resp.Error.Code, protocol.InvalidParams)
+	assert.That(t, "error message", resp.Error.Message, "bad resource uri format")
+}
+
 // Test_handleResourcesList_With_Registry_Should_ReturnResources covers
 // handleResourcesList happy path with direct function call.
 func Test_handleResourcesList_With_Registry_Should_ReturnResources(t *testing.T) {

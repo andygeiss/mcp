@@ -10,7 +10,7 @@ bench:
 
 ## Build all packages
 build:
-	go build ./...
+	go build -ldflags "-X main.version=$$(git describe --tags --always --dirty)" ./cmd/mcp/
 
 ## Run the full quality pipeline (build, test, lint)
 check: build test lint

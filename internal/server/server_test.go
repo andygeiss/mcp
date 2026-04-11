@@ -3341,6 +3341,29 @@ func Test_Server_With_ResourcesReadHandlerError_Should_ReturnInternalError(t *te
 	assert.That(t, "error code", responses[1].Error.Code, protocol.InternalError)
 }
 
+func Test_Server_With_ResourcesReadHandlerCodeError_Should_ReturnCodeError(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — register a resource with a handler that returns a CodeError
+	reg := resources.NewRegistry()
+	_ = resources.Register(reg, "err://params", "ParamsErr", "returns InvalidParams",
+		func(_ context.Context, _ string) (resources.Result, error) {
+			return resources.Result{}, protocol.ErrInvalidParams("bad resource uri format")
+		},
+	)
+
+	input := handshake() + `{"jsonrpc":"2.0","method":"resources/read","id":2,"params":{"uri":"err://params"}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input, server.WithResources(reg))
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.InvalidParams)
+	assert.That(t, "error message", responses[1].Error.Message, "bad resource uri format")
+}
+
 func Test_Server_With_UnknownResourcesMethod_Should_ReturnMethodNotFound(t *testing.T) {
 	t.Parallel()
 

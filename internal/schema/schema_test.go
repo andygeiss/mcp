@@ -14,7 +14,7 @@ type simpleInput struct {
 	Score  float64 `json:"score,omitempty"`
 }
 
-func TestDeriveInputSchema_With_SimpleStruct_Should_ReturnCorrectSchema(t *testing.T) {
+func Test_DeriveInputSchema_With_SimpleStruct_Should_ReturnCorrectSchema(t *testing.T) {
 	t.Parallel()
 
 	// Act
@@ -39,7 +39,7 @@ type nestedInput struct {
 	} `json:"inner"`
 }
 
-func TestDeriveInputSchema_With_NestedStruct_Should_ReturnNestedProperties(t *testing.T) {
+func Test_DeriveInputSchema_With_NestedStruct_Should_ReturnNestedProperties(t *testing.T) {
 	t.Parallel()
 
 	// Act
@@ -55,7 +55,7 @@ type sliceInput struct {
 	Tags []string `json:"tags" description:"List of tags"`
 }
 
-func TestDeriveInputSchema_With_Slice_Should_ReturnArrayType(t *testing.T) {
+func Test_DeriveInputSchema_With_Slice_Should_ReturnArrayType(t *testing.T) {
 	t.Parallel()
 
 	// Act
@@ -71,7 +71,7 @@ type mapInput struct {
 	Labels map[string]string `json:"labels,omitempty"`
 }
 
-func TestDeriveInputSchema_With_Map_Should_ReturnObjectType(t *testing.T) {
+func Test_DeriveInputSchema_With_Map_Should_ReturnObjectType(t *testing.T) {
 	t.Parallel()
 
 	// Act
@@ -93,7 +93,7 @@ type embeddedInput struct {
 	Name string `json:"name"`
 }
 
-func TestDeriveInputSchema_With_EmbeddedStruct_Should_PromoteFields(t *testing.T) {
+func Test_DeriveInputSchema_With_EmbeddedStruct_Should_PromoteFields(t *testing.T) {
 	t.Parallel()
 
 	// Act
@@ -110,7 +110,7 @@ type pointerInput struct {
 	Value *string `json:"value,omitempty"`
 }
 
-func TestDeriveInputSchema_With_Pointer_Should_DereferenceType(t *testing.T) {
+func Test_DeriveInputSchema_With_Pointer_Should_DereferenceType(t *testing.T) {
 	t.Parallel()
 
 	// Act
@@ -132,7 +132,7 @@ type taggedEmbedInput struct {
 	Name            string `json:"name"`
 }
 
-func TestDeriveInputSchema_With_TaggedEmbed_Should_NotPromote(t *testing.T) {
+func Test_DeriveInputSchema_With_TaggedEmbed_Should_NotPromote(t *testing.T) {
 	t.Parallel()
 
 	// Act
@@ -150,7 +150,7 @@ type pointerEmbedInput struct {
 	Name string `json:"name"`
 }
 
-func TestDeriveInputSchema_With_PointerEmbed_Should_PromoteFields(t *testing.T) {
+func Test_DeriveInputSchema_With_PointerEmbed_Should_PromoteFields(t *testing.T) {
 	t.Parallel()
 
 	// Act
@@ -169,7 +169,7 @@ type nonStringMapInput struct {
 	Data map[int]string `json:"data"`
 }
 
-func TestDeriveInputSchema_With_NonStringMapKey_Should_ReturnError(t *testing.T) {
+func Test_DeriveInputSchema_With_NonStringMapKey_Should_ReturnError(t *testing.T) {
 	t.Parallel()
 
 	// Act
@@ -187,7 +187,7 @@ type chanInput struct {
 	Ch chan string `json:"ch"`
 }
 
-func TestDeriveInputSchema_With_UnsupportedType_Should_ReturnError(t *testing.T) {
+func Test_DeriveInputSchema_With_UnsupportedType_Should_ReturnError(t *testing.T) {
 	t.Parallel()
 
 	// Act
@@ -206,7 +206,7 @@ type untaggedFieldInput struct {
 	Untagged string
 }
 
-func TestDeriveInputSchema_With_UntaggedField_Should_SkipIt(t *testing.T) {
+func Test_DeriveInputSchema_With_UntaggedField_Should_SkipIt(t *testing.T) {
 	t.Parallel()
 
 	// Act
@@ -223,7 +223,7 @@ type ignoredFieldInput struct {
 	Ignored string `json:"-"`
 }
 
-func TestDeriveInputSchema_With_IgnoredField_Should_SkipIt(t *testing.T) {
+func Test_DeriveInputSchema_With_IgnoredField_Should_SkipIt(t *testing.T) {
 	t.Parallel()
 
 	// Act
@@ -237,7 +237,7 @@ func TestDeriveInputSchema_With_IgnoredField_Should_SkipIt(t *testing.T) {
 
 // --- DeriveInputSchema with pointer type parameter ---
 
-func TestDeriveInputSchema_With_PointerTypeParam_Should_Dereference(t *testing.T) {
+func Test_DeriveInputSchema_With_PointerTypeParam_Should_Dereference(t *testing.T) {
 	t.Parallel()
 
 	// Act
@@ -255,7 +255,7 @@ type sliceChanInput struct {
 	Items []chan int `json:"items"`
 }
 
-func TestDeriveInputSchema_With_SliceOfUnsupportedType_Should_ReturnError(t *testing.T) {
+func Test_DeriveInputSchema_With_SliceOfUnsupportedType_Should_ReturnError(t *testing.T) {
 	t.Parallel()
 
 	// Act
@@ -273,7 +273,7 @@ type mapChanInput struct {
 	Data map[string]chan int `json:"data"`
 }
 
-func TestDeriveInputSchema_With_MapOfUnsupportedValueType_Should_ReturnError(t *testing.T) {
+func Test_DeriveInputSchema_With_MapOfUnsupportedValueType_Should_ReturnError(t *testing.T) {
 	t.Parallel()
 
 	// Act
@@ -294,7 +294,7 @@ type allOptionalNested struct {
 	} `json:"inner"`
 }
 
-func TestDeriveInputSchema_With_AllOptionalNestedStruct_Should_OmitRequired(t *testing.T) {
+func Test_DeriveInputSchema_With_AllOptionalNestedStruct_Should_OmitRequired(t *testing.T) {
 	t.Parallel()
 
 	// Act
@@ -318,7 +318,7 @@ type unexportedEmbedInput struct {
 	Name string `json:"name"`
 }
 
-func TestDeriveInputSchema_With_UnexportedEmbed_Should_NotPromote(t *testing.T) {
+func Test_DeriveInputSchema_With_UnexportedEmbed_Should_NotPromote(t *testing.T) {
 	t.Parallel()
 
 	// Act
@@ -359,7 +359,7 @@ type depth0 struct {
 	} `json:"a"`
 }
 
-func TestDeriveInputSchema_With_ExcessiveDepth_Should_ReturnError(t *testing.T) {
+func Test_DeriveInputSchema_With_ExcessiveDepth_Should_ReturnError(t *testing.T) {
 	t.Parallel()
 
 	// Act
@@ -377,7 +377,7 @@ type uintInput struct {
 	Val uint `json:"val"`
 }
 
-func TestDeriveInputSchema_With_UintType_Should_ReturnInteger(t *testing.T) {
+func Test_DeriveInputSchema_With_UintType_Should_ReturnInteger(t *testing.T) {
 	t.Parallel()
 
 	// Act

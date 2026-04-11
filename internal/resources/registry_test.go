@@ -8,7 +8,7 @@ import (
 	"github.com/andygeiss/mcp/internal/resources"
 )
 
-func TestRegister_With_ValidResource_Should_Succeed(t *testing.T) {
+func Test_Register_With_ValidResource_Should_Succeed(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
@@ -30,7 +30,7 @@ func TestRegister_With_ValidResource_Should_Succeed(t *testing.T) {
 	assert.That(t, "resource mime", r.Resources()[0].MimeType, "application/json")
 }
 
-func TestRegister_With_DuplicateURI_Should_ReturnError(t *testing.T) {
+func Test_Register_With_DuplicateURI_Should_ReturnError(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
@@ -49,7 +49,7 @@ func TestRegister_With_DuplicateURI_Should_ReturnError(t *testing.T) {
 	}
 }
 
-func TestLookup_With_RegisteredURI_Should_ReturnResource(t *testing.T) {
+func Test_Lookup_With_RegisteredURI_Should_ReturnResource(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
@@ -68,7 +68,7 @@ func TestLookup_With_RegisteredURI_Should_ReturnResource(t *testing.T) {
 	assert.That(t, "name", res.Name, "Config")
 }
 
-func TestLookup_With_UnknownURI_Should_ReturnFalse(t *testing.T) {
+func Test_Lookup_With_UnknownURI_Should_ReturnFalse(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
@@ -81,7 +81,7 @@ func TestLookup_With_UnknownURI_Should_ReturnFalse(t *testing.T) {
 	assert.That(t, "found", ok, false)
 }
 
-func TestRegisterTemplate_With_ValidTemplate_Should_Succeed(t *testing.T) {
+func Test_RegisterTemplate_With_ValidTemplate_Should_Succeed(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
@@ -100,7 +100,7 @@ func TestRegisterTemplate_With_ValidTemplate_Should_Succeed(t *testing.T) {
 	assert.That(t, "template name", r.Templates()[0].Name, "File")
 }
 
-func TestResources_Should_ReturnSortedByURI(t *testing.T) {
+func Test_Resources_Should_ReturnSortedByURI(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
@@ -122,7 +122,7 @@ func TestResources_Should_ReturnSortedByURI(t *testing.T) {
 	assert.That(t, "third", all[2].URI, "z://last")
 }
 
-func TestTextResult_Should_ReturnCorrectContent(t *testing.T) {
+func Test_TextResult_Should_ReturnCorrectContent(t *testing.T) {
 	t.Parallel()
 
 	// Act
@@ -134,7 +134,7 @@ func TestTextResult_Should_ReturnCorrectContent(t *testing.T) {
 	assert.That(t, "text", result.Contents[0].Text, "hello")
 }
 
-func TestBlobResult_Should_ReturnCorrectContent(t *testing.T) {
+func Test_BlobResult_Should_ReturnCorrectContent(t *testing.T) {
 	t.Parallel()
 
 	// Act
@@ -147,7 +147,7 @@ func TestBlobResult_Should_ReturnCorrectContent(t *testing.T) {
 	assert.That(t, "mime", result.Contents[0].MimeType, "image/png")
 }
 
-func TestRegisterTemplate_With_MimeType_Should_ApplyOption(t *testing.T) {
+func Test_RegisterTemplate_With_MimeType_Should_ApplyOption(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
@@ -167,7 +167,7 @@ func TestRegisterTemplate_With_MimeType_Should_ApplyOption(t *testing.T) {
 	assert.That(t, "mime type", r.Templates()[0].MimeType, "text/plain")
 }
 
-func TestTemplates_Should_ReturnSortedByURITemplate(t *testing.T) {
+func Test_Templates_Should_ReturnSortedByURITemplate(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
