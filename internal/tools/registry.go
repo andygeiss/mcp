@@ -113,15 +113,6 @@ func NewRegistry() *Registry {
 	return &Registry{index: make(map[string]int), tools: []Tool{}}
 }
 
-// Names returns the names of all registered tools in alphabetical order.
-func (r *Registry) Names() []string {
-	names := make([]string, len(r.tools))
-	for i, t := range r.tools {
-		names[i] = t.Name
-	}
-	return names
-}
-
 // Lookup finds a tool by name in O(1) via the index map.
 func (r *Registry) Lookup(name string) (Tool, bool) {
 	i, ok := r.index[name]
@@ -129,6 +120,15 @@ func (r *Registry) Lookup(name string) (Tool, bool) {
 		return Tool{}, false
 	}
 	return r.tools[i], true
+}
+
+// Names returns the names of all registered tools in alphabetical order.
+func (r *Registry) Names() []string {
+	names := make([]string, len(r.tools))
+	for i, t := range r.tools {
+		names[i] = t.Name
+	}
+	return names
 }
 
 // Register adds a tool to the registry. The generic type parameter T defines

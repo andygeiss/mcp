@@ -34,6 +34,11 @@ func newCountingReader(r io.Reader, limit int64) *countingReader {
 	}
 }
 
+// Exceeded reports whether the byte counter has exceeded the limit.
+func (cr *countingReader) Exceeded() bool {
+	return cr.count > cr.limit
+}
+
 // Read implements io.Reader, tracking total bytes and enforcing the limit.
 // When the limit is exceeded after a read, the bytes already consumed are
 // reported along with the error, per the io.Reader contract.
@@ -47,11 +52,6 @@ func (cr *countingReader) Read(p []byte) (int, error) {
 		return n, errMessageTooLarge
 	}
 	return n, err
-}
-
-// Exceeded reports whether the byte counter has exceeded the limit.
-func (cr *countingReader) Exceeded() bool {
-	return cr.count > cr.limit
 }
 
 // Reset resets the byte counter for the next message.

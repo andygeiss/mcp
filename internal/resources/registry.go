@@ -74,6 +74,70 @@ func (r *Registry) Lookup(uri string) (Resource, bool) {
 	return r.resources[i], true
 }
 
+// LookupTemplate finds the first template whose URI pattern matches the given
+// URI. Returns the template and true if a match is found. Templates use
+// RFC 6570 Level 1 syntax: literal segments plus {variable} placeholders that
+// each match one or more characters.
+func (r *Registry) LookupTemplate(uri string) (ResourceTemplate, bool) {
+	for _, tmpl := range r.templates {
+		if matchTemplate(tmpl.URITemplate, uri) {
+			return tmpl, true
+		}
+	}
+	return ResourceTemplate{}, false
+}
+
+// matchTemplate checks whether uri matches a Level 1 URI template. Each
+// {variable} placeholder matches one or more characters; literal segments
+// must match exactly.
+func matchTemplate(pattern, uri string) bool {
+	for {
+		literal, rest, hasVar := strings.Cut(pattern, "{")
+		if !hasVar {
+			return pattern == uri
+		}
+		if !strings.HasPrefix(uri, literal) {
+			return false
+		}
+		uri = uri[len(literal):]
+		_, after, closed := strings.Cut(rest, "}")
+		if !closed {
+			return false
+		}
+		pattern = after
+		if pattern == "" {
+			return uri != ""
+		}
+		uri = advancePastVariable(pattern, uri)
+		if uri == "" {
+			return false
+		}
+	}
+}
+
+// advancePastVariable finds where a variable match ends by locating the next
+// literal anchor in the remaining pattern. The variable must match at least
+// one character. Returns the remaining URI after the variable, or "" if no
+// valid match exists.
+func advancePastVariable(pattern, uri string) string {
+	if pattern == "" {
+		return uri // variable consumes everything remaining
+	}
+	anchor, _, _ := strings.Cut(pattern, "{")
+	if anchor == "" {
+		// Adjacent variables — consume exactly one character.
+		if uri == "" {
+			return ""
+		}
+		return uri[1:]
+	}
+	k := strings.Index(uri, anchor)
+	if k < 1 {
+		return ""
+	}
+	return uri[k:]
+}
+
 // Register adds a static resource to the registry.
 func Register(r *Registry, uri, name, description string, handler func(ctx context.Context, uri string) (Result, error), opts ...Option) error {
 	if _, exists := r.index[uri]; exists {

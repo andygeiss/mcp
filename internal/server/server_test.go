@@ -3513,10 +3513,10 @@ func Test_Server_Without_Prompts_With_Resources_Should_RejectPromptsMethods(t *t
 	assert.That(t, "error code", responses[1].Error.Code, protocol.MethodNotFound)
 }
 
-func Test_Server_With_PromptsGetNoArguments_Should_DefaultToEmpty(t *testing.T) {
+func Test_Server_With_PromptsGetNoArguments_Should_RejectMissingRequired(t *testing.T) {
 	t.Parallel()
 
-	// Arrange — prompts/get without arguments field
+	// Arrange — prompts/get without arguments field; "greet" requires "name"
 	input := handshake() + `{"jsonrpc":"2.0","method":"prompts/get","id":2,"params":{"name":"greet"}}` + "\n"
 
 	// Act
@@ -3525,10 +3525,7 @@ func Test_Server_With_PromptsGetNoArguments_Should_DefaultToEmpty(t *testing.T) 
 	// Assert
 	assert.That(t, "error", err, nil)
 	assert.That(t, "response count", len(responses), 2)
-	// Should succeed with empty arguments (defaulting to empty map)
-	if responses[1].Error != nil {
-		t.Fatalf("expected no error, got %v", responses[1].Error)
-	}
+	assert.That(t, "error code", responses[1].Error.Code, protocol.InvalidParams)
 }
 
 func Test_Server_With_NilProgressReport_Should_NotPanic(t *testing.T) {
@@ -3644,4 +3641,97 @@ func Test_Server_With_SendRequest_Should_CorrelateResponse(t *testing.T) {
 	// Assert
 	assert.That(t, "error", err, nil)
 	assert.That(t, "method", srvReq.Method, "sampling/createMessage")
+}
+
+func testResourcesRegistryWithTemplate() *resources.Registry {
+	r := testResourcesRegistry()
+	if err := resources.RegisterTemplate(r, "file://{path}", "File", "Read a file",
+		func(_ context.Context, uri string) (resources.Result, error) {
+			return resources.TextResult(uri, "content of "+uri), nil
+		},
+	); err != nil {
+		panic("testResourcesRegistryWithTemplate: " + err.Error())
+	}
+	return r
+}
+
+func Test_Server_With_ResourcesReadTemplate_Should_ReturnContent(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	input := handshake() + `{"jsonrpc":"2.0","method":"resources/read","id":2,"params":{"uri":"file://readme.md"}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input, server.WithResources(testResourcesRegistryWithTemplate()))
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "no error", responses[1].Error == nil, true)
+
+	var result struct {
+		Contents []struct {
+			Text string `json:"text"`
+			URI  string `json:"uri"`
+		} `json:"contents"`
+	}
+	err = json.Unmarshal(responses[1].Result, &result)
+	assert.That(t, "unmarshal error", err, nil)
+	assert.That(t, "content count", len(result.Contents), 1)
+	assert.That(t, "content text", result.Contents[0].Text, "content of file://readme.md")
+	assert.That(t, "content uri", result.Contents[0].URI, "file://readme.md")
+}
+
+func Test_Server_With_ResourcesReadStaticOverTemplate_Should_PreferStatic(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — static resource matches exactly, template also matches
+	input := handshake() + `{"jsonrpc":"2.0","method":"resources/read","id":2,"params":{"uri":"config://app"}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input, server.WithResources(testResourcesRegistryWithTemplate()))
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "no error", responses[1].Error == nil, true)
+
+	var result struct {
+		Contents []struct {
+			Text string `json:"text"`
+		} `json:"contents"`
+	}
+	err = json.Unmarshal(responses[1].Result, &result)
+	assert.That(t, "unmarshal error", err, nil)
+	assert.That(t, "content text", result.Contents[0].Text, `{"key":"value"}`)
+}
+
+func Test_Server_With_PromptsGetMissingRequiredArg_Should_ReturnInvalidParams(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — "greet" prompt requires "name" argument
+	input := handshake() + `{"jsonrpc":"2.0","method":"prompts/get","id":2,"params":{"name":"greet","arguments":{}}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input, server.WithPrompts(testPromptsRegistry()))
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.InvalidParams)
+}
+
+func Test_Server_With_PromptsGetNoArgs_Should_ReturnInvalidParams(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — "greet" prompt requires "name" argument, no arguments provided
+	input := handshake() + `{"jsonrpc":"2.0","method":"prompts/get","id":2,"params":{"name":"greet"}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input, server.WithPrompts(testPromptsRegistry()))
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.InvalidParams)
 }

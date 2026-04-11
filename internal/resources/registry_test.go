@@ -167,6 +167,93 @@ func Test_RegisterTemplate_With_MimeType_Should_ApplyOption(t *testing.T) {
 	assert.That(t, "mime type", r.Templates()[0].MimeType, "text/plain")
 }
 
+func Test_LookupTemplate_With_MatchingURI_Should_ReturnTemplate(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := resources.NewRegistry()
+	_ = resources.RegisterTemplate(r, "file://{path}", "File", "Read a file",
+		func(_ context.Context, uri string) (resources.Result, error) {
+			return resources.TextResult(uri, "content of "+uri), nil
+		},
+	)
+
+	// Act
+	tmpl, ok := r.LookupTemplate("file://readme.md")
+
+	// Assert
+	assert.That(t, "found", ok, true)
+	assert.That(t, "name", tmpl.Name, "File")
+}
+
+func Test_LookupTemplate_With_NonMatchingURI_Should_ReturnFalse(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := resources.NewRegistry()
+	_ = resources.RegisterTemplate(r, "file://{path}", "File", "Read a file",
+		func(_ context.Context, uri string) (resources.Result, error) {
+			return resources.TextResult(uri, "data"), nil
+		},
+	)
+
+	// Act
+	_, ok := r.LookupTemplate("config://app")
+
+	// Assert
+	assert.That(t, "found", ok, false)
+}
+
+func Test_LookupTemplate_With_MultipleVariables_Should_Match(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := resources.NewRegistry()
+	_ = resources.RegisterTemplate(r, "db://{schema}/{table}", "DB Table", "Read a DB table",
+		func(_ context.Context, uri string) (resources.Result, error) {
+			return resources.TextResult(uri, "rows"), nil
+		},
+	)
+
+	// Act
+	tmpl, ok := r.LookupTemplate("db://public/users")
+
+	// Assert
+	assert.That(t, "found", ok, true)
+	assert.That(t, "name", tmpl.Name, "DB Table")
+}
+
+func Test_LookupTemplate_With_EmptyVariable_Should_NotMatch(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := resources.NewRegistry()
+	_ = resources.RegisterTemplate(r, "file://{path}", "File", "Read a file",
+		func(_ context.Context, uri string) (resources.Result, error) {
+			return resources.TextResult(uri, "data"), nil
+		},
+	)
+
+	// Act — "file://" has no content after the prefix, so {path} would be empty
+	_, ok := r.LookupTemplate("file://")
+
+	// Assert
+	assert.That(t, "found", ok, false)
+}
+
+func Test_LookupTemplate_With_NoTemplates_Should_ReturnFalse(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := resources.NewRegistry()
+
+	// Act
+	_, ok := r.LookupTemplate("file://anything")
+
+	// Assert
+	assert.That(t, "found", ok, false)
+}
+
 func Test_Templates_Should_ReturnSortedByURITemplate(t *testing.T) {
 	t.Parallel()
 

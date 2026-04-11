@@ -31,6 +31,18 @@ type messageParams struct {
 	Logger string `json:"logger,omitempty"`
 }
 
+// Log sends a notifications/message log entry. No-op if the receiver is nil.
+func (p *Progress) Log(level, logger, data string) {
+	if p == nil {
+		return
+	}
+	_ = p.server.sendNotification(protocol.NotificationMessage, messageParams{
+		Data:   data,
+		Level:  level,
+		Logger: logger,
+	})
+}
+
 // Report sends a progress notification. No-op if the client didn't provide a token
 // or if the receiver is nil.
 func (p *Progress) Report(current, total int64) {
@@ -41,18 +53,6 @@ func (p *Progress) Report(current, total int64) {
 		Progress:      current,
 		ProgressToken: p.token,
 		Total:         total,
-	})
-}
-
-// Log sends a notifications/message log entry. No-op if the receiver is nil.
-func (p *Progress) Log(level, logger, data string) {
-	if p == nil {
-		return
-	}
-	_ = p.server.sendNotification(protocol.NotificationMessage, messageParams{
-		Data:   data,
-		Level:  level,
-		Logger: logger,
 	})
 }
 

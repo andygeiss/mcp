@@ -56,8 +56,8 @@ type Server struct {
 	pendingMu         sync.Mutex
 	prompts           *prompts.Registry
 	registry          *tools.Registry
-	resources         *resources.Registry
 	requestCount      atomic.Int64
+	resources         *resources.Registry
 	safetyMargin      time.Duration
 	state             int
 	stdoutMu          sync.Mutex
@@ -1146,15 +1146,19 @@ func (s *Server) handleResourcesRead(msg protocol.Request) protocol.Response {
 		return s.errorResponse(msg.ID, protocol.ErrInvalidParams("uri is required"))
 	}
 
-	res, ok := s.resources.Lookup(params.URI)
-	if !ok {
-		return s.errorResponse(msg.ID, protocol.ErrInvalidParams("unknown resource: "+params.URI))
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), s.handlerTimeout)
 	defer cancel()
 
-	result, err := res.Handler(ctx, params.URI)
+	var result resources.Result
+	var err error
+
+	if res, ok := s.resources.Lookup(params.URI); ok {
+		result, err = res.Handler(ctx, params.URI)
+	} else if tmpl, ok := s.resources.LookupTemplate(params.URI); ok {
+		result, err = tmpl.Handler(ctx, params.URI)
+	} else {
+		return s.errorResponse(msg.ID, protocol.ErrInvalidParams("unknown resource: "+params.URI))
+	}
 	if err != nil {
 		return s.errorResponse(msg.ID, err)
 	}
@@ -1228,6 +1232,14 @@ func (s *Server) handlePromptsGet(msg protocol.Request) protocol.Response {
 	args := params.Arguments
 	if args == nil {
 		args = make(map[string]string)
+	}
+
+	for _, arg := range prompt.Arguments {
+		if arg.Required {
+			if _, ok := args[arg.Name]; !ok {
+				return s.errorResponse(msg.ID, protocol.ErrInvalidParams("missing required argument: "+arg.Name))
+			}
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), s.handlerTimeout)
