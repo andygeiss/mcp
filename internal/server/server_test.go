@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"github.com/andygeiss/mcp/internal/assert"
+	"github.com/andygeiss/mcp/internal/prompts"
 	"github.com/andygeiss/mcp/internal/protocol"
+	"github.com/andygeiss/mcp/internal/resources"
 	"github.com/andygeiss/mcp/internal/server"
 	"github.com/andygeiss/mcp/internal/tools"
 )
@@ -34,10 +36,10 @@ func testRegistry() *tools.Registry {
 }
 
 // helper: run server with input string, return output and error.
-func runServer(t *testing.T, registry *tools.Registry, input string) ([]protocol.Response, error) {
+func runServer(t *testing.T, registry *tools.Registry, input string, opts ...server.Option) ([]protocol.Response, error) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
-	srv := server.NewServer("mcp", "test", registry, strings.NewReader(input), &stdout, &stderr)
+	srv := server.NewServer("mcp", "test", registry, strings.NewReader(input), &stdout, &stderr, opts...)
 	err := srv.Run(context.Background())
 
 	var responses []protocol.Response
@@ -93,7 +95,7 @@ func Test_Server_With_InitializeHandshake_Should_ReturnCapabilities(t *testing.T
 	}
 	err = json.Unmarshal(resp.Result, &result)
 	assert.That(t, "unmarshal error", err, nil)
-	assert.That(t, "protocol version", result.ProtocolVersion, "2025-06-18")
+	assert.That(t, "protocol version", result.ProtocolVersion, "2025-11-25")
 	assert.That(t, "server name", result.ServerInfo.Name, "mcp")
 	assert.That(t, "server version", result.ServerInfo.Version, "test")
 
@@ -2601,4 +2603,473 @@ func Test_Server_With_InvalidNotificationInDispatch_Should_SilentlyIgnore(t *tes
 	assert.That(t, "response count", len(responses), 2)
 	assert.That(t, "init id", string(responses[0].ID), "1")
 	assert.That(t, "ping result", string(responses[1].Result), "{}")
+}
+
+// --- Resources tests ---
+
+func testResourcesRegistry() *resources.Registry {
+	r := resources.NewRegistry()
+	if err := resources.Register(r, "config://app", "App Config", "Application configuration",
+		func(_ context.Context, uri string) (resources.Result, error) {
+			return resources.TextResult(uri, `{"key":"value"}`), nil
+		},
+		resources.WithMimeType("application/json"),
+	); err != nil {
+		panic("testResourcesRegistry: " + err.Error())
+	}
+	return r
+}
+
+func Test_Server_With_ResourcesList_Should_ReturnResources(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	input := handshake() + `{"jsonrpc":"2.0","method":"resources/list","id":2,"params":{}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input, server.WithResources(testResourcesRegistry()))
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+
+	var result struct {
+		Resources []struct {
+			Description string `json:"description"`
+			MimeType    string `json:"mimeType"`
+			Name        string `json:"name"`
+			URI         string `json:"uri"`
+		} `json:"resources"`
+	}
+	err = json.Unmarshal(responses[1].Result, &result)
+	assert.That(t, "unmarshal error", err, nil)
+	assert.That(t, "resource count", len(result.Resources), 1)
+	assert.That(t, "resource name", result.Resources[0].Name, "App Config")
+	assert.That(t, "resource uri", result.Resources[0].URI, "config://app")
+	assert.That(t, "resource mime", result.Resources[0].MimeType, "application/json")
+}
+
+func Test_Server_With_ResourcesRead_Should_ReturnContent(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	input := handshake() + `{"jsonrpc":"2.0","method":"resources/read","id":2,"params":{"uri":"config://app"}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input, server.WithResources(testResourcesRegistry()))
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+
+	var result struct {
+		Contents []struct {
+			Text string `json:"text"`
+			URI  string `json:"uri"`
+		} `json:"contents"`
+	}
+	err = json.Unmarshal(responses[1].Result, &result)
+	assert.That(t, "unmarshal error", err, nil)
+	assert.That(t, "content count", len(result.Contents), 1)
+	assert.That(t, "content text", result.Contents[0].Text, `{"key":"value"}`)
+	assert.That(t, "content uri", result.Contents[0].URI, "config://app")
+}
+
+func Test_Server_With_ResourcesReadUnknown_Should_ReturnError(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	input := handshake() + `{"jsonrpc":"2.0","method":"resources/read","id":2,"params":{"uri":"unknown://uri"}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input, server.WithResources(testResourcesRegistry()))
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.InvalidParams)
+}
+
+func Test_Server_With_ResourcesCapability_Should_AdvertiseInInitialize(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	input := initRequest
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input, server.WithResources(testResourcesRegistry()))
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 1)
+
+	var result struct {
+		Capabilities struct {
+			Resources struct {
+				ListChanged bool `json:"listChanged"`
+				Subscribe   bool `json:"subscribe"`
+			} `json:"resources"`
+			Tools struct{} `json:"tools"`
+		} `json:"capabilities"`
+	}
+	err = json.Unmarshal(responses[0].Result, &result)
+	assert.That(t, "unmarshal error", err, nil)
+}
+
+func Test_Server_Without_Resources_Should_RejectResourcesMethods(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — no WithResources, only tools
+	input := handshake() + `{"jsonrpc":"2.0","method":"resources/list","id":2,"params":{}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input)
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.MethodNotFound)
+}
+
+// --- Prompts tests ---
+
+type promptTestInput struct {
+	Name string `json:"name" description:"Name to greet"`
+}
+
+func testPromptsRegistry() *prompts.Registry {
+	r := prompts.NewRegistry()
+	if err := prompts.Register(r, "greet", "A greeting prompt",
+		func(_ context.Context, input promptTestInput) prompts.Result {
+			return prompts.Result{
+				Description: "Greeting for " + input.Name,
+				Messages: []prompts.Message{
+					prompts.UserMessage("Hello " + input.Name),
+					prompts.AssistantMessage("Hi there!"),
+				},
+			}
+		},
+	); err != nil {
+		panic("testPromptsRegistry: " + err.Error())
+	}
+	return r
+}
+
+func Test_Server_With_PromptsList_Should_ReturnPrompts(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	input := handshake() + `{"jsonrpc":"2.0","method":"prompts/list","id":2,"params":{}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input, server.WithPrompts(testPromptsRegistry()))
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+
+	var result struct {
+		Prompts []struct {
+			Arguments []struct {
+				Description string `json:"description"`
+				Name        string `json:"name"`
+				Required    bool   `json:"required"`
+			} `json:"arguments"`
+			Description string `json:"description"`
+			Name        string `json:"name"`
+		} `json:"prompts"`
+	}
+	err = json.Unmarshal(responses[1].Result, &result)
+	assert.That(t, "unmarshal error", err, nil)
+	assert.That(t, "prompt count", len(result.Prompts), 1)
+	assert.That(t, "prompt name", result.Prompts[0].Name, "greet")
+	assert.That(t, "argument count", len(result.Prompts[0].Arguments), 1)
+	assert.That(t, "argument name", result.Prompts[0].Arguments[0].Name, "name")
+}
+
+func Test_Server_With_PromptsGet_Should_ReturnMessages(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	input := handshake() + `{"jsonrpc":"2.0","method":"prompts/get","id":2,"params":{"name":"greet","arguments":{"name":"Andy"}}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input, server.WithPrompts(testPromptsRegistry()))
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+
+	var result struct {
+		Description string `json:"description"`
+		Messages    []struct {
+			Content struct {
+				Text string `json:"text"`
+				Type string `json:"type"`
+			} `json:"content"`
+			Role string `json:"role"`
+		} `json:"messages"`
+	}
+	err = json.Unmarshal(responses[1].Result, &result)
+	assert.That(t, "unmarshal error", err, nil)
+	assert.That(t, "description", result.Description, "Greeting for Andy")
+	assert.That(t, "message count", len(result.Messages), 2)
+	assert.That(t, "first role", result.Messages[0].Role, "user")
+	assert.That(t, "first text", result.Messages[0].Content.Text, "Hello Andy")
+	assert.That(t, "second role", result.Messages[1].Role, "assistant")
+}
+
+func Test_Server_With_PromptsGetUnknown_Should_ReturnError(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	input := handshake() + `{"jsonrpc":"2.0","method":"prompts/get","id":2,"params":{"name":"unknown"}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input, server.WithPrompts(testPromptsRegistry()))
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.InvalidParams)
+}
+
+func Test_Server_Without_Prompts_Should_RejectPromptsMethods(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	input := handshake() + `{"jsonrpc":"2.0","method":"prompts/list","id":2,"params":{}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input)
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.MethodNotFound)
+}
+
+// --- Progress + Logging tests ---
+
+func Test_Server_With_ProgressToken_Should_EmitProgressNotification(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — register a tool that reports progress
+	r := tools.NewRegistry()
+	if err := tools.Register(r, "slow", "slow tool", func(ctx context.Context, _ testInput) tools.Result {
+		p := server.ProgressFromContext(ctx)
+		p.Report(1, 10)
+		p.Report(10, 10)
+		return tools.TextResult("done")
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	input := handshake() +
+		`{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"slow","arguments":{"message":"test"},"_meta":{"progressToken":"tok-1"}}}` + "\n"
+
+	var stdout, stderr bytes.Buffer
+	srv := server.NewServer("mcp", "test", r, strings.NewReader(input), &stdout, &stderr)
+
+	// Act
+	err := srv.Run(context.Background())
+	assert.That(t, "error", err, nil)
+
+	// Assert — parse all messages from stdout (notifications + response)
+	dec := json.NewDecoder(&stdout)
+	var messages []json.RawMessage
+	for dec.More() {
+		var raw json.RawMessage
+		if uerr := dec.Decode(&raw); uerr != nil {
+			break
+		}
+		messages = append(messages, raw)
+	}
+	// Should have: init response, 2 progress notifications, tool response
+	assert.That(t, "message count", len(messages), 4)
+
+	// Verify first progress notification
+	var notif struct {
+		Method string `json:"method"`
+		Params struct {
+			Progress      int    `json:"progress"`
+			ProgressToken string `json:"progressToken"`
+			Total         int    `json:"total"`
+		} `json:"params"`
+	}
+	err = json.Unmarshal(messages[1], &notif)
+	assert.That(t, "unmarshal notif", err, nil)
+	assert.That(t, "method", notif.Method, "notifications/progress")
+	assert.That(t, "progress token", notif.Params.ProgressToken, "tok-1")
+	assert.That(t, "progress", notif.Params.Progress, 1)
+	assert.That(t, "total", notif.Params.Total, 10)
+}
+
+func Test_Server_Without_ProgressToken_Should_NotEmitProgress(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — tool reports progress but no _meta.progressToken in request
+	r := tools.NewRegistry()
+	if err := tools.Register(r, "fast", "fast tool", func(ctx context.Context, _ testInput) tools.Result {
+		p := server.ProgressFromContext(ctx)
+		p.Report(1, 1) // no-op because no token
+		return tools.TextResult("done")
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	input := handshake() +
+		`{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"fast","arguments":{"message":"test"}}}` + "\n"
+
+	var stdout, stderr bytes.Buffer
+	srv := server.NewServer("mcp", "test", r, strings.NewReader(input), &stdout, &stderr)
+
+	// Act
+	err := srv.Run(context.Background())
+	assert.That(t, "error", err, nil)
+
+	// Assert — only init response + tool response, no notifications
+	dec := json.NewDecoder(&stdout)
+	var count int
+	for dec.More() {
+		var raw json.RawMessage
+		if uerr := dec.Decode(&raw); uerr != nil {
+			break
+		}
+		count++
+	}
+	assert.That(t, "message count", count, 2)
+}
+
+func Test_Server_With_LoggingSetLevel_Should_SetLevel(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	input := handshake() + `{"jsonrpc":"2.0","method":"logging/setLevel","id":2,"params":{"level":"debug"}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input)
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "result", string(responses[1].Result), "{}")
+}
+
+func Test_Server_With_ToolHandler_Log_Should_EmitLogNotification(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — register a tool that logs
+	r := tools.NewRegistry()
+	if err := tools.Register(r, "logger", "logging tool", func(ctx context.Context, _ testInput) tools.Result {
+		p := server.ProgressFromContext(ctx)
+		p.Log("info", "test-logger", "hello from tool")
+		return tools.TextResult("done")
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	input := handshake() +
+		`{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"logger","arguments":{"message":"test"}}}` + "\n"
+
+	var stdout, stderr bytes.Buffer
+	srv := server.NewServer("mcp", "test", r, strings.NewReader(input), &stdout, &stderr)
+
+	// Act
+	err := srv.Run(context.Background())
+	assert.That(t, "error", err, nil)
+
+	// Assert — parse all messages from stdout
+	dec := json.NewDecoder(&stdout)
+	var messages []json.RawMessage
+	for dec.More() {
+		var raw json.RawMessage
+		if uerr := dec.Decode(&raw); uerr != nil {
+			break
+		}
+		messages = append(messages, raw)
+	}
+	// Should have: init response, log notification, tool response
+	assert.That(t, "message count", len(messages), 3)
+
+	// Verify log notification
+	var notif struct {
+		Method string `json:"method"`
+		Params struct {
+			Data   string `json:"data"`
+			Level  string `json:"level"`
+			Logger string `json:"logger"`
+		} `json:"params"`
+	}
+	err = json.Unmarshal(messages[1], &notif)
+	assert.That(t, "unmarshal notif", err, nil)
+	assert.That(t, "method", notif.Method, "notifications/message")
+	assert.That(t, "level", notif.Params.Level, "info")
+	assert.That(t, "logger", notif.Params.Logger, "test-logger")
+	assert.That(t, "data", notif.Params.Data, "hello from tool")
+}
+
+// --- SendRequest (bidirectional) tests ---
+
+func Test_Server_With_SendRequest_Should_CorrelateResponse(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — register a tool that uses SendRequest to call the client
+	r := tools.NewRegistry()
+	if err := tools.Register(r, "bidir", "bidirectional tool", func(ctx context.Context, _ testInput) tools.Result {
+		resp, err := server.SendRequestFromContext(ctx, "sampling/createMessage", map[string]string{"prompt": "hello"})
+		if err != nil {
+			return tools.ErrorResult("send request failed: " + err.Error())
+		}
+		return tools.TextResult("client said: " + string(resp.Result))
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Use pipes for bidirectional communication (both stdin and stdout)
+	stdinR, stdinW := io.Pipe()
+	stdoutR, stdoutW := io.Pipe()
+	var stderr bytes.Buffer
+	srv := server.NewServer("mcp", "test", r, stdinR, stdoutW, &stderr)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- srv.Run(context.Background())
+	}()
+
+	// Act — write handshake
+	_, _ = stdinW.Write([]byte(handshake()))
+
+	// Read stdout with a decoder (thread-safe via pipe)
+	dec := json.NewDecoder(stdoutR)
+
+	// First message: initialize response
+	var initResp json.RawMessage
+	_ = dec.Decode(&initResp)
+
+	// Write tool call
+	_, _ = stdinW.Write([]byte(`{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"bidir","arguments":{"message":"test"}}}` + "\n"))
+
+	// Second message: the server's sampling/createMessage request
+	var srvReq struct {
+		ID     json.RawMessage `json:"id"`
+		Method string          `json:"method"`
+	}
+	_ = dec.Decode(&srvReq)
+
+	// Write the response back to stdin
+	response := fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":"world"}`, string(srvReq.ID))
+	_, _ = stdinW.Write([]byte(response + "\n"))
+
+	// Third message: the tool call result
+	var toolResp json.RawMessage
+	_ = dec.Decode(&toolResp)
+
+	// Close stdin to trigger shutdown
+	_ = stdinW.Close()
+	err := <-done
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "method", srvReq.Method, "sampling/createMessage")
 }
