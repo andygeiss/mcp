@@ -30,7 +30,8 @@ sboms:
   - artifacts: archive
 
 signs:
-  - cmd: cosign
+  - id: bundle
+    cmd: cosign
     args:
       - sign-blob
       - --yes
@@ -38,3 +39,12 @@ signs:
       - ${artifact}
     artifacts: checksum
     signature: ${artifact}.bundle
+  - id: sig
+    cmd: cosign
+    args:
+      - sign-blob
+      - --yes
+      - --output-signature=${signature}
+      - ${artifact}
+    artifacts: checksum
+    signature: ${artifact}.sig
