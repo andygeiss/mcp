@@ -12,7 +12,7 @@ type greetInput struct {
 	Name string `json:"name" description:"Name to greet"`
 }
 
-func TestRegister_With_ValidPrompt_Should_Succeed(t *testing.T) {
+func Test_Register_With_ValidPrompt_Should_Succeed(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
@@ -39,7 +39,7 @@ func TestRegister_With_ValidPrompt_Should_Succeed(t *testing.T) {
 	assert.That(t, "argument desc", r.Prompts()[0].Arguments[0].Description, "Name to greet")
 }
 
-func TestRegister_With_DuplicateName_Should_ReturnError(t *testing.T) {
+func Test_Register_With_DuplicateName_Should_ReturnError(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
@@ -58,7 +58,7 @@ func TestRegister_With_DuplicateName_Should_ReturnError(t *testing.T) {
 	}
 }
 
-func TestLookup_With_RegisteredName_Should_ReturnPrompt(t *testing.T) {
+func Test_Lookup_With_RegisteredName_Should_ReturnPrompt(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
@@ -77,7 +77,7 @@ func TestLookup_With_RegisteredName_Should_ReturnPrompt(t *testing.T) {
 	assert.That(t, "name", p.Name, "greet")
 }
 
-func TestLookup_With_UnknownName_Should_ReturnFalse(t *testing.T) {
+func Test_Lookup_With_UnknownName_Should_ReturnFalse(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
@@ -90,7 +90,7 @@ func TestLookup_With_UnknownName_Should_ReturnFalse(t *testing.T) {
 	assert.That(t, "found", ok, false)
 }
 
-func TestPrompts_Should_ReturnSortedByName(t *testing.T) {
+func Test_Prompts_Should_ReturnSortedByName(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
@@ -110,7 +110,7 @@ func TestPrompts_Should_ReturnSortedByName(t *testing.T) {
 	assert.That(t, "second", all[1].Name, "zeta")
 }
 
-func TestUserMessage_Should_ReturnCorrectContent(t *testing.T) {
+func Test_UserMessage_Should_ReturnCorrectContent(t *testing.T) {
 	t.Parallel()
 
 	// Act
@@ -122,7 +122,7 @@ func TestUserMessage_Should_ReturnCorrectContent(t *testing.T) {
 	assert.That(t, "type", msg.Content.Type, "text")
 }
 
-func TestRegister_With_Handler_Should_ExecuteCorrectly(t *testing.T) {
+func Test_Register_With_Handler_Should_ExecuteCorrectly(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
@@ -152,7 +152,7 @@ type unsupportedInput struct {
 	Ch chan int `json:"ch"`
 }
 
-func TestRegister_With_UnsupportedInputType_Should_ReturnError(t *testing.T) {
+func Test_Register_With_UnsupportedInputType_Should_ReturnError(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
@@ -171,7 +171,7 @@ func TestRegister_With_UnsupportedInputType_Should_ReturnError(t *testing.T) {
 	}
 }
 
-func TestAssistantMessage_Should_ReturnCorrectContent(t *testing.T) {
+func Test_AssistantMessage_Should_ReturnCorrectContent(t *testing.T) {
 	t.Parallel()
 
 	// Act

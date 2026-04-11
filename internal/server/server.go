@@ -1156,8 +1156,7 @@ func (s *Server) handleResourcesRead(msg protocol.Request) protocol.Response {
 
 	result, err := res.Handler(ctx, params.URI)
 	if err != nil {
-		s.logger.Error("resource_read_error", "uri", params.URI, "error", err)
-		return s.errorResponse(msg.ID, protocol.ErrInternalError("failed to read resource: "+params.URI))
+		return s.errorResponse(msg.ID, err)
 	}
 
 	resp, rErr := protocol.NewResultResponse(msg.ID, resourcesReadResult{Contents: result.Contents})
@@ -1236,8 +1235,7 @@ func (s *Server) handlePromptsGet(msg protocol.Request) protocol.Response {
 
 	result, err := prompt.Handler(ctx, args)
 	if err != nil {
-		s.logger.Error("prompt_get_error", "name", params.Name, "error", err)
-		return s.errorResponse(msg.ID, protocol.ErrInternalError("failed to get prompt: "+params.Name))
+		return s.errorResponse(msg.ID, err)
 	}
 
 	resp, rErr := protocol.NewResultResponse(msg.ID, promptsGetResult{
