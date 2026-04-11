@@ -37,4 +37,4 @@ signs:
       - --bundle=${signature}
       - ${artifact}
     artifacts: all
-    signature: ${artifact}.bundle
+    signature: ${artifact}.sigstore.json
