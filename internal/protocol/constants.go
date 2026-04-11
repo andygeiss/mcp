@@ -21,19 +21,33 @@ const MaxConcurrentRequests = 1
 
 // MCP method constants.
 const (
-	MCPVersion              = "2025-06-18"
-	MethodInitialize        = "initialize"
-	MethodPing              = "ping"
-	MethodToolsCall         = "tools/call"
-	MethodToolsList         = "tools/list"
-	NotificationCancelled   = "notifications/cancelled"
-	NotificationInitialized = "notifications/initialized"
+	MCPVersion                       = "2025-11-25"
+	MethodCompletionComplete         = "completion/complete"
+	MethodInitialize                 = "initialize"
+	MethodLoggingSetLevel            = "logging/setLevel"
+	MethodPing                       = "ping"
+	MethodPromptsList                = "prompts/list"
+	MethodPromptsGet                 = "prompts/get"
+	MethodResourcesList              = "resources/list"
+	MethodResourcesRead              = "resources/read"
+	MethodResourcesSubscribe         = "resources/subscribe"
+	MethodResourcesUnsubscribe       = "resources/unsubscribe"
+	MethodToolsCall                  = "tools/call"
+	MethodToolsList                  = "tools/list"
+	NotificationCancelled            = "notifications/cancelled"
+	NotificationInitialized          = "notifications/initialized"
+	NotificationProgress             = "notifications/progress"
+	NotificationMessage              = "notifications/message"
+	NotificationResourcesListChanged = "notifications/resources/list_changed"
+	NotificationToolsListChanged     = "notifications/tools/list_changed"
+	NotificationPromptsListChanged   = "notifications/prompts/list_changed"
 )
 
 // Namespace prefix constants for method dispatch.
 const (
 	NamespaceCompletion  = "completion/"
 	NamespaceElicitation = "elicitation/"
+	NamespaceLogging     = "logging/"
 	NamespacePrompts     = "prompts/"
 	NamespaceResources   = "resources/"
 	PrefixRPC            = "rpc."

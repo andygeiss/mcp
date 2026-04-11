@@ -61,6 +61,14 @@ func ErrServerTimeout(msg string) *CodeError {
 	return &CodeError{Code: ServerTimeout, Message: msg}
 }
 
+// Notification represents a JSON-RPC 2.0 notification (server-initiated, no ID,
+// no response expected). Used for progress, logging, and list-changed events.
+type Notification struct {
+	JSONRPC string          `json:"jsonrpc"`
+	Method  string          `json:"method"`
+	Params  json.RawMessage `json:"params,omitempty"`
+}
+
 // Request represents a JSON-RPC 2.0 request or notification.
 type Request struct {
 	ID      json.RawMessage `json:"id,omitempty"`

@@ -8,31 +8,73 @@ import (
 	"fmt"
 )
 
+// IncomingMessage is a union type for messages arriving on stdin. It
+// distinguishes client requests/notifications (which have a Method field)
+// from client responses to server-initiated requests (which have Result or
+// Error but no Method).
+type IncomingMessage struct {
+	IsResponse bool
+	Request    Request
+	Response   Response
+}
+
 // Decode reads one JSON-RPC 2.0 message from the decoder. It detects batch
 // arrays (returning a parse error), normalizes absent or null params to {},
 // and returns the decoded Request.
 func Decode(dec *json.Decoder) (Request, error) {
+	msg, err := DecodeMessage(dec)
+	if err != nil {
+		return Request{}, err
+	}
+	if msg.IsResponse {
+		return Request{}, errors.New("unexpected response message")
+	}
+	return msg.Request, nil
+}
+
+// DecodeMessage reads one JSON-RPC 2.0 message from the decoder and classifies
+// it as either a request/notification (has "method") or a response to a
+// server-initiated request (has "result" or "error", no "method").
+func DecodeMessage(dec *json.Decoder) (IncomingMessage, error) {
 	var raw json.RawMessage
 	if err := dec.Decode(&raw); err != nil {
-		return Request{}, fmt.Errorf("decode message: %w", err)
+		return IncomingMessage{}, fmt.Errorf("decode message: %w", err)
 	}
 
 	// Batch detection: JSON array at top level is not supported.
 	if len(raw) > 0 && raw[0] == '[' {
-		return Request{}, errors.New("batch requests not supported")
+		return IncomingMessage{}, errors.New("batch requests not supported")
 	}
 
-	var msg Request
-	if err := json.Unmarshal(raw, &msg); err != nil {
-		return Request{}, fmt.Errorf("decode message: %w", err)
+	// Classify: a response has "result" or "error" (no "method"); a request
+	// has "method". Check for response indicators to handle case-insensitive
+	// field matching correctly (encoding/json v1 is case-insensitive).
+	var probe struct {
+		Method string          `json:"method"`
+		Result json.RawMessage `json:"result"`
+		Error  json.RawMessage `json:"error"`
+	}
+	_ = json.Unmarshal(raw, &probe)
+
+	isResponse := (len(probe.Result) > 0 || len(probe.Error) > 0) && probe.Method == ""
+	if !isResponse {
+		// It's a request or notification.
+		var msg Request
+		if err := json.Unmarshal(raw, &msg); err != nil {
+			return IncomingMessage{}, fmt.Errorf("decode message: %w", err)
+		}
+		if len(msg.Params) == 0 || bytes.Equal(msg.Params, []byte("null")) {
+			msg.Params = json.RawMessage("{}")
+		}
+		return IncomingMessage{Request: msg}, nil
 	}
 
-	// Normalize absent or null params to {}.
-	if len(msg.Params) == 0 || bytes.Equal(msg.Params, []byte("null")) {
-		msg.Params = json.RawMessage("{}")
+	// It's a response to a server-initiated request.
+	var resp Response
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return IncomingMessage{}, fmt.Errorf("decode message: %w", err)
 	}
-
-	return msg, nil
+	return IncomingMessage{IsResponse: true, Response: resp}, nil
 }
 
 // Validate checks structural validity of a decoded JSON-RPC 2.0 request:

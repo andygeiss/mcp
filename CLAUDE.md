@@ -12,7 +12,7 @@ Every decision — code, architecture, review, tooling — is evaluated from the
 
 Go implementation of the Model Context Protocol (MCP). Module path: `github.com/andygeiss/mcp`. The required Go version is defined in `go.mod` — always trust `go.mod` as the source of truth.
 
-Minimal, efficient MCP server communicating over stdin/stdout using JSON-RPC 2.0. Single CLI binary — no HTTP, no WebSocket. MCP protocol version: `2025-06-18`. This project serves as both a working MCP server and a scaffold for building custom MCP servers via `make init MODULE=...`.
+Minimal, efficient MCP server communicating over stdin/stdout using JSON-RPC 2.0. Single CLI binary — no HTTP, no WebSocket. MCP protocol version: `2025-11-25`. This project serves as both a working MCP server and a scaffold for building custom MCP servers via `make init MODULE=...`.
 
 Prefer the newest stdlib API available at the Go version declared in `go.mod`. No external `go.mod` dependencies beyond the standard library. CI toolchain tools (golangci-lint, GitHub Actions, Codecov) are exempt infrastructure, not project dependencies. Go 1.26 was chosen for Green Tea GC (10-40% overhead reduction), `reflect.Type.Fields` iterators, `signal.NotifyContext` cancel cause, and `errors.AsType[T]`. `GOEXPERIMENT=jsonv2` is **not supported** — the protocol codec relies on `encoding/json` v1 behavior.
 
@@ -40,14 +40,17 @@ cmd/mcp/                  # main.go — wiring only: parse flags, inject os.Stdi
 cmd/init/                 # template rewriter — for template-repo consumers: rewrites module path, renames binary dir, then self-deletes; not part of normal builds
 internal/
   assert/                 # lightweight test assertion helpers (assert.That) — stdlib only
+  prompts/                # prompt registry, reflection-based argument derivation from struct tags
   protocol/               # JSON-RPC 2.0 types, message codec, constants
-  server/                 # MCP server: lifecycle, capability negotiation, method dispatch, CLAUDE.md self-test
+  resources/              # resource registry, static resources and URI templates
+  schema/                 # shared JSON Schema derivation engine via reflection — used by tools and prompts
+  server/                 # MCP server: lifecycle, capability negotiation, method dispatch, progress/logging notifications, bidirectional transport
   tools/                  # tool registry, reflection-based schema derivation, individual tool handler implementations
 ```
 
 ### Dependency Direction
 
-`cmd/mcp/ → internal/server/ → internal/protocol/` and `internal/server/ → internal/tools/`. The `protocol` package has zero dependencies on other internal packages. The `tools` package may import `protocol` but never `server`. The `assert` package is test-only.
+`cmd/mcp/ → internal/server/ → internal/protocol/` and `internal/server/ → internal/tools/`, `internal/server/ → internal/resources/`, `internal/server/ → internal/prompts/`. The `protocol` package has zero dependencies on other internal packages. The `tools` and `prompts` packages may import `protocol` and `schema` but never `server`. The `resources` and `schema` packages have zero internal dependencies. The `assert` package is test-only.
 
 ### Transport Constraints
 
@@ -100,7 +103,23 @@ Use `encoding/json` with `omitempty` for optional fields — never `omitzero`. W
 
 ### Adding a New Tool
 
-Follow the simplest existing tool in `internal/tools/` as the template. Define an input struct with `json` and `description` tags — the input schema is auto-derived from struct fields via reflection (`tools/schema.go`), so no manual schema definition is needed. Implement a typed handler `func(ctx context.Context, input T) Result`, register via `tools.Register[T]` in `cmd/mcp/main.go`. Unit test the handler in isolation. Integration test through the full server (`//go:build integration`).
+Follow the simplest existing tool in `internal/tools/` as the template. Define an input struct with `json` and `description` tags — the input schema is auto-derived from struct fields via reflection (`schema/schema.go`), so no manual schema definition is needed. Implement a typed handler `func(ctx context.Context, input T) Result`, register via `tools.Register[T]` in `cmd/mcp/main.go`. Unit test the handler in isolation. Integration test through the full server (`//go:build integration`).
+
+### Adding a New Resource
+
+Use `resources.Register` with a URI, name, description, and handler function `func(ctx, uri) (Result, error)`. For URI templates, use `resources.RegisterTemplate`. Pass the registry to the server via `server.WithResources(registry)`. The server auto-advertises the `resources` capability when a registry is configured.
+
+### Adding a New Prompt
+
+Define an argument struct with `json` and `description` tags — arguments are auto-derived via the shared reflection engine (`schema/schema.go`). Implement a handler `func(ctx context.Context, input T) Result`, register via `prompts.Register[T]`. Pass the registry to the server via `server.WithPrompts(registry)`. The server auto-advertises the `prompts` capability when a registry is configured.
+
+### Progress and Logging from Tool Handlers
+
+Tool handlers receive a `*Progress` via context. Use `server.ProgressFromContext(ctx)` to extract it. Call `p.Report(current, total)` to emit progress notifications (requires client to send `_meta.progressToken` in the request). Call `p.Log(level, logger, data)` to emit log notifications. Both methods are nil-safe.
+
+### Server-to-Client Requests
+
+Tool handlers can send requests to the client (e.g., sampling, elicitation) via `server.SendRequestFromContext(ctx, method, params)`. The server correlates responses using a pending-request map with atomic ID generation.
 
 ## Coding Conventions
 

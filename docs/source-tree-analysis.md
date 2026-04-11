@@ -140,10 +140,14 @@ mcp/
 ```
 cmd/mcp/ ──→ internal/server/ ──→ internal/protocol/
                     │
-                    └──→ internal/tools/ ──→ internal/protocol/
+                    ├──→ internal/tools/     ──→ internal/protocol/
+                    │                             └──→ internal/schema/
+                    ├──→ internal/resources/
+                    └──→ internal/prompts/   ──→ internal/schema/
 
 internal/assert/    (test-only, zero internal deps)
 internal/protocol/  (zero internal deps — foundation layer)
+internal/schema/    (zero internal deps — shared reflection engine)
 ```
 
 ## Source File Details

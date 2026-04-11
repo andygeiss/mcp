@@ -10,10 +10,13 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/andygeiss/mcp/internal/prompts"
 	"github.com/andygeiss/mcp/internal/protocol"
+	"github.com/andygeiss/mcp/internal/resources"
 	"github.com/andygeiss/mcp/internal/tools"
 )
 
@@ -45,12 +48,19 @@ type Server struct {
 	inFlightCancelled bool
 	inFlightCh        chan inFlightResult
 	inFlightID        json.RawMessage
+	logLevel          string
 	logger            *slog.Logger
 	name              string
+	nextReqID         atomic.Int64
+	pending           map[string]chan protocol.Response
+	pendingMu         sync.Mutex
+	prompts           *prompts.Registry
 	registry          *tools.Registry
+	resources         *resources.Registry
 	requestCount      atomic.Int64
 	safetyMargin      time.Duration
 	state             int
+	stdoutMu          sync.Mutex
 	trace             bool
 	version           string
 }
@@ -72,6 +82,7 @@ type decodeResult struct {
 	err      error
 	exceeded bool
 	msg      protocol.Request
+	routed   bool // true if the message was a response routed to the pending map
 }
 
 // Option configures the Server.
@@ -82,6 +93,22 @@ type Option func(*Server)
 func WithHandlerTimeout(d time.Duration) Option {
 	return func(s *Server) {
 		s.handlerTimeout = d
+	}
+}
+
+// WithPrompts attaches a prompt registry to the server. When set, the
+// server advertises the prompts capability and dispatches prompts/ methods.
+func WithPrompts(p *prompts.Registry) Option {
+	return func(s *Server) {
+		s.prompts = p
+	}
+}
+
+// WithResources attaches a resource registry to the server. When set, the
+// server advertises the resources capability and dispatches resources/ methods.
+func WithResources(r *resources.Registry) Option {
+	return func(s *Server) {
+		s.resources = r
 	}
 }
 
@@ -115,6 +142,7 @@ func NewServer(name, version string, registry *tools.Registry, stdin io.Reader, 
 		dec:            json.NewDecoder(cr),
 		enc:            enc,
 		handlerTimeout: defaultHandlerTimeout,
+		pending:        make(map[string]chan protocol.Response),
 		safetyMargin:   defaultSafetyMargin,
 		logger:         slog.New(slog.NewJSONHandler(stderr, &slog.HandlerOptions{Level: slog.LevelInfo})),
 		name:           name,
@@ -154,8 +182,14 @@ func (s *Server) Run(ctx context.Context) error {
 	startDecode := func() {
 		go func() {
 			s.counting.Reset()
-			msg, err := protocol.Decode(s.dec)
-			decodeCh <- decodeResult{msg: msg, err: err, exceeded: s.counting.Exceeded()}
+			incoming, err := protocol.DecodeMessage(s.dec)
+			exceeded := s.counting.Exceeded()
+			if err == nil && incoming.IsResponse {
+				s.routeResponse(incoming.Response)
+				decodeCh <- decodeResult{routed: true, exceeded: exceeded}
+				return
+			}
+			decodeCh <- decodeResult{msg: incoming.Request, err: err, exceeded: exceeded}
 		}()
 	}
 
@@ -175,6 +209,62 @@ func (s *Server) Run(ctx context.Context) error {
 			runErr = loopErr
 			return runErr
 		}
+	}
+}
+
+// SendRequest sends a JSON-RPC 2.0 request to the client and waits for the
+// response. This enables server-to-client capabilities like sampling,
+// elicitation, and roots/list. Safe for concurrent use from handler goroutines.
+func (s *Server) SendRequest(ctx context.Context, method string, params any) (protocol.Response, error) {
+	id := s.nextReqID.Add(1)
+	idJSON, _ := json.Marshal(fmt.Sprintf("srv-%d", id))
+
+	ch := make(chan protocol.Response, 1)
+	key := string(idJSON)
+	s.pendingMu.Lock()
+	s.pending[key] = ch
+	s.pendingMu.Unlock()
+	defer func() {
+		s.pendingMu.Lock()
+		delete(s.pending, key)
+		s.pendingMu.Unlock()
+	}()
+
+	raw, err := json.Marshal(params)
+	if err != nil {
+		return protocol.Response{}, fmt.Errorf("marshal request params: %w", err)
+	}
+
+	req := protocol.Request{
+		ID:      json.RawMessage(idJSON),
+		JSONRPC: protocol.Version,
+		Method:  method,
+		Params:  json.RawMessage(raw),
+	}
+
+	s.stdoutMu.Lock()
+	err = s.enc.Encode(&req)
+	s.stdoutMu.Unlock()
+	if err != nil {
+		return protocol.Response{}, fmt.Errorf("encode request: %w", err)
+	}
+
+	select {
+	case resp := <-ch:
+		return resp, nil
+	case <-ctx.Done():
+		return protocol.Response{}, ctx.Err()
+	}
+}
+
+// routeResponse delivers a client response to the pending request map.
+// If no pending request matches the response ID, the response is silently dropped.
+func (s *Server) routeResponse(resp protocol.Response) {
+	s.pendingMu.Lock()
+	ch, ok := s.pending[string(resp.ID)]
+	s.pendingMu.Unlock()
+	if ok {
+		ch <- resp
 	}
 }
 
@@ -198,6 +288,10 @@ func (s *Server) runInFlight(ctx context.Context, decodeCh chan decodeResult, st
 		return s.processInFlightResult(ifr)
 
 	case dr := <-decodeCh:
+		if dr.routed {
+			startDecode()
+			return nil
+		}
 		err := s.handleDecodeResultDuringInFlight(ctx, dr)
 		if err != nil || dr.err != nil || dr.exceeded {
 			if err != nil {
@@ -220,6 +314,10 @@ func (s *Server) runInFlight(ctx context.Context, decodeCh chan decodeResult, st
 func (s *Server) runIdle(ctx context.Context, decodeCh chan decodeResult, startDecode func()) error {
 	select {
 	case dr := <-decodeCh:
+		if dr.routed {
+			startDecode()
+			return nil
+		}
 		err := s.handleDecodeResultIdle(ctx, dr)
 		if err != nil || dr.err != nil || dr.exceeded {
 			if err != nil {
@@ -360,7 +458,39 @@ func (s *Server) handleDecodeResultIdle(ctx context.Context, dr decodeResult) er
 	return nil
 }
 
+// sendNotification writes a JSON-RPC 2.0 notification to stdout. Notifications
+// have no ID and expect no response. Safe for concurrent use from handler goroutines.
+func (s *Server) sendNotification(method string, params any) error {
+	raw, err := json.Marshal(params)
+	if err != nil {
+		s.logger.Error("marshal_notification_params", "error", err, "method", method)
+		return fmt.Errorf("marshal notification params: %w", err)
+	}
+	n := protocol.Notification{
+		JSONRPC: protocol.Version,
+		Method:  method,
+		Params:  json.RawMessage(raw),
+	}
+	if s.trace {
+		if traceRaw, err := json.Marshal(n); err != nil {
+			s.logger.Warn("trace_marshal_notification", "error", err)
+		} else {
+			s.logger.Info("trace_notification", "direction", "→", "message", string(traceRaw))
+		}
+	}
+	s.stdoutMu.Lock()
+	err = s.enc.Encode(&n)
+	s.stdoutMu.Unlock()
+	if err != nil {
+		s.logger.Error("encode_notification", "error", err, "method", method)
+		return fmt.Errorf("encode notification: %w", err)
+	}
+	return nil
+}
+
 // encodeResponse writes a JSON-RPC response to stdout with optional trace logging.
+// All stdout writes are serialized via stdoutMu to prevent interleaved output
+// when notifications are sent concurrently from a tool handler goroutine.
 func (s *Server) encodeResponse(resp protocol.Response) error {
 	if s.trace {
 		if raw, err := json.Marshal(resp); err != nil {
@@ -369,7 +499,10 @@ func (s *Server) encodeResponse(resp protocol.Response) error {
 			s.logger.Info("trace_response", "direction", "→", "message", string(raw))
 		}
 	}
-	if err := protocol.Encode(s.enc, resp); err != nil {
+	s.stdoutMu.Lock()
+	err := protocol.Encode(s.enc, resp)
+	s.stdoutMu.Unlock()
+	if err != nil {
 		s.logger.Error("encode_error", "error", err)
 		return fmt.Errorf("encode error: %w", err)
 	}
@@ -431,6 +564,10 @@ func (s *Server) startToolCallAsync(ctx context.Context, msg protocol.Request) (
 	s.cancelInFlight = cancel
 	s.inFlightID = msg.ID
 	s.inFlightCh = make(chan inFlightResult, 1)
+
+	// Inject progress notifier into handler context.
+	prog := &Progress{server: s, token: extractProgressToken(msg.Params)}
+	callCtx = withProgress(callCtx, prog)
 
 	go func() {
 		defer cancel()
@@ -544,7 +681,10 @@ func (s *Server) handleDecodeError(err error) error {
 
 	s.logger.Error("decode_error", "error", err)
 	resp := protocol.NewErrorResponse(protocol.NullID(), protocol.ParseError, msg)
-	if encErr := protocol.Encode(s.enc, resp); encErr != nil {
+	s.stdoutMu.Lock()
+	encErr := protocol.Encode(s.enc, resp)
+	s.stdoutMu.Unlock()
+	if encErr != nil {
 		s.logger.Error("encode_error", "error", encErr)
 	}
 	return fmt.Errorf("fatal decode error: %w", err)
@@ -662,8 +802,22 @@ type initializeResult struct {
 }
 
 type initializeCapabilities struct {
-	Experimental map[string]any  `json:"experimental,omitempty"`
-	Tools        toolsCapability `json:"tools"`
+	Experimental map[string]any       `json:"experimental,omitempty"`
+	Logging      *loggingCapability   `json:"logging,omitempty"`
+	Prompts      *promptsCapability   `json:"prompts,omitempty"`
+	Resources    *resourcesCapability `json:"resources,omitempty"`
+	Tools        *toolsCapability     `json:"tools,omitempty"`
+}
+
+type loggingCapability struct{}
+
+type promptsCapability struct {
+	ListChanged bool `json:"listChanged"`
+}
+
+type resourcesCapability struct {
+	ListChanged bool `json:"listChanged"`
+	Subscribe   bool `json:"subscribe"`
 }
 
 type toolsCapability struct {
@@ -679,14 +833,26 @@ type serverInfo struct {
 func (s *Server) handleInitialize(msg protocol.Request) protocol.Response {
 	s.state = stateInitializing
 
-	result := initializeResult{
-		Capabilities: initializeCapabilities{
-			Experimental: map[string]any{
-				"concurrency": map[string]any{
-					"maxInFlight": protocol.MaxConcurrentRequests,
-				},
+	caps := initializeCapabilities{
+		Experimental: map[string]any{
+			"concurrency": map[string]any{
+				"maxInFlight": protocol.MaxConcurrentRequests,
 			},
 		},
+	}
+	caps.Logging = &loggingCapability{}
+	if s.prompts != nil {
+		caps.Prompts = &promptsCapability{}
+	}
+	if s.resources != nil {
+		caps.Resources = &resourcesCapability{}
+	}
+	if s.registry != nil {
+		caps.Tools = &toolsCapability{}
+	}
+
+	result := initializeResult{
+		Capabilities:    caps,
 		ProtocolVersion: protocol.MCPVersion,
 		ServerInfo:      serverInfo{Name: s.name, Version: s.version},
 	}
@@ -712,10 +878,18 @@ func (s *Server) handleMethod(msg protocol.Request) protocol.Response {
 		return s.handleUnsupportedCapability(msg)
 	case strings.HasPrefix(msg.Method, protocol.NamespaceElicitation):
 		return s.handleUnsupportedCapability(msg)
+	case msg.Method == protocol.MethodLoggingSetLevel:
+		return s.handleLoggingSetLevel(msg)
 	case strings.HasPrefix(msg.Method, protocol.NamespacePrompts):
-		return s.handleUnsupportedCapability(msg)
+		if s.prompts == nil {
+			return s.handleUnsupportedCapability(msg)
+		}
+		return s.handlePromptsMethod(msg)
 	case strings.HasPrefix(msg.Method, protocol.NamespaceResources):
-		return s.handleUnsupportedCapability(msg)
+		if s.resources == nil {
+			return s.handleUnsupportedCapability(msg)
+		}
+		return s.handleResourcesMethod(msg)
 	case msg.Method == protocol.MethodToolsCall:
 		// tools/call in ready state is intercepted by Run for async dispatch.
 		// If we reach here, something unexpected happened.
@@ -730,20 +904,38 @@ func (s *Server) handleMethod(msg protocol.Request) protocol.Response {
 }
 
 // handleUnsupportedCapability returns a -32601 response with guidance data
-// for methods in unsupported MCP namespaces (completion/, elicitation/, prompts/, resources/).
+// for methods in unsupported MCP namespaces.
 func (s *Server) handleUnsupportedCapability(msg protocol.Request) protocol.Response {
+	supported := s.supportedCapabilities()
 	data, _ := json.Marshal(&capabilityGuidance{
-		Hint:                  "this server supports tools only; use tools/list and tools/call",
-		SupportedCapabilities: []string{"tools"},
+		Hint:                  "this capability is not enabled; supported: " + strings.Join(supported, ", "),
+		SupportedCapabilities: supported,
 	})
 	ce := protocol.ErrMethodNotFound("method not found: " + msg.Method)
 	ce.Data = data
 	return s.errorResponse(msg.ID, ce)
 }
 
+// supportedCapabilities returns the list of capability names that this server
+// advertises, derived from which registries are configured.
+func (s *Server) supportedCapabilities() []string {
+	var caps []string
+	if s.prompts != nil {
+		caps = append(caps, "prompts")
+	}
+	if s.resources != nil {
+		caps = append(caps, "resources")
+	}
+	if s.registry != nil {
+		caps = append(caps, "tools")
+	}
+	return caps
+}
+
 // toolsListResult is the result of tools/list.
 type toolsListResult struct {
-	Tools []tools.Tool `json:"tools"`
+	NextCursor string       `json:"nextCursor,omitempty"`
+	Tools      []tools.Tool `json:"tools"`
 }
 
 // handleToolsList returns all registered tools.
@@ -761,6 +953,26 @@ func (s *Server) handleToolsList(msg protocol.Request) protocol.Response {
 type toolCallParams struct {
 	Arguments json.RawMessage `json:"arguments"`
 	Name      string          `json:"name"`
+}
+
+// extractProgressToken extracts the _meta.progressToken from raw tool call
+// params. Returns nil if absent. The _meta field uses a leading underscore per
+// the MCP spec, so it is extracted via map access rather than struct tags to
+// satisfy the camelCase linter rule.
+func extractProgressToken(raw json.RawMessage) json.RawMessage {
+	var m map[string]json.RawMessage
+	if json.Unmarshal(raw, &m) != nil {
+		return nil
+	}
+	meta, ok := m["_meta"]
+	if !ok {
+		return nil
+	}
+	var metaObj map[string]json.RawMessage
+	if json.Unmarshal(meta, &metaObj) != nil {
+		return nil
+	}
+	return metaObj["progressToken"]
 }
 
 // panicDiag is the machine-readable diagnostic attached to Error.Data when a
@@ -877,4 +1089,190 @@ func (s *Server) dispatchToolCall(ctx context.Context, tool tools.Tool, params j
 			message: fmt.Sprintf("tool %q execution timed out", tool.Name),
 		}
 	}
+}
+
+// --- Resources ---
+
+// resourcesListResult is the result of resources/list.
+type resourcesListResult struct {
+	NextCursor        string                       `json:"nextCursor,omitempty"`
+	ResourceTemplates []resources.ResourceTemplate `json:"resourceTemplates,omitempty"`
+	Resources         []resources.Resource         `json:"resources"`
+}
+
+// resourcesReadParams is the expected structure of resources/read params.
+type resourcesReadParams struct {
+	URI string `json:"uri"`
+}
+
+// resourcesReadResult is the result of resources/read.
+type resourcesReadResult struct {
+	Contents []resources.ContentBlock `json:"contents"`
+}
+
+// handleResourcesMethod dispatches resources/ methods.
+func (s *Server) handleResourcesMethod(msg protocol.Request) protocol.Response {
+	switch msg.Method {
+	case protocol.MethodResourcesList:
+		return s.handleResourcesList(msg)
+	case protocol.MethodResourcesRead:
+		return s.handleResourcesRead(msg)
+	default:
+		return s.errorResponse(msg.ID, protocol.ErrMethodNotFound("unknown method: "+msg.Method))
+	}
+}
+
+// handleResourcesList returns all registered resources and templates.
+func (s *Server) handleResourcesList(msg protocol.Request) protocol.Response {
+	result := resourcesListResult{
+		Resources:         s.resources.Resources(),
+		ResourceTemplates: s.resources.Templates(),
+	}
+	resp, err := protocol.NewResultResponse(msg.ID, result)
+	if err != nil {
+		s.logger.Error("marshal_resources_list", "error", err)
+		return s.errorResponse(msg.ID, protocol.ErrInternalError("failed to marshal resources list"))
+	}
+	return resp
+}
+
+// handleResourcesRead reads a specific resource by URI.
+func (s *Server) handleResourcesRead(msg protocol.Request) protocol.Response {
+	var params resourcesReadParams
+	if err := json.Unmarshal(msg.Params, &params); err != nil {
+		return s.errorResponse(msg.ID, protocol.ErrInvalidParams("invalid resources/read params"))
+	}
+	if params.URI == "" {
+		return s.errorResponse(msg.ID, protocol.ErrInvalidParams("uri is required"))
+	}
+
+	res, ok := s.resources.Lookup(params.URI)
+	if !ok {
+		return s.errorResponse(msg.ID, protocol.ErrInvalidParams("unknown resource: "+params.URI))
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), s.handlerTimeout)
+	defer cancel()
+
+	result, err := res.Handler(ctx, params.URI)
+	if err != nil {
+		s.logger.Error("resource_read_error", "uri", params.URI, "error", err)
+		return s.errorResponse(msg.ID, protocol.ErrInternalError("failed to read resource: "+params.URI))
+	}
+
+	resp, rErr := protocol.NewResultResponse(msg.ID, resourcesReadResult{Contents: result.Contents})
+	if rErr != nil {
+		s.logger.Error("marshal_resource_read", "error", rErr)
+		return s.errorResponse(msg.ID, protocol.ErrInternalError("failed to marshal resource read result"))
+	}
+	return resp
+}
+
+// --- Prompts ---
+
+// promptsListResult is the result of prompts/list.
+type promptsListResult struct {
+	NextCursor string           `json:"nextCursor,omitempty"`
+	Prompts    []prompts.Prompt `json:"prompts"`
+}
+
+// promptsGetParams is the expected structure of prompts/get params.
+type promptsGetParams struct {
+	Arguments map[string]string `json:"arguments,omitempty"`
+	Name      string            `json:"name"`
+}
+
+// promptsGetResult is the result of prompts/get.
+type promptsGetResult struct {
+	Description string            `json:"description,omitempty"`
+	Messages    []prompts.Message `json:"messages"`
+}
+
+// handlePromptsMethod dispatches prompts/ methods.
+func (s *Server) handlePromptsMethod(msg protocol.Request) protocol.Response {
+	switch msg.Method {
+	case protocol.MethodPromptsList:
+		return s.handlePromptsList(msg)
+	case protocol.MethodPromptsGet:
+		return s.handlePromptsGet(msg)
+	default:
+		return s.errorResponse(msg.ID, protocol.ErrMethodNotFound("unknown method: "+msg.Method))
+	}
+}
+
+// handlePromptsList returns all registered prompts.
+func (s *Server) handlePromptsList(msg protocol.Request) protocol.Response {
+	result := promptsListResult{Prompts: s.prompts.Prompts()}
+	resp, err := protocol.NewResultResponse(msg.ID, result)
+	if err != nil {
+		s.logger.Error("marshal_prompts_list", "error", err)
+		return s.errorResponse(msg.ID, protocol.ErrInternalError("failed to marshal prompts list"))
+	}
+	return resp
+}
+
+// handlePromptsGet resolves a prompt by name with arguments.
+func (s *Server) handlePromptsGet(msg protocol.Request) protocol.Response {
+	var params promptsGetParams
+	if err := json.Unmarshal(msg.Params, &params); err != nil {
+		return s.errorResponse(msg.ID, protocol.ErrInvalidParams("invalid prompts/get params"))
+	}
+	if params.Name == "" {
+		return s.errorResponse(msg.ID, protocol.ErrInvalidParams("name is required"))
+	}
+
+	prompt, ok := s.prompts.Lookup(params.Name)
+	if !ok {
+		return s.errorResponse(msg.ID, protocol.ErrInvalidParams("unknown prompt: "+params.Name))
+	}
+
+	args := params.Arguments
+	if args == nil {
+		args = make(map[string]string)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), s.handlerTimeout)
+	defer cancel()
+
+	result, err := prompt.Handler(ctx, args)
+	if err != nil {
+		s.logger.Error("prompt_get_error", "name", params.Name, "error", err)
+		return s.errorResponse(msg.ID, protocol.ErrInternalError("failed to get prompt: "+params.Name))
+	}
+
+	resp, rErr := protocol.NewResultResponse(msg.ID, promptsGetResult{
+		Description: result.Description,
+		Messages:    result.Messages,
+	})
+	if rErr != nil {
+		s.logger.Error("marshal_prompt_get", "error", rErr)
+		return s.errorResponse(msg.ID, protocol.ErrInternalError("failed to marshal prompt get result"))
+	}
+	return resp
+}
+
+// --- Logging ---
+
+// loggingSetLevelParams is the expected structure of logging/setLevel params.
+type loggingSetLevelParams struct {
+	Level string `json:"level"`
+}
+
+// handleLoggingSetLevel sets the server's client-facing log level.
+func (s *Server) handleLoggingSetLevel(msg protocol.Request) protocol.Response {
+	var params loggingSetLevelParams
+	if err := json.Unmarshal(msg.Params, &params); err != nil {
+		return s.errorResponse(msg.ID, protocol.ErrInvalidParams("invalid logging/setLevel params"))
+	}
+	if params.Level == "" {
+		return s.errorResponse(msg.ID, protocol.ErrInvalidParams("level is required"))
+	}
+	s.logLevel = params.Level
+	s.logger.Info("log_level_changed", "level", params.Level)
+
+	resp, err := protocol.NewResultResponse(msg.ID, json.RawMessage("{}"))
+	if err != nil {
+		return s.errorResponse(msg.ID, protocol.ErrInternalError("failed to marshal logging/setLevel result"))
+	}
+	return resp
 }

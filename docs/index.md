@@ -5,7 +5,7 @@
 - **Type:** Monolith CLI
 - **Primary Language:** Go 1.26
 - **Architecture:** Flat dependency chain, single binary, stdin/stdout transport
-- **MCP Version:** 2025-06-18
+- **MCP Version:** 2025-11-25
 - **Dependencies:** None (stdlib only)
 
 ## Quick Reference

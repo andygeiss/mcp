@@ -96,7 +96,7 @@ func Test_Integration_With_FullPipeline_Should_CompleteSuccessfully(t *testing.T
 	}
 	err = json.Unmarshal(responses[0].Result, &initResult)
 	assert.That(t, "init unmarshal", err, nil)
-	assert.That(t, "protocol version", initResult.ProtocolVersion, "2025-06-18")
+	assert.That(t, "protocol version", initResult.ProtocolVersion, "2025-11-25")
 	assert.That(t, "server name", initResult.ServerInfo.Name, "mcp")
 	assert.That(t, "server version", initResult.ServerInfo.Version, "1.0.0")
 

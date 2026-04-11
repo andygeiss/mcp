@@ -107,7 +107,7 @@ type CodeError struct {
 
 ```go
 // MCP protocol version
-const MCPVersion = "2025-06-18"
+const MCPVersion = "2025-11-25"
 
 // JSON-RPC methods
 const (
