@@ -520,6 +520,43 @@ import "github.com/new/mod/internal/protocol"
 	assert.That(t, "content", string(data), expected)
 }
 
+func Test_RewriteGoFiles_With_SkippedDir_Should_SkipIt(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	dir := t.TempDir()
+	// Create a .go file inside a .git directory (should be skipped)
+	gitDir := filepath.Join(dir, ".git")
+	err := os.MkdirAll(gitDir, 0o750)
+	assert.That(t, "mkdir error", err, nil)
+	err = os.WriteFile(filepath.Join(gitDir, "hooks.go"), []byte(`package hooks
+import "github.com/andygeiss/mcp/internal/server"
+`), 0o600)
+	assert.That(t, "write error", err, nil)
+
+	// Create a normal .go file
+	err = os.WriteFile(filepath.Join(dir, "main.go"), []byte(`package main
+import "github.com/andygeiss/mcp/internal/tools"
+`), 0o600)
+	assert.That(t, "write main", err, nil)
+
+	// Act
+	err = rewriteGoFiles(dir, "github.com/new/mod")
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	// main.go should be rewritten
+	data, _ := readFile(filepath.Join(dir, "main.go"))
+	assert.That(t, "main rewritten", string(data), `package main
+import "github.com/new/mod/internal/tools"
+`)
+	// .git/hooks.go should NOT be rewritten
+	gitData, _ := readFile(filepath.Join(gitDir, "hooks.go"))
+	assert.That(t, "git untouched", string(gitData), `package hooks
+import "github.com/andygeiss/mcp/internal/server"
+`)
+}
+
 func Test_RenameBinaryDir_With_NeitherExists_Should_ReturnError(t *testing.T) {
 	t.Parallel()
 
