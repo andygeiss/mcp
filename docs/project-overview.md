@@ -14,7 +14,7 @@ The project serves dual purposes:
 |---|---|
 | **Module Path** | `github.com/andygeiss/mcp` |
 | **Language** | Go 1.26 |
-| **MCP Version** | `2025-06-18` |
+| **MCP Version** | `2025-11-25` |
 | **Transport** | stdin/stdout (JSON-RPC 2.0, newline-delimited) |
 | **External Dependencies** | None (stdlib only) |
 | **License** | MIT |
@@ -80,11 +80,15 @@ The import graph is enforced by automated tests in `architecture_test.go`:
 - **45+ linter rules** enforced via golangci-lint with zero suppression policy
 - **Tool annotations** — behavioral hints (read-only, destructive, idempotent, open-world) for MCP clients
 - **Input validation** — path traversal prevention, null byte detection, length limits (4096 chars)
-- **Unsupported capability guidance** — methods in `completion/`, `elicitation/`, `prompts/`, `resources/` return `-32601` with structured guidance pointing to `tools/list` and `tools/call`
+- **Bidirectional transport** — `DecodeMessage` classifies requests vs responses; `SendRequest` with pending-response map enables server-to-client requests (sampling, elicitation, roots)
+- **Progress notifications** — context-injected `Progress` struct with `Report(current, total)` using `_meta.progressToken`
+- **Logging** — `logging/setLevel` handler and `notifications/message` emission from tool handlers
+- **Dynamic capability advertisement** — capabilities auto-derived from registered handlers
+- **Unsupported capability guidance** — methods in unconfigured namespaces return `-32601` with guidance listing available capabilities
 
 ## Protocol Compliance
 
-MCP version `2025-06-18`. JSON-RPC 2.0 with these specifics:
+MCP version `2025-11-25`. JSON-RPC 2.0 with these specifics:
 
 | Behavior | Implementation |
 |---|---|
@@ -161,8 +165,11 @@ MCP version `2025-06-18`. JSON-RPC 2.0 with these specifics:
 |---|---|
 | `cmd/mcp/` | MCP server binary — flags, I/O injection, signal handling |
 | `cmd/init/` | Template rewriter — module path rewriting, self-cleanup |
+| `internal/prompts/` | Prompt registry and argument derivation |
 | `internal/protocol/` | JSON-RPC 2.0 codec (3 source files) |
-| `internal/server/` | Server lifecycle and dispatch (2 source files, 13 test files) |
+| `internal/resources/` | Resource registry, static resources, URI templates |
+| `internal/schema/` | Shared JSON Schema derivation engine |
+| `internal/server/` | Server lifecycle, dispatch, notifications, bidirectional transport |
 | `internal/tools/` | Tool registry and schema (5 source files, 8 test files) |
 | `internal/assert/` | Generic test assertion helper |
 | `oss-fuzz/` | Google OSS-Fuzz integration (Dockerfile, build.sh, project.yaml) |

@@ -15,8 +15,11 @@ Use it directly, or use it as a **template** to scaffold your own MCP server in 
 
 ## Features
 
+- **MCP 2025-11-25** spec-complete protocol foundation
 - **JSON-RPC 2.0** over stdin/stdout -- newline-delimited, no LSP framing
-- **Automatic input schema** derived from Go struct tags via reflection -- no manual JSON Schema
+- **Tools, Resources, Prompts** -- all capabilities with auto-derived schemas via reflection
+- **Progress & Logging** -- context-injected notifications during tool execution
+- **Bidirectional transport** -- server-to-client requests (sampling, elicitation, roots)
 - **Three-state lifecycle** (uninitialized / initializing / ready) per the MCP spec
 - **Graceful shutdown** on SIGINT, SIGTERM, or EOF
 - **Per-message size limits** and handler timeouts with panic recovery
@@ -86,13 +89,16 @@ The input schema (`{"type":"object","properties":{"name":{"type":"string","descr
 cmd/mcp/           main.go -- wiring only: flags, I/O injection, os.Exit
 cmd/init/          template rewriter -- not part of normal builds
 internal/
+  prompts/         prompt registry, argument derivation
   protocol/        JSON-RPC 2.0 codec, types, constants
-  server/          lifecycle, dispatch, capability negotiation
-  tools/           registry, schema derivation, tool handlers
+  resources/       resource registry, static resources, URI templates
+  schema/          shared JSON Schema derivation via reflection
+  server/          lifecycle, dispatch, notifications, bidirectional transport
+  tools/           tool registry, schema derivation, tool handlers
   assert/          test assertion helpers
 ```
 
-**Dependency direction:** `cmd/mcp/ -> server/ -> protocol/`, `server/ -> tools/`. Protocol has zero internal dependencies. Tools may import protocol but never server.
+**Dependency direction:** `cmd/mcp/ -> server/ -> protocol/`, `server/ -> tools/`, `server/ -> resources/`, `server/ -> prompts/`. Protocol and schema have zero internal dependencies.
 
 **Transport rules:**
 - **stdout** is protocol-only. Every byte is a valid JSON-RPC message.
@@ -112,7 +118,7 @@ The test suite uses table-driven subtests, parallel execution, black-box package
 
 ## Protocol compliance
 
-MCP version `2025-06-18`. JSON-RPC 2.0 with these specifics:
+MCP version `2025-11-25`. JSON-RPC 2.0 with these specifics:
 
 | Behavior | Implementation |
 |---|---|
