@@ -22,10 +22,11 @@ Use it directly, or use it as a **template** to scaffold your own MCP server in 
 - **Bidirectional transport** -- server-to-client requests (sampling, elicitation, roots)
 - **Three-state lifecycle** (uninitialized / initializing / ready) per the MCP spec
 - **Graceful shutdown** on SIGINT, SIGTERM, or EOF
-- **Per-message size limits** and handler timeouts with panic recovery
+- **Per-message size limits** (4 MB) and handler timeouts (30s) with panic recovery
 - **Structured logging** to stderr via `slog.JSONHandler`
 - **Zero external dependencies** -- standard library only
-- **Fuzz-tested** JSON decoder
+- **Fuzz-tested** JSON decoder with 22-entry seed corpus
+- **54 linter rules** via golangci-lint v2 -- zero suppression policy
 
 ## Requirements
 
@@ -89,13 +90,13 @@ The input schema (`{"type":"object","properties":{"name":{"type":"string","descr
 cmd/mcp/           main.go -- wiring only: flags, I/O injection, os.Exit
 cmd/init/          template rewriter -- not part of normal builds
 internal/
+  assert/          test assertion helpers
   prompts/         prompt registry, argument derivation
   protocol/        JSON-RPC 2.0 codec, types, constants
   resources/       resource registry, static resources, URI templates
   schema/          shared JSON Schema derivation via reflection
   server/          lifecycle, dispatch, notifications, bidirectional transport
   tools/           tool registry, schema derivation, tool handlers
-  assert/          test assertion helpers
 ```
 
 **Dependency direction:** `cmd/mcp/ -> server/ -> protocol/`, `server/ -> tools/`, `server/ -> resources/`, `server/ -> prompts/`. Protocol and schema have zero internal dependencies.
@@ -112,9 +113,10 @@ go test -race ./...                                            # unit tests
 go test -race ./... -tags=integration                          # include integration tests
 go test -fuzz Fuzz_Decoder ./internal/protocol -fuzztime=30s   # fuzz the decoder
 golangci-lint run ./...                                        # lint
+make check                                                     # build + test + lint
 ```
 
-The test suite uses table-driven subtests, parallel execution, black-box packages, byte-exact golden comparisons, and fuzz targets for the protocol decoder.
+419 test functions, 33 conformance scenarios, 4 fuzz targets, 11 benchmarks, 90% coverage threshold enforced in CI.
 
 ## Protocol compliance
 
@@ -134,11 +136,11 @@ MCP version `2025-11-25`. JSON-RPC 2.0 with these specifics:
 
 Full project documentation lives in [`docs/`](docs/index.md):
 
-- [Project Overview](docs/project-overview.md)
-- [Architecture](docs/architecture.md)
-- [Source Tree Analysis](docs/source-tree-analysis.md)
-- [Development Guide](docs/development-guide.md)
-- [Deployment Guide](docs/deployment-guide.md)
+- [Project Overview](docs/project-overview.md) -- Executive summary, features, protocol compliance
+- [Architecture](docs/architecture.md) -- Package structure, state machine, dispatch model, schema derivation
+- [Source Tree Analysis](docs/source-tree-analysis.md) -- Annotated directory tree, per-package exports, test inventory
+- [Development Guide](docs/development-guide.md) -- Setup, testing, tool authoring, code conventions
+- [Deployment Guide](docs/deployment-guide.md) -- Build, release pipeline, CI/CD, platform support
 
 ## License
 
