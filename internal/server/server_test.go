@@ -3736,6 +3736,25 @@ func Test_Server_With_PromptsGetNoArgs_Should_ReturnInvalidParams(t *testing.T) 
 	assert.That(t, "error code", responses[1].Error.Code, protocol.InvalidParams)
 }
 
+func Test_Server_With_PromptsGetUnknownArg_Should_ReturnInvalidParams(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — "greet" only accepts "name"; "nme" is a typo
+	input := handshake() + `{"jsonrpc":"2.0","method":"prompts/get","id":2,"params":{"name":"greet","arguments":{"name":"Alice","nme":"typo"}}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input, server.WithPrompts(testPromptsRegistry()))
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "has error", responses[1].Error != nil, true)
+	if responses[1].Error != nil {
+		assert.That(t, "error code", responses[1].Error.Code, protocol.InvalidParams)
+		assert.That(t, "error mentions unknown arg", strings.Contains(responses[1].Error.Message, "unknown argument"), true)
+	}
+}
+
 func Test_Server_With_InitializeNoRegistries_Should_OmitOptionalCapabilities(t *testing.T) {
 	t.Parallel()
 

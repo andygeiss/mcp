@@ -1234,11 +1234,18 @@ func (s *Server) handlePromptsGet(msg protocol.Request) protocol.Response {
 		args = make(map[string]string)
 	}
 
+	known := make(map[string]bool, len(prompt.Arguments))
 	for _, arg := range prompt.Arguments {
+		known[arg.Name] = true
 		if arg.Required {
 			if _, ok := args[arg.Name]; !ok {
 				return s.errorResponse(msg.ID, protocol.ErrInvalidParams("missing required argument: "+arg.Name))
 			}
+		}
+	}
+	for name := range args {
+		if !known[name] {
+			return s.errorResponse(msg.ID, protocol.ErrInvalidParams("unknown argument: "+name))
 		}
 	}
 
