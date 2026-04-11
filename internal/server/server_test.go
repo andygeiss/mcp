@@ -3735,3 +3735,208 @@ func Test_Server_With_PromptsGetNoArgs_Should_ReturnInvalidParams(t *testing.T) 
 	assert.That(t, "response count", len(responses), 2)
 	assert.That(t, "error code", responses[1].Error.Code, protocol.InvalidParams)
 }
+
+func Test_Server_With_InitializeNoRegistries_Should_OmitOptionalCapabilities(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — server with empty tool registry, no prompts, no resources
+	input := initRequest
+
+	// Act
+	var stdout, stderr bytes.Buffer
+	srv := server.NewServer("bare", "0.0.0", tools.NewRegistry(), strings.NewReader(input), &stdout, &stderr)
+	err := srv.Run(context.Background())
+
+	// Assert
+	assert.That(t, "error", err, nil)
+
+	var resp protocol.Response
+	_ = json.NewDecoder(&stdout).Decode(&resp)
+
+	var result struct {
+		Capabilities struct {
+			Logging   *json.RawMessage `json:"logging"`
+			Prompts   *json.RawMessage `json:"prompts"`
+			Resources *json.RawMessage `json:"resources"`
+			Tools     *json.RawMessage `json:"tools"`
+		} `json:"capabilities"`
+	}
+	_ = json.Unmarshal(resp.Result, &result)
+	assert.That(t, "logging present", result.Capabilities.Logging != nil, true)
+	assert.That(t, "prompts absent", result.Capabilities.Prompts == nil, true)
+	assert.That(t, "resources absent", result.Capabilities.Resources == nil, true)
+	assert.That(t, "tools present", result.Capabilities.Tools != nil, true)
+}
+
+func Test_Server_With_ResourcesReadTemplateHandlerError_Should_ReturnInternalError(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — register a template with a handler that returns a plain error
+	reg := resources.NewRegistry()
+	_ = resources.RegisterTemplate(reg, "fail://{id}", "Fail", "Failing template",
+		func(_ context.Context, _ string) (resources.Result, error) {
+			return resources.Result{}, errors.New("template read failed")
+		},
+	)
+
+	input := handshake() + `{"jsonrpc":"2.0","method":"resources/read","id":2,"params":{"uri":"fail://123"}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input, server.WithResources(reg))
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.InternalError)
+}
+
+func Test_Server_With_ResourcesReadTemplateHandlerCodeError_Should_ReturnCodeError(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — template handler returns a CodeError
+	reg := resources.NewRegistry()
+	_ = resources.RegisterTemplate(reg, "perms://{path}", "Perms", "Permission check",
+		func(_ context.Context, _ string) (resources.Result, error) {
+			return resources.Result{}, protocol.ErrInvalidParams("access denied")
+		},
+	)
+
+	input := handshake() + `{"jsonrpc":"2.0","method":"resources/read","id":2,"params":{"uri":"perms://secret"}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input, server.WithResources(reg))
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.InvalidParams)
+	assert.That(t, "error message", responses[1].Error.Message, "access denied")
+}
+
+func Test_Server_With_ResourcesReadNoMatchStaticOrTemplate_Should_ReturnInvalidParams(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — registry has both static and template, but URI matches neither
+	input := handshake() + `{"jsonrpc":"2.0","method":"resources/read","id":2,"params":{"uri":"unknown://thing"}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input, server.WithResources(testResourcesRegistryWithTemplate()))
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.InvalidParams)
+}
+
+func Test_Server_With_TraceEnabledNotification_Should_LogTraceNotification(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — tool that emits a log notification, with trace enabled
+	r := tools.NewRegistry()
+	if err := tools.Register(r, "logger", "emits log", func(ctx context.Context, _ testInput) tools.Result {
+		p := server.ProgressFromContext(ctx)
+		p.Log("info", "test", "hello from tool")
+		return tools.TextResult("done")
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	input := handshake() +
+		`{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"logger","arguments":{"message":"x"}}}` + "\n"
+
+	var stdout, stderr bytes.Buffer
+	srv := server.NewServer("mcp", "test", r, strings.NewReader(input), &stdout, &stderr,
+		server.WithTrace(true),
+	)
+
+	// Act
+	err := srv.Run(context.Background())
+
+	// Assert
+	assert.That(t, "error", err, nil)
+
+	entries := parseLogEntries(t, &stderr)
+	traceNotif := findLogEntry(entries, "trace_notification")
+	if traceNotif == nil {
+		t.Fatal("expected trace_notification log entry")
+	}
+}
+
+func Test_Server_With_ResourcesListAndTemplates_Should_ReturnBoth(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — registry with both static resources and templates
+	input := handshake() + `{"jsonrpc":"2.0","method":"resources/list","id":2,"params":{}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input, server.WithResources(testResourcesRegistryWithTemplate()))
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "no error", responses[1].Error == nil, true)
+
+	var result struct {
+		Resources []struct {
+			URI string `json:"uri"`
+		} `json:"resources"`
+		ResourceTemplates []struct {
+			URITemplate string `json:"uriTemplate"`
+		} `json:"resourceTemplates"`
+	}
+	_ = json.Unmarshal(responses[1].Result, &result)
+	assert.That(t, "resource count", len(result.Resources), 1)
+	assert.That(t, "template count", len(result.ResourceTemplates), 1)
+	assert.That(t, "resource uri", result.Resources[0].URI, "config://app")
+	assert.That(t, "template uri", result.ResourceTemplates[0].URITemplate, "file://{path}")
+}
+
+func Test_Server_With_ToolCallErrorResult_Should_ReturnErrorFlag(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — tool returns an error result (isError flag)
+	r := tools.NewRegistry()
+	if err := tools.Register(r, "errtool", "returns error result", func(_ context.Context, _ testInput) tools.Result {
+		return tools.ErrorResult("something went wrong")
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	input := handshake() +
+		`{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"errtool","arguments":{"message":"x"}}}` + "\n"
+
+	var stdout, stderr bytes.Buffer
+	srv := server.NewServer("mcp", "test", r, strings.NewReader(input), &stdout, &stderr)
+
+	// Act
+	err := srv.Run(context.Background())
+
+	// Assert
+	assert.That(t, "error", err, nil)
+
+	var resps []protocol.Response
+	dec := json.NewDecoder(&stdout)
+	for {
+		var resp protocol.Response
+		if uerr := dec.Decode(&resp); uerr != nil {
+			break
+		}
+		resps = append(resps, resp)
+	}
+
+	if len(resps) < 2 {
+		t.Fatalf("expected at least 2 responses, got %d", len(resps))
+	}
+	toolResp := resps[1]
+	assert.That(t, "no protocol error", toolResp.Error == nil, true)
+
+	var result struct {
+		Content []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+		IsError bool `json:"isError"`
+	}
+	_ = json.Unmarshal(toolResp.Result, &result)
+	assert.That(t, "isError", result.IsError, true)
+	assert.That(t, "error text", result.Content[0].Text, "something went wrong")
+}

@@ -254,6 +254,208 @@ func Test_LookupTemplate_With_NoTemplates_Should_ReturnFalse(t *testing.T) {
 	assert.That(t, "found", ok, false)
 }
 
+func Test_LookupTemplate_With_UnclosedBrace_Should_NotMatch(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — register a template with an unclosed brace (malformed pattern)
+	r := resources.NewRegistry()
+	_ = resources.RegisterTemplate(r, "file://{path", "File", "Read a file",
+		func(_ context.Context, uri string) (resources.Result, error) {
+			return resources.TextResult(uri, "data"), nil
+		},
+	)
+
+	// Act
+	_, ok := r.LookupTemplate("file://readme.md")
+
+	// Assert
+	assert.That(t, "found", ok, false)
+}
+
+func Test_LookupTemplate_With_LiteralOnly_Should_MatchExactly(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — template has no variables, acts as exact match
+	r := resources.NewRegistry()
+	_ = resources.RegisterTemplate(r, "static://exact", "Static", "Exact match",
+		func(_ context.Context, uri string) (resources.Result, error) {
+			return resources.TextResult(uri, "static"), nil
+		},
+	)
+
+	// Act
+	tmpl, ok := r.LookupTemplate("static://exact")
+
+	// Assert
+	assert.That(t, "found", ok, true)
+	assert.That(t, "name", tmpl.Name, "Static")
+}
+
+func Test_LookupTemplate_With_LiteralOnlyMismatch_Should_NotMatch(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := resources.NewRegistry()
+	_ = resources.RegisterTemplate(r, "static://exact", "Static", "Exact match",
+		func(_ context.Context, uri string) (resources.Result, error) {
+			return resources.TextResult(uri, "static"), nil
+		},
+	)
+
+	// Act
+	_, ok := r.LookupTemplate("static://other")
+
+	// Assert
+	assert.That(t, "found", ok, false)
+}
+
+func Test_LookupTemplate_With_AdjacentVariables_Should_Match(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — two adjacent variables with no literal separator
+	r := resources.NewRegistry()
+	_ = resources.RegisterTemplate(r, "{scheme}{path}", "Adjacent", "Adjacent vars",
+		func(_ context.Context, uri string) (resources.Result, error) {
+			return resources.TextResult(uri, "adj"), nil
+		},
+	)
+
+	// Act — minimum: each variable matches at least one character
+	tmpl, ok := r.LookupTemplate("ab")
+
+	// Assert
+	assert.That(t, "found", ok, true)
+	assert.That(t, "name", tmpl.Name, "Adjacent")
+}
+
+func Test_LookupTemplate_With_AdjacentVariablesSingleChar_Should_NotMatch(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — two adjacent variables need at least 2 characters total
+	r := resources.NewRegistry()
+	_ = resources.RegisterTemplate(r, "{a}{b}", "Adjacent", "Adjacent vars",
+		func(_ context.Context, uri string) (resources.Result, error) {
+			return resources.TextResult(uri, "adj"), nil
+		},
+	)
+
+	// Act — only 1 char, cannot satisfy both variables
+	_, ok := r.LookupTemplate("x")
+
+	// Assert
+	assert.That(t, "found", ok, false)
+}
+
+func Test_LookupTemplate_With_LiteralPrefixMismatch_Should_NotMatch(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := resources.NewRegistry()
+	_ = resources.RegisterTemplate(r, "prefix://{id}", "Pre", "Prefix match",
+		func(_ context.Context, uri string) (resources.Result, error) {
+			return resources.TextResult(uri, "data"), nil
+		},
+	)
+
+	// Act — URI doesn't start with the literal prefix
+	_, ok := r.LookupTemplate("other://123")
+
+	// Assert
+	assert.That(t, "found", ok, false)
+}
+
+func Test_LookupTemplate_With_TrailingSuffix_Should_Match(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — template: prefix/{var}/suffix
+	r := resources.NewRegistry()
+	_ = resources.RegisterTemplate(r, "api/{version}/docs", "API", "API docs",
+		func(_ context.Context, uri string) (resources.Result, error) {
+			return resources.TextResult(uri, "docs"), nil
+		},
+	)
+
+	// Act
+	tmpl, ok := r.LookupTemplate("api/v2/docs")
+
+	// Assert
+	assert.That(t, "found", ok, true)
+	assert.That(t, "name", tmpl.Name, "API")
+}
+
+func Test_LookupTemplate_With_TrailingSuffixMismatch_Should_NotMatch(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — anchor after variable doesn't match
+	r := resources.NewRegistry()
+	_ = resources.RegisterTemplate(r, "api/{version}/docs", "API", "API docs",
+		func(_ context.Context, uri string) (resources.Result, error) {
+			return resources.TextResult(uri, "docs"), nil
+		},
+	)
+
+	// Act — suffix "docs" not present
+	_, ok := r.LookupTemplate("api/v2/other")
+
+	// Assert
+	assert.That(t, "found", ok, false)
+}
+
+func Test_LookupTemplate_With_ThreeAdjacentVariablesTwoChars_Should_NotMatch(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — three adjacent variables need at least 3 characters
+	r := resources.NewRegistry()
+	_ = resources.RegisterTemplate(r, "{a}{b}{c}", "Triple", "Triple vars",
+		func(_ context.Context, uri string) (resources.Result, error) {
+			return resources.TextResult(uri, "triple"), nil
+		},
+	)
+
+	// Act — only 2 chars, cannot satisfy 3 variables each needing 1+ char
+	_, ok := r.LookupTemplate("xy")
+
+	// Assert
+	assert.That(t, "found", ok, false)
+}
+
+func Test_LookupTemplate_With_ThreeAdjacentVariablesThreeChars_Should_Match(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	r := resources.NewRegistry()
+	_ = resources.RegisterTemplate(r, "{a}{b}{c}", "Triple", "Triple vars",
+		func(_ context.Context, uri string) (resources.Result, error) {
+			return resources.TextResult(uri, "triple"), nil
+		},
+	)
+
+	// Act — exactly 3 chars satisfies 3 adjacent variables
+	tmpl, ok := r.LookupTemplate("xyz")
+
+	// Assert
+	assert.That(t, "found", ok, true)
+	assert.That(t, "name", tmpl.Name, "Triple")
+}
+
+func Test_LookupTemplate_With_VariableAnchorNotFound_Should_NotMatch(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — variable followed by literal anchor that URI doesn't contain
+	r := resources.NewRegistry()
+	_ = resources.RegisterTemplate(r, "{host}:8080", "Host", "Host with port",
+		func(_ context.Context, uri string) (resources.Result, error) {
+			return resources.TextResult(uri, "host"), nil
+		},
+	)
+
+	// Act — URI has no ":8080" anchor
+	_, ok := r.LookupTemplate("localhost")
+
+	// Assert
+	assert.That(t, "found", ok, false)
+}
+
 func Test_Templates_Should_ReturnSortedByURITemplate(t *testing.T) {
 	t.Parallel()
 

@@ -229,6 +229,142 @@ func Test_handleInitialize_With_ValidRequest_Should_ReturnCapabilities(t *testin
 	assert.That(t, "state", s.state, stateInitializing)
 }
 
+// Test_handleInitialize_With_AllRegistries_Should_AdvertiseAllCapabilities covers
+// handleInitialize with prompts, resources, and tools registries all set.
+func Test_handleInitialize_With_AllRegistries_Should_AdvertiseAllCapabilities(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	s := newTestServer(t)
+	s.prompts = prompts.NewRegistry()
+	s.resources = resources.NewRegistry()
+
+	msg := protocol.Request{
+		JSONRPC: "2.0",
+		ID:      json.RawMessage(`1`),
+		Method:  "initialize",
+		Params:  json.RawMessage(`{"capabilities":{}}`),
+	}
+
+	// Act
+	resp := s.handleInitialize(msg)
+
+	// Assert
+	assert.That(t, "no error", resp.Error == nil, true)
+
+	var result struct {
+		Capabilities struct {
+			Logging   *json.RawMessage `json:"logging"`
+			Prompts   *json.RawMessage `json:"prompts"`
+			Resources *json.RawMessage `json:"resources"`
+			Tools     *json.RawMessage `json:"tools"`
+		} `json:"capabilities"`
+	}
+	_ = json.Unmarshal(resp.Result, &result)
+	assert.That(t, "logging", result.Capabilities.Logging != nil, true)
+	assert.That(t, "prompts", result.Capabilities.Prompts != nil, true)
+	assert.That(t, "resources", result.Capabilities.Resources != nil, true)
+	assert.That(t, "tools", result.Capabilities.Tools != nil, true)
+}
+
+// Test_handleLoggingSetLevel_With_ValidLevel_Should_Succeed covers
+// handleLoggingSetLevel happy path.
+func Test_handleLoggingSetLevel_With_ValidLevel_Should_Succeed(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	s := newTestServer(t)
+
+	msg := protocol.Request{
+		JSONRPC: "2.0",
+		ID:      json.RawMessage(`1`),
+		Method:  "logging/setLevel",
+		Params:  json.RawMessage(`{"level":"debug"}`),
+	}
+
+	// Act
+	resp := s.handleLoggingSetLevel(msg)
+
+	// Assert
+	assert.That(t, "no error", resp.Error == nil, true)
+	assert.That(t, "log level set", s.logLevel, "debug")
+}
+
+// Test_handleResourcesRead_With_TemplateMatch_Should_ReturnContent covers
+// handleResourcesRead lines 1155-1157: template fallback when static lookup fails.
+func Test_handleResourcesRead_With_TemplateMatch_Should_ReturnContent(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	s := newTestServer(t)
+	reg := resources.NewRegistry()
+	_ = resources.RegisterTemplate(reg, "file://{path}", "File", "Read a file",
+		func(_ context.Context, uri string) (resources.Result, error) {
+			return resources.TextResult(uri, "template content"), nil
+		},
+	)
+	s.resources = reg
+
+	msg := protocol.Request{
+		JSONRPC: "2.0",
+		ID:      json.RawMessage(`1`),
+		Method:  "resources/read",
+		Params:  json.RawMessage(`{"uri":"file://readme.md"}`),
+	}
+
+	// Act
+	resp := s.handleResourcesRead(msg)
+
+	// Assert
+	assert.That(t, "no error", resp.Error == nil, true)
+}
+
+// Test_handleResourcesMethod_With_UnknownMethod_Should_ReturnMethodNotFound covers
+// handleResourcesMethod default branch.
+func Test_handleResourcesMethod_With_UnknownMethod_Should_ReturnMethodNotFound(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	s := newTestServer(t)
+	s.resources = resources.NewRegistry()
+
+	msg := protocol.Request{
+		JSONRPC: "2.0",
+		ID:      json.RawMessage(`1`),
+		Method:  "resources/subscribe",
+		Params:  json.RawMessage(`{}`),
+	}
+
+	// Act
+	resp := s.handleResourcesMethod(msg)
+
+	// Assert
+	assert.That(t, "error code", resp.Error.Code, protocol.MethodNotFound)
+}
+
+// Test_handlePromptsMethod_With_UnknownMethod_Should_ReturnMethodNotFound covers
+// handlePromptsMethod default branch.
+func Test_handlePromptsMethod_With_UnknownMethod_Should_ReturnMethodNotFound(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	s := newTestServer(t)
+	s.prompts = prompts.NewRegistry()
+
+	msg := protocol.Request{
+		JSONRPC: "2.0",
+		ID:      json.RawMessage(`1`),
+		Method:  "prompts/complete",
+		Params:  json.RawMessage(`{}`),
+	}
+
+	// Act
+	resp := s.handlePromptsMethod(msg)
+
+	// Assert
+	assert.That(t, "error code", resp.Error.Code, protocol.MethodNotFound)
+}
+
 // Test_dispatchByState_With_UnknownState_Should_ReturnInternalError covers
 // dispatchByState lines 605-606: the default branch for unknown server state.
 func Test_dispatchByState_With_UnknownState_Should_ReturnInternalError(t *testing.T) {
@@ -804,6 +940,106 @@ func Test_handleDecodeResultDuringInFlight_With_ConcurrentCompletion_Should_Proc
 
 	// Assert
 	assert.That(t, "no error", err, nil)
+}
+
+// Test_handleDecodeResultDuringInFlight_With_TraceEnabled_Should_LogTrace covers
+// handleDecodeResultDuringInFlight lines 367-373: trace logging when receiving
+// a message during in-flight with trace mode enabled.
+func Test_handleDecodeResultDuringInFlight_With_TraceEnabled_Should_LogTrace(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	var stderr bytes.Buffer
+	s := newTestServer(t)
+	s.state = stateReady
+	s.trace = true
+	s.logger = slog.New(slog.NewJSONHandler(&stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	s.inFlightCh = make(chan inFlightResult, 1)
+	s.inFlightID = json.RawMessage(`1`)
+
+	msg := protocol.Request{
+		JSONRPC: "2.0",
+		ID:      json.RawMessage(`2`),
+		Method:  "ping",
+		Params:  json.RawMessage(`{}`),
+	}
+
+	// Act
+	err := s.handleDecodeResultDuringInFlight(context.Background(), decodeResult{msg: msg})
+
+	// Assert
+	assert.That(t, "no error", err, nil)
+	if !bytes.Contains(stderr.Bytes(), []byte("trace_request")) {
+		t.Fatal("expected trace_request log entry")
+	}
+}
+
+// Test_handleDecodeResultDuringInFlight_With_ConcurrentCompletionEncodeError_Should_ReturnError covers
+// handleDecodeResultDuringInFlight lines 378-380: handler completes concurrently
+// but processInFlightResult fails due to broken writer.
+func Test_handleDecodeResultDuringInFlight_With_ConcurrentCompletionEncodeError_Should_ReturnError(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	s := newTestServer(t)
+	s.state = stateReady
+	s.enc = json.NewEncoder(&brokenWriter{})
+	s.inFlightCh = make(chan inFlightResult, 1)
+	s.inFlightID = json.RawMessage(`1`)
+
+	// Simulate handler completing
+	resp, _ := protocol.NewResultResponse(json.RawMessage(`1`), json.RawMessage(`{}`))
+	s.inFlightCh <- inFlightResult{resp: resp}
+
+	msg := protocol.Request{
+		JSONRPC: "2.0",
+		ID:      json.RawMessage(`2`),
+		Method:  "ping",
+		Params:  json.RawMessage(`{}`),
+	}
+
+	// Act
+	err := s.handleDecodeResultDuringInFlight(context.Background(), decodeResult{msg: msg})
+
+	// Assert — processInFlightResult should fail due to broken writer
+	if err == nil {
+		t.Fatal("expected encode error from processInFlightResult")
+	}
+}
+
+// Test_handleDecodeResultDuringInFlight_With_BusyEncodeError_Should_CancelAndReturn covers
+// handleDecodeResultDuringInFlight lines 385-388: handleMessageDuringInFlight fails
+// due to broken writer, triggering cancelAndAwaitInFlight.
+func Test_handleDecodeResultDuringInFlight_With_BusyEncodeError_Should_CancelAndReturn(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	s := newTestServer(t)
+	s.state = stateReady
+	s.enc = json.NewEncoder(&brokenWriter{})
+	s.cancelInFlight = func() {}
+	s.inFlightCh = make(chan inFlightResult, 1)
+	s.inFlightID = json.RawMessage(`1`)
+
+	// Handler completes so cancelAndAwaitInFlight can read from channel
+	resp, _ := protocol.NewResultResponse(json.RawMessage(`1`), json.RawMessage(`{}`))
+	s.inFlightCh <- inFlightResult{resp: resp}
+
+	msg := protocol.Request{
+		JSONRPC: "2.0",
+		ID:      json.RawMessage(`2`),
+		Method:  "tools/list",
+		Params:  json.RawMessage(`{}`),
+	}
+
+	// Act — handleMessageDuringInFlight will fail encoding the busy error,
+	// which triggers cancelAndAwaitInFlight
+	err := s.handleDecodeResultDuringInFlight(context.Background(), decodeResult{msg: msg})
+
+	// Assert
+	if err == nil {
+		t.Fatal("expected encode error")
+	}
 }
 
 // Test_handleMessageDuringInFlight_With_BrokenWriter_Should_ReturnError covers
