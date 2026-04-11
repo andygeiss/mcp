@@ -2337,6 +2337,231 @@ func Test_Server_With_CancelledInFlight_Should_SuppressToolResponse(t *testing.T
 	assert.That(t, "init id", string(responses[0].ID), "1")
 }
 
+// Test_Server_With_MalformedToolsCallParams_Should_ReturnInvalidParams covers
+// startToolCallAsync lines 414-417: when tools/call params cannot be unmarshaled
+// into toolCallParams (e.g. "name" is an integer instead of a string).
+func Test_Server_With_MalformedToolsCallParams_Should_ReturnInvalidParams(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — params is a valid JSON object but "name" has wrong type
+	input := handshake() + `{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":123}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input)
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.InvalidParams)
+}
+
+// Test_Server_With_FastHandlerAndSlowDecode_Should_HitPriorityPath covers
+// runInFlight line 191: the non-blocking select that checks if the handler
+// has already completed before entering the blocking select. With a fast
+// handler and a pipe that delivers the next message after a delay, the
+// handler result lands on inFlightCh before the next decode completes.
+func Test_Server_With_FastHandlerAndSlowDecode_Should_HitPriorityPath(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — instant handler
+	r := tools.NewRegistry()
+	if err := tools.Register(r, "fast", "returns immediately", func(_ context.Context, input testInput) tools.Result {
+		return tools.TextResult(input.Message)
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	pr, pw := io.Pipe()
+	var stdout, stderr bytes.Buffer
+	srv := server.NewServer("mcp", "test", r, pr, &stdout, &stderr)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- srv.Run(context.Background())
+	}()
+
+	// Act — handshake
+	writeLine(pw, `{"jsonrpc":"2.0","method":"initialize","id":1,"params":{"capabilities":{}}}`)
+	writeLine(pw, `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
+
+	// Start a fast tool call — handler completes immediately
+	writeLine(pw, `{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"fast","arguments":{"message":"hello"}}}`)
+
+	// Wait long enough for handler to complete and result to be on inFlightCh
+	time.Sleep(100 * time.Millisecond)
+
+	// Now send next message — runInFlight's priority select should pick up the result first
+	writeLine(pw, `{"jsonrpc":"2.0","method":"ping","id":3,"params":{}}`)
+	time.Sleep(50 * time.Millisecond)
+
+	_ = pw.Close()
+	err := <-done
+
+	// Assert
+	assert.That(t, "error", err, nil)
+
+	var responses []protocol.Response
+	dec := json.NewDecoder(&stdout)
+	for {
+		var resp protocol.Response
+		if uerr := dec.Decode(&resp); uerr != nil {
+			break
+		}
+		responses = append(responses, resp)
+	}
+	// init + tool result + ping = 3 responses
+	if len(responses) < 3 {
+		t.Fatalf("expected at least 3 responses, got %d", len(responses))
+	}
+}
+
+// Test_Server_With_TraceEnabledEncodeResponse_Should_LogTraceResponse covers
+// encodeResponse trace logging branch (lines 365-371) for the idle path.
+func Test_Server_With_TraceEnabledEncodeResponse_Should_LogTraceResponse(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	input := handshake() + `{"jsonrpc":"2.0","method":"ping","id":2,"params":{}}` + "\n"
+	var stdout, stderr bytes.Buffer
+	srv := server.NewServer("mcp", "test", testRegistry(), strings.NewReader(input), &stdout, &stderr,
+		server.WithTrace(true),
+	)
+
+	// Act
+	err := srv.Run(context.Background())
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	entries := parseLogEntries(t, &stderr)
+	traceResp := findLogEntry(entries, "trace_response")
+	if traceResp == nil {
+		t.Fatal("expected trace_response log entry")
+	}
+	assert.That(t, "direction", traceResp["direction"], "→")
+}
+
+// Test_Server_With_TraceEnabledIdleDecode_Should_LogTraceRequest covers
+// handleDecodeResultIdle trace logging branch (lines 335-342).
+func Test_Server_With_TraceEnabledIdleDecode_Should_LogTraceRequest(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	input := handshake() + `{"jsonrpc":"2.0","method":"tools/list","id":2,"params":{}}` + "\n"
+	var stdout, stderr bytes.Buffer
+	srv := server.NewServer("mcp", "test", testRegistry(), strings.NewReader(input), &stdout, &stderr,
+		server.WithTrace(true),
+	)
+
+	// Act
+	err := srv.Run(context.Background())
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	entries := parseLogEntries(t, &stderr)
+	traceReqs := []map[string]any{}
+	for _, e := range entries {
+		if e["msg"] == "trace_request" {
+			traceReqs = append(traceReqs, e)
+		}
+	}
+	if len(traceReqs) == 0 {
+		t.Fatal("expected trace_request log entries")
+	}
+	assert.That(t, "direction", traceReqs[0]["direction"], "←")
+}
+
+// Test_Server_With_CompletionNamespace_Should_ReturnUnsupportedCapability covers
+// handleMethod lines 711-712 for the completion/ namespace.
+func Test_Server_With_CompletionNamespace_Should_ReturnUnsupportedCapability(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	input := handshake() + `{"jsonrpc":"2.0","method":"completion/complete","id":2,"params":{}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input)
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.MethodNotFound)
+}
+
+// Test_Server_With_ElicitationNamespace_Should_ReturnUnsupportedCapability covers
+// handleMethod lines 713-714 for the elicitation/ namespace.
+func Test_Server_With_ElicitationNamespace_Should_ReturnUnsupportedCapability(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	input := handshake() + `{"jsonrpc":"2.0","method":"elicitation/create","id":2,"params":{}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input)
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.MethodNotFound)
+}
+
+// Test_Server_With_ReservedRPCMethod_Should_ReturnMethodNotFound covers
+// handleMethod line 725-726 for rpc.* methods.
+func Test_Server_With_ReservedRPCMethod_Should_ReturnMethodNotFound(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	input := handshake() + `{"jsonrpc":"2.0","method":"rpc.discover","id":2,"params":{}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input)
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.MethodNotFound)
+	if !strings.Contains(responses[1].Error.Message, "reserved method") {
+		t.Errorf("expected 'reserved method' in message, got: %s", responses[1].Error.Message)
+	}
+}
+
+// Test_Server_With_DuplicateInitInInitializing_Should_ReturnError covers
+// dispatchByState line 594: sending initialize while in initializing state.
+func Test_Server_With_DuplicateInitInInitializing_Should_ReturnError(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — send init, then another init without sending notifications/initialized
+	input := initRequest + `{"jsonrpc":"2.0","method":"initialize","id":2,"params":{"capabilities":{}}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input)
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.ServerError)
+	assert.That(t, "error message", responses[1].Error.Message, "already initialized")
+}
+
+// Test_Server_With_MethodInInitializing_Should_ReturnError covers
+// dispatchByState line 597: sending a non-init method while in initializing state.
+func Test_Server_With_MethodInInitializing_Should_ReturnError(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — send init, then tools/list without initialized notification
+	input := initRequest + `{"jsonrpc":"2.0","method":"tools/list","id":2,"params":{}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input)
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.ServerError)
+	if !strings.Contains(responses[1].Error.Message, "awaiting") {
+		t.Errorf("expected 'awaiting' in message, got: %s", responses[1].Error.Message)
+	}
+}
+
 // Test_Server_With_InFlightCodeError_Should_IncrementErrorCount covers
 // processInFlightResult lines 509-511: when ifr.isError is true, errorCount
 // is incremented. A handler that returns *protocol.CodeError produces a
