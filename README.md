@@ -22,7 +22,7 @@ Use it directly, or **scaffold your own** with `make init`.
 - **MCP 2025-11-25** -- tools, resources (list/read), prompts, logging, progress
 - **JSON-RPC 2.0** over stdin/stdout -- newline-delimited, no LSP framing
 - **Auto-derived schemas** -- struct tags drive tool and prompt input schemas via reflection
-- **Bidirectional transport** -- server-to-client sampling, elicitation, and roots requests
+- **Bidirectional transport** -- generic server-to-client request primitive (no built-in handlers for sampling/elicitation/roots)
 - **Safe by default** -- per-message cap (4 MB), handler timeout (30s), panic recovery
 - **Structured diagnostics** -- `slog.JSONHandler` to stderr; stdout stays protocol-only
 - **Zero external dependencies** -- standard library only
@@ -55,7 +55,7 @@ Point any MCP client (Claude Desktop, VS Code, etc.) at the installed binary:
 }
 ```
 
-Set `MCP_TRACE=1` in the client's environment to log every request and response to stderr.
+Set `MCP_TRACE=1` in the client's environment to log every request and response to stderr. Trace output includes full tool arguments — do not enable in production if handlers may receive credentials or PII.
 
 ## Scaffold your own
 
