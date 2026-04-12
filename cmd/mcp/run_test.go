@@ -10,17 +10,17 @@ import (
 func Test_Run_With_VersionFlag_Should_ReturnNil(t *testing.T) {
 	t.Parallel()
 
-	// Arrange — override os.Args and os.Stdout
+	// Arrange — override os.Args and os.Stderr
 	origArgs := os.Args
-	origStdout := os.Stdout
+	origStderr := os.Stderr
 	t.Cleanup(func() {
 		os.Args = origArgs
-		os.Stdout = origStdout
+		os.Stderr = origStderr
 	})
 
 	r, w, err := os.Pipe()
 	assert.That(t, "pipe error", err, nil)
-	os.Stdout = w
+	os.Stderr = w
 	os.Args = []string{"mcp", "--version"}
 
 	// Act

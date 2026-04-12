@@ -8,13 +8,28 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ### Added
 
+- `internal/server`: MCP `initialize` now negotiates `protocolVersion` — echoes the client's version when it matches the server's supported version, otherwise falls back to the server's version. `clientInfo` is logged at the uninitialized→initializing transition.
+- `internal/server`: `ErrPendingRequestsFull` sentinel and `maxPendingRequests` cap (1024) on the server-to-client correlation map; `SendRequest` now returns the sentinel under back-pressure instead of growing the map without bound.
+- `internal/protocol`: JSON nesting depth guard (`maxJSONDepth = 64`) scanned before `Unmarshal` to prevent stack-exhaustion on pathological payloads.
 - `cmd/init`: refuses to run when the working tree has uncommitted changes. The trailing `resetGitHistory` step is destructive, so the guard prevents silent loss of in-progress edits. Pass `--force` to override.
 - `internal/schema`: `time.Time` now derives as `{"type":"string","format":"date-time"}`; `json.RawMessage` derives as an unconstrained schema (any JSON); recursive types fail fast with a clear error instead of exhausting the depth budget.
 
 ### Changed
 
+- `internal/tools`: `InputSchema`, `OutputSchema`, and `Property` are now type aliases to the `internal/schema` types so tools and prompts share the same JSON Schema vocabulary. Consumer source compiles unchanged.
+- `internal/server`: request context is now threaded through `dispatch → handle{Resources,Prompts}{Method,Read,Get}` so client disconnect and server shutdown cancel resource/prompt handlers promptly (previously rooted at `context.Background()`).
+- `internal/protocol`: response classification now rejects messages carrying both `result` and `error` per JSON-RPC 2.0 §5; a `null` value in either field is treated as absent so `{"result":null}` is no longer misclassified as a valid response.
+- `internal/prompts`: argument marshal/unmarshal errors are returned as `*protocol.CodeError{InvalidParams}` at the handler boundary (consistent with `internal/tools`).
+- `cmd/mcp`: `--version` now writes to stderr so stdout stays protocol-only even when the flag is invoked against the server binary.
+- Release and `make build`: enabled `-trimpath` so `go install …@latest` and release artifacts are path-reproducible.
+- `README.md`: clarified that bidirectional transport is a generic server-to-client primitive — no built-in handlers for sampling, elicitation, or roots. Added `MCP_TRACE=1` production warning.
 - `internal/protocol`: removed unused constants for out-of-scope methods (`MethodCompletionComplete`, `MethodResourcesSubscribe`, `MethodResourcesUnsubscribe`) and notifications (`NotificationResourcesListChanged`, `NotificationToolsListChanged`, `NotificationPromptsListChanged`). Remaining method/notification constants are alphabetized.
 - `internal/server`: capability structs (`prompts`, `resources`, `tools`) are now empty objects — previously they advertised `listChanged: false` / `subscribe: false` for features the server does not implement. The capability is still advertised (key presence signals support); the zero-value flags were noise.
+
+### Fixed
+
+- `internal/server`: `inFlightCancelled` converted from `bool` to `atomic.Bool` and reset at handler spawn (not post-processing) so a stale `notifications/cancelled` for a prior request cannot suppress the current handler's response.
+- `internal/server`: `resources/read` and `prompts/get` parameter-unmarshal errors now include the underlying parse error instead of the opaque `"invalid ... params"` string.
 
 ## [1.0.0] — 2026-04-12
 

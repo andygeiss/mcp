@@ -46,8 +46,8 @@ func Test_Integration_With_VersionFlagAndLdflags_Should_PrintVersionAndExit(t *t
 
 	// Assert
 	assert.That(t, "error", err, nil)
-	assert.That(t, "stdout", string(stdout), "v1.2.3\n")
-	assert.That(t, "stderr", stderr.String(), "")
+	assert.That(t, "stdout", string(stdout), "")
+	assert.That(t, "stderr", stderr.String(), "v1.2.3\n")
 }
 
 func Test_Integration_With_VersionFlagNoLdflags_Should_PrintDevAndExit(t *testing.T) {
@@ -64,8 +64,8 @@ func Test_Integration_With_VersionFlagNoLdflags_Should_PrintDevAndExit(t *testin
 
 	// Assert
 	assert.That(t, "error", err, nil)
-	assert.That(t, "stdout", string(stdout), "dev\n")
-	assert.That(t, "stderr", stderr.String(), "")
+	assert.That(t, "stdout", string(stdout), "")
+	assert.That(t, "stderr", stderr.String(), "dev\n")
 }
 
 func Test_Server_With_EOFAfterInitialize_Should_ExitCleanly(t *testing.T) {

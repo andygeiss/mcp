@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"testing"
 	"time"
@@ -229,6 +230,59 @@ func Test_handleInitialize_With_ValidRequest_Should_ReturnCapabilities(t *testin
 	assert.That(t, "state", s.state, stateInitializing)
 }
 
+// Test_handleInitialize_With_SupportedProtocolVersion_Should_EchoClientVersion
+// confirms the server echoes the client-sent protocolVersion when it matches
+// the server's supported version.
+func Test_handleInitialize_With_SupportedProtocolVersion_Should_EchoClientVersion(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	s := newTestServer(t)
+	params := fmt.Sprintf(`{"protocolVersion":%q,"clientInfo":{"name":"c","version":"1"}}`, protocol.MCPVersion)
+	msg := protocol.Request{
+		JSONRPC: "2.0",
+		ID:      json.RawMessage(`1`),
+		Method:  "initialize",
+		Params:  json.RawMessage(params),
+	}
+
+	// Act
+	resp := s.handleInitialize(msg)
+
+	// Assert
+	var result struct {
+		ProtocolVersion string `json:"protocolVersion"`
+	}
+	_ = json.Unmarshal(resp.Result, &result)
+	assert.That(t, "echoed protocolVersion", result.ProtocolVersion, protocol.MCPVersion)
+}
+
+// Test_handleInitialize_With_UnsupportedProtocolVersion_Should_ReturnServerVersion
+// confirms the server falls back to its own version when the client requests a
+// version the server does not support.
+func Test_handleInitialize_With_UnsupportedProtocolVersion_Should_ReturnServerVersion(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	s := newTestServer(t)
+	msg := protocol.Request{
+		JSONRPC: "2.0",
+		ID:      json.RawMessage(`1`),
+		Method:  "initialize",
+		Params:  json.RawMessage(`{"protocolVersion":"1999-01-01"}`),
+	}
+
+	// Act
+	resp := s.handleInitialize(msg)
+
+	// Assert
+	var result struct {
+		ProtocolVersion string `json:"protocolVersion"`
+	}
+	_ = json.Unmarshal(resp.Result, &result)
+	assert.That(t, "server protocolVersion", result.ProtocolVersion, protocol.MCPVersion)
+}
+
 // Test_handleInitialize_With_AllRegistries_Should_AdvertiseAllCapabilities covers
 // handleInitialize with prompts, resources, and tools registries all set.
 func Test_handleInitialize_With_AllRegistries_Should_AdvertiseAllCapabilities(t *testing.T) {
@@ -313,7 +367,7 @@ func Test_handleResourcesRead_With_TemplateMatch_Should_ReturnContent(t *testing
 	}
 
 	// Act
-	resp := s.handleResourcesRead(msg)
+	resp := s.handleResourcesRead(context.Background(), msg)
 
 	// Assert
 	assert.That(t, "no error", resp.Error == nil, true)
@@ -336,7 +390,7 @@ func Test_handleResourcesMethod_With_UnknownMethod_Should_ReturnMethodNotFound(t
 	}
 
 	// Act
-	resp := s.handleResourcesMethod(msg)
+	resp := s.handleResourcesMethod(context.Background(), msg)
 
 	// Assert
 	assert.That(t, "error code", resp.Error.Code, protocol.MethodNotFound)
@@ -359,7 +413,7 @@ func Test_handlePromptsMethod_With_UnknownMethod_Should_ReturnMethodNotFound(t *
 	}
 
 	// Act
-	resp := s.handlePromptsMethod(msg)
+	resp := s.handlePromptsMethod(context.Background(), msg)
 
 	// Assert
 	assert.That(t, "error code", resp.Error.Code, protocol.MethodNotFound)
@@ -382,7 +436,7 @@ func Test_dispatchByState_With_UnknownState_Should_ReturnInternalError(t *testin
 	}
 
 	// Act
-	resp := s.dispatchByState(msg)
+	resp := s.dispatchByState(context.Background(), msg)
 
 	// Assert
 	assert.That(t, "error code", resp.Error.Code, protocol.InternalError)
@@ -404,7 +458,7 @@ func Test_handleMethod_With_ToolsCall_Should_ReturnInternalError(t *testing.T) {
 	}
 
 	// Act
-	resp := s.handleMethod(msg)
+	resp := s.handleMethod(context.Background(), msg)
 
 	// Assert
 	assert.That(t, "error code", resp.Error.Code, protocol.InternalError)
@@ -427,7 +481,7 @@ func Test_dispatch_With_Ping_Should_ReturnResult(t *testing.T) {
 	}
 
 	// Act
-	resp, respond := s.dispatch(msg)
+	resp, respond := s.dispatch(context.Background(), msg)
 
 	// Assert
 	assert.That(t, "should respond", respond, true)
@@ -629,7 +683,7 @@ func Test_processInFlightResult_With_CancelledRequest_Should_SuppressResponse(t 
 
 	// Arrange
 	s := newTestServer(t)
-	s.inFlightCancelled = true
+	s.inFlightCancelled.Store(true)
 	s.inFlightID = json.RawMessage(`1`)
 	s.inFlightCh = make(chan inFlightResult, 1)
 
@@ -799,7 +853,7 @@ func Test_handlePromptsGet_With_HandlerError_Should_ReturnInternalError(t *testi
 	}
 
 	// Act
-	resp := s.handleResourcesRead(msg)
+	resp := s.handleResourcesRead(context.Background(), msg)
 
 	// Assert
 	assert.That(t, "error code", resp.Error.Code, protocol.InternalError)
@@ -829,7 +883,7 @@ func Test_handleResourcesRead_With_HandlerCodeError_Should_PassthroughCode(t *te
 	}
 
 	// Act
-	resp := s.handleResourcesRead(msg)
+	resp := s.handleResourcesRead(context.Background(), msg)
 
 	// Assert
 	assert.That(t, "error code", resp.Error.Code, protocol.InvalidParams)
@@ -910,6 +964,29 @@ func Test_SendRequest_With_UnmarshalableParams_Should_ReturnError(t *testing.T) 
 	if err == nil {
 		t.Fatal("expected marshal error")
 	}
+}
+
+// Test_SendRequest_With_PendingMapFull_Should_ReturnBackpressureError verifies
+// that SendRequest refuses to grow the correlation map past maxPendingRequests
+// and returns the exported ErrPendingRequestsFull sentinel.
+func Test_SendRequest_With_PendingMapFull_Should_ReturnBackpressureError(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — preload the map at capacity with dummy entries.
+	s := newTestServer(t)
+	s.pending = make(map[string]chan protocol.Response, maxPendingRequests)
+	for i := range maxPendingRequests {
+		s.pending[fmt.Sprintf("k-%d", i)] = make(chan protocol.Response, 1)
+	}
+
+	// Act
+	_, err := s.SendRequest(context.Background(), "test/method", struct{}{})
+
+	// Assert
+	if !errors.Is(err, ErrPendingRequestsFull) {
+		t.Fatalf("expected ErrPendingRequestsFull, got: %v", err)
+	}
+	assert.That(t, "map size unchanged", len(s.pending), maxPendingRequests)
 }
 
 // Test_handleDecodeResultDuringInFlight_With_ConcurrentCompletion_Should_ProcessBoth covers

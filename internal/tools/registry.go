@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/andygeiss/mcp/internal/protocol"
+	"github.com/andygeiss/mcp/internal/schema"
 )
 
 // Content type constants for tool result content blocks.
@@ -17,21 +18,6 @@ const (
 	ContentTypeImage        = "image"
 	ContentTypeResourceLink = "resource_link"
 	ContentTypeText         = "text"
-)
-
-const (
-	// SchemaTypeArray is the JSON Schema type for array values.
-	SchemaTypeArray = "array"
-	// SchemaTypeBoolean is the JSON Schema type for boolean values.
-	SchemaTypeBoolean = "boolean"
-	// SchemaTypeInteger is the JSON Schema type for integer values.
-	SchemaTypeInteger = "integer"
-	// SchemaTypeNumber is the JSON Schema type for numeric values.
-	SchemaTypeNumber = "number"
-	// SchemaTypeObject is the JSON Schema type for object values.
-	SchemaTypeObject = "object"
-	// SchemaTypeString is the JSON Schema type for string values.
-	SchemaTypeString = "string"
 )
 
 // ContentBlock represents a single content item in a tool result.
@@ -45,29 +31,15 @@ type ContentBlock struct {
 	URI      string `json:"uri,omitempty"`
 }
 
-// InputSchema describes the JSON Schema for a tool's input parameters.
-type InputSchema struct {
-	Properties map[string]Property `json:"properties,omitempty"`
-	Required   []string            `json:"required,omitempty"`
-	Type       string              `json:"type"`
-}
+// InputSchema aliases schema.InputSchema so tools and prompts share the same
+// JSON Schema vocabulary.
+type InputSchema = schema.InputSchema
 
-// Property describes a single property in a tool's input schema.
-type Property struct {
-	AdditionalProperties *Property           `json:"additionalProperties,omitempty"`
-	Description          string              `json:"description,omitempty"`
-	Items                *Property           `json:"items,omitempty"`
-	Properties           map[string]Property `json:"properties,omitempty"`
-	Required             []string            `json:"required,omitempty"`
-	Type                 string              `json:"type"`
-}
+// OutputSchema aliases schema.OutputSchema for structured tool output.
+type OutputSchema = schema.OutputSchema
 
-// OutputSchema describes the JSON Schema for a tool's structured output.
-type OutputSchema struct {
-	Properties map[string]Property `json:"properties,omitempty"`
-	Required   []string            `json:"required,omitempty"`
-	Type       string              `json:"type"`
-}
+// Property aliases schema.Property.
+type Property = schema.Property
 
 // Registry holds registered tools sorted alphabetically by name.
 // Not safe for concurrent use — register all tools before starting the server.
@@ -149,14 +121,14 @@ func Register[T any](r *Registry, name, description string, handler func(ctx con
 		return fmt.Errorf("duplicate tool name: %s", name)
 	}
 
-	schema, err := deriveSchema[T]()
+	inputSchema, err := schema.DeriveInputSchema[T]()
 	if err != nil {
 		return fmt.Errorf("derive schema for tool %q: %w", name, err)
 	}
 
 	wrapped := func(ctx context.Context, params json.RawMessage) (Result, error) {
 		var input T
-		if err := unmarshalAndValidate(params, &input, schema.Required); err != nil {
+		if err := unmarshalAndValidate(params, &input, inputSchema.Required); err != nil {
 			return Result{}, &protocol.CodeError{
 				Code:    protocol.InvalidParams,
 				Message: fmt.Sprintf("invalid arguments for tool %q: %v", name, err),
@@ -168,7 +140,7 @@ func Register[T any](r *Registry, name, description string, handler func(ctx con
 	tool := Tool{
 		Description: description,
 		Handler:     wrapped,
-		InputSchema: schema,
+		InputSchema: inputSchema,
 		Name:        name,
 	}
 	for _, opt := range opts {

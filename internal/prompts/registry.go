@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/andygeiss/mcp/internal/protocol"
 	"github.com/andygeiss/mcp/internal/schema"
 )
 
@@ -96,10 +97,16 @@ func Register[T any](r *Registry, name, description string, handler func(ctx con
 		var input T
 		raw, mErr := json.Marshal(args)
 		if mErr != nil {
-			return Result{}, fmt.Errorf("marshal prompt args: %w", mErr)
+			return Result{}, &protocol.CodeError{
+				Code:    protocol.InvalidParams,
+				Message: fmt.Sprintf("invalid arguments for prompt %q: %v", name, mErr),
+			}
 		}
 		if uErr := json.Unmarshal(raw, &input); uErr != nil {
-			return Result{}, fmt.Errorf("unmarshal prompt args: %w", uErr)
+			return Result{}, &protocol.CodeError{
+				Code:    protocol.InvalidParams,
+				Message: fmt.Sprintf("invalid arguments for prompt %q: %v", name, uErr),
+			}
 		}
 		return handler(ctx, input), nil
 	}

@@ -10,6 +10,8 @@ archives:
 builds:
   - main: ./cmd/mcp/
     binary: mcp
+    flags:
+      - -trimpath
     goos:
       - darwin
       - linux
