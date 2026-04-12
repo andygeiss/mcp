@@ -32,9 +32,16 @@ func repoShortForm(modulePath string) string {
 }
 
 // rewriteProject performs all rewrite operations on the project rooted at dir.
-func rewriteProject(dir, modulePath string) error {
+// When force is false and dir is a git working tree with uncommitted changes,
+// init refuses to run — the final resetGitHistory step would otherwise blow
+// away the user's in-progress edits irrecoverably.
+func rewriteProject(dir, modulePath string, force bool) error {
 	if modulePath != templateModulePath && strings.HasPrefix(modulePath, templateModulePath) {
 		return fmt.Errorf("module path %q must not extend template path %q", modulePath, templateModulePath)
+	}
+
+	if err := checkCleanWorkingTree(dir, force); err != nil {
+		return err
 	}
 
 	if err := rewriteGoMod(dir, modulePath); err != nil {
@@ -178,6 +185,34 @@ func rewriteTextFile(path, modulePath string) error {
 		return nil
 	}
 	return writeFile(path, replaced)
+}
+
+// checkCleanWorkingTree refuses to proceed when dir is a git repo with
+// uncommitted changes. init ends with resetGitHistory, which wipes .git and
+// captures only the on-disk state — any unstaged work would be lost with no
+// recovery path. When dir is not a git repo (fresh template extract, zip
+// download), the check is a no-op.
+func checkCleanWorkingTree(dir string, force bool) error {
+	if force {
+		return nil
+	}
+	info, statErr := os.Stat(filepath.Join(dir, ".git"))
+	if os.IsNotExist(statErr) || (statErr == nil && !info.IsDir()) {
+		return nil
+	}
+	if statErr != nil {
+		return fmt.Errorf("stat .git: %w", statErr)
+	}
+	cmd := exec.Command("git", "status", "--porcelain")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("git status: %w", err)
+	}
+	if len(bytes.TrimSpace(out)) > 0 {
+		return fmt.Errorf("working tree has uncommitted changes:\n%s\ncommit or stash them, or pass --force to proceed (destructive: init will reset git history)", out)
+	}
+	return nil
 }
 
 // resetGitHistory wipes any inherited .git and creates a single fresh commit on

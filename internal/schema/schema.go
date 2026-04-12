@@ -3,13 +3,20 @@
 package schema
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"slices"
 	"strings"
+	"time"
 )
 
 const maxSchemaDepth = 10
+
+var (
+	timeType       = reflect.TypeFor[time.Time]()
+	rawMessageType = reflect.TypeFor[json.RawMessage]()
+)
 
 // JSON Schema type constants.
 const (
@@ -39,10 +46,11 @@ type OutputSchema struct {
 type Property struct {
 	AdditionalProperties *Property           `json:"additionalProperties,omitempty"`
 	Description          string              `json:"description,omitempty"`
+	Format               string              `json:"format,omitempty"`
 	Items                *Property           `json:"items,omitempty"`
 	Properties           map[string]Property `json:"properties,omitempty"`
 	Required             []string            `json:"required,omitempty"`
-	Type                 string              `json:"type"`
+	Type                 string              `json:"type,omitempty"`
 }
 
 // DeriveInputSchema reflects over struct T to build an InputSchema.
@@ -58,7 +66,7 @@ func DeriveInputSchema[T any]() (InputSchema, error) {
 		Type:       TypeObject,
 	}
 
-	if err := collectFields(t, s.Properties, &s.Required, 0); err != nil {
+	if err := collectFields(t, s.Properties, &s.Required, 0, map[reflect.Type]bool{t: true}); err != nil {
 		return InputSchema{}, err
 	}
 
@@ -68,20 +76,22 @@ func DeriveInputSchema[T any]() (InputSchema, error) {
 
 // collectFields iterates struct fields, promoting anonymous embedded structs
 // and collecting named fields into the given property map and required slice.
-func collectFields(t reflect.Type, props map[string]Property, required *[]string, depth int) error {
+// visited tracks struct types currently being derived so recursive definitions
+// fail fast with a clear error instead of silently blowing the depth budget.
+func collectFields(t reflect.Type, props map[string]Property, required *[]string, depth int, visited map[reflect.Type]bool) error {
 	for field := range t.Fields() {
 		if field.Anonymous && shouldPromote(field) {
 			ft := field.Type
 			if ft.Kind() == reflect.Pointer {
 				ft = ft.Elem()
 			}
-			if err := collectFields(ft, props, required, depth); err != nil {
+			if err := collectFields(ft, props, required, depth, visited); err != nil {
 				return err
 			}
 			continue
 		}
 
-		if err := collectField(field, props, required, depth); err != nil {
+		if err := collectField(field, props, required, depth, visited); err != nil {
 			return err
 		}
 	}
@@ -106,7 +116,7 @@ func shouldPromote(field reflect.StructField) bool {
 }
 
 // collectField processes a single struct field into the property map.
-func collectField(field reflect.StructField, props map[string]Property, required *[]string, depth int) error {
+func collectField(field reflect.StructField, props map[string]Property, required *[]string, depth int, visited map[reflect.Type]bool) error {
 	jsonTag := field.Tag.Get("json")
 	if jsonTag == "" || jsonTag == "-" {
 		return nil
@@ -117,7 +127,7 @@ func collectField(field reflect.StructField, props map[string]Property, required
 		return nil
 	}
 
-	prop, err := deriveProperty(field.Name, field.Type, depth)
+	prop, err := deriveProperty(field.Name, field.Type, depth, visited)
 	if err != nil {
 		return err
 	}
@@ -135,14 +145,30 @@ func collectField(field reflect.StructField, props map[string]Property, required
 }
 
 // deriveProperty builds a Property for the given Go type.
-func deriveProperty(fieldName string, t reflect.Type, depth int) (Property, error) {
+func deriveProperty(fieldName string, t reflect.Type, depth int, visited map[reflect.Type]bool) (Property, error) {
 	if depth > maxSchemaDepth {
 		return Property{}, fmt.Errorf("exceeded max depth for type %s", t)
+	}
+	if p, ok := deriveSpecial(t); ok {
+		return p, nil
 	}
 	if p, ok := derivePrimitive(t); ok {
 		return p, nil
 	}
-	return deriveComposite(fieldName, t, depth)
+	return deriveComposite(fieldName, t, depth, visited)
+}
+
+// deriveSpecial handles well-known types that would otherwise be mis-derived:
+// time.Time marshals as an RFC3339 string (not a struct), and json.RawMessage
+// is a []byte holding arbitrary JSON — not an array of integers.
+func deriveSpecial(t reflect.Type) (Property, bool) {
+	switch t {
+	case timeType:
+		return Property{Type: TypeString, Format: "date-time"}, true
+	case rawMessageType:
+		return Property{}, true
+	}
+	return Property{}, false
 }
 
 // derivePrimitive returns a Property for Go primitive types.
@@ -163,38 +189,44 @@ func derivePrimitive(t reflect.Type) (Property, bool) {
 }
 
 // deriveComposite handles map, pointer, slice, and struct types.
-func deriveComposite(fieldName string, t reflect.Type, depth int) (Property, error) {
+func deriveComposite(fieldName string, t reflect.Type, depth int, visited map[reflect.Type]bool) (Property, error) {
 	switch t.Kind() {
 	case reflect.Map:
 		if t.Key().Kind() != reflect.String {
 			return Property{}, fmt.Errorf("unsupported map key type for field %q: %s (must be string)", fieldName, t.Key())
 		}
-		valProp, err := deriveProperty(fieldName, t.Elem(), depth+1)
+		valProp, err := deriveProperty(fieldName, t.Elem(), depth+1, visited)
 		if err != nil {
 			return Property{}, err
 		}
 		return Property{Type: TypeObject, AdditionalProperties: &valProp}, nil
 	case reflect.Pointer:
-		return deriveProperty(fieldName, t.Elem(), depth+1)
+		return deriveProperty(fieldName, t.Elem(), depth+1, visited)
 	case reflect.Slice:
-		elemProp, err := deriveProperty(fieldName, t.Elem(), depth+1)
+		elemProp, err := deriveProperty(fieldName, t.Elem(), depth+1, visited)
 		if err != nil {
 			return Property{}, err
 		}
 		return Property{Type: TypeArray, Items: &elemProp}, nil
 	case reflect.Struct:
-		return deriveStructProperty(t, depth+1)
+		return deriveStructProperty(t, depth+1, visited)
 	default:
 		return Property{}, fmt.Errorf("unsupported type for field %q: %s", fieldName, t)
 	}
 }
 
 // deriveStructProperty builds a Property with nested properties for a struct type.
-func deriveStructProperty(t reflect.Type, depth int) (Property, error) {
+func deriveStructProperty(t reflect.Type, depth int, visited map[reflect.Type]bool) (Property, error) {
+	if visited[t] {
+		return Property{}, fmt.Errorf("recursive type %s is not supported in JSON Schema derivation", t)
+	}
+	visited[t] = true
+	defer delete(visited, t)
+
 	props := make(map[string]Property)
 	var required []string
 
-	if err := collectFields(t, props, &required, depth); err != nil {
+	if err := collectFields(t, props, &required, depth, visited); err != nil {
 		return Property{}, err
 	}
 

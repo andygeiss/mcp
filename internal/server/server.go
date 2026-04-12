@@ -811,18 +811,11 @@ type initializeCapabilities struct {
 
 type loggingCapability struct{}
 
-type promptsCapability struct {
-	ListChanged bool `json:"listChanged"`
-}
+type promptsCapability struct{}
 
-type resourcesCapability struct {
-	ListChanged bool `json:"listChanged"`
-	Subscribe   bool `json:"subscribe"`
-}
+type resourcesCapability struct{}
 
-type toolsCapability struct {
-	ListChanged bool `json:"listChanged"`
-}
+type toolsCapability struct{}
 
 type serverInfo struct {
 	Name    string `json:"name"`

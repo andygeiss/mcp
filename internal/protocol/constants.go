@@ -19,28 +19,28 @@ const (
 // dispatch to clients. Not configurable — the server processes one request at a time.
 const MaxConcurrentRequests = 1
 
+// MCPVersion is the MCP protocol version advertised during initialize.
+const MCPVersion = "2025-11-25"
+
 // MCP method constants.
 const (
-	MCPVersion                       = "2025-11-25"
-	MethodCompletionComplete         = "completion/complete"
-	MethodInitialize                 = "initialize"
-	MethodLoggingSetLevel            = "logging/setLevel"
-	MethodPing                       = "ping"
-	MethodPromptsList                = "prompts/list"
-	MethodPromptsGet                 = "prompts/get"
-	MethodResourcesList              = "resources/list"
-	MethodResourcesRead              = "resources/read"
-	MethodResourcesSubscribe         = "resources/subscribe"
-	MethodResourcesUnsubscribe       = "resources/unsubscribe"
-	MethodToolsCall                  = "tools/call"
-	MethodToolsList                  = "tools/list"
-	NotificationCancelled            = "notifications/cancelled"
-	NotificationInitialized          = "notifications/initialized"
-	NotificationProgress             = "notifications/progress"
-	NotificationMessage              = "notifications/message"
-	NotificationResourcesListChanged = "notifications/resources/list_changed"
-	NotificationToolsListChanged     = "notifications/tools/list_changed"
-	NotificationPromptsListChanged   = "notifications/prompts/list_changed"
+	MethodInitialize      = "initialize"
+	MethodLoggingSetLevel = "logging/setLevel"
+	MethodPing            = "ping"
+	MethodPromptsGet      = "prompts/get"
+	MethodPromptsList     = "prompts/list"
+	MethodResourcesList   = "resources/list"
+	MethodResourcesRead   = "resources/read"
+	MethodToolsCall       = "tools/call"
+	MethodToolsList       = "tools/list"
+)
+
+// MCP notification constants.
+const (
+	NotificationCancelled   = "notifications/cancelled"
+	NotificationInitialized = "notifications/initialized"
+	NotificationMessage     = "notifications/message"
+	NotificationProgress    = "notifications/progress"
 )
 
 // Namespace prefix constants for method dispatch.
