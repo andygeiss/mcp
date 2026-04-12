@@ -1,0 +1,12 @@
+annotations:
+  - checks:
+      - pinned-dependencies
+    reasons:
+      - reason: not-supported
+        details: >-
+          slsa-framework/slsa-github-generator MUST be tag-pinned per upstream
+          requirements (README.md "Referencing SLSA builders and generators").
+          SHA pinning breaks builder-fetch.sh
+          (slsa-framework/slsa-github-generator#4216) and is blocked upstream on
+          slsa-framework/slsa-verifier#12 pending GitHub OIDC support for
+          workflow ref/branch/hash.
