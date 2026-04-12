@@ -23,7 +23,14 @@ import (
 const (
 	defaultHandlerTimeout = 30 * time.Second
 	defaultSafetyMargin   = time.Second
+	// maxPendingRequests caps the server-to-client request correlation map to
+	// prevent unbounded memory growth from misbehaving handlers.
+	maxPendingRequests = 1024
 )
+
+// ErrPendingRequestsFull is returned by SendRequest when the pending map is at
+// capacity. It signals back-pressure — the caller should retry later.
+var ErrPendingRequestsFull = errors.New("pending server-to-client requests full")
 
 // Server states. stateUninitialized must be iota 0 so the zero value of
 // Server.state matches the uninitialized lifecycle stage.
@@ -45,7 +52,7 @@ type Server struct {
 	enc               *json.Encoder
 	errorCount        atomic.Int64
 	handlerTimeout    time.Duration
-	inFlightCancelled bool
+	inFlightCancelled atomic.Bool
 	inFlightCh        chan inFlightResult
 	inFlightID        json.RawMessage
 	logLevel          string
@@ -222,6 +229,10 @@ func (s *Server) SendRequest(ctx context.Context, method string, params any) (pr
 	ch := make(chan protocol.Response, 1)
 	key := string(idJSON)
 	s.pendingMu.Lock()
+	if len(s.pending) >= maxPendingRequests {
+		s.pendingMu.Unlock()
+		return protocol.Response{}, ErrPendingRequestsFull
+	}
 	s.pending[key] = ch
 	s.pendingMu.Unlock()
 	defer func() {
@@ -403,7 +414,7 @@ func (s *Server) handleDecodeErrorDuringInFlight(dr decodeResult) error {
 	select {
 	case ifr := <-s.inFlightCh:
 		timer.Stop()
-		if !s.inFlightCancelled {
+		if !s.inFlightCancelled.Load() {
 			if ifr.isError {
 				s.errorCount.Add(1)
 			}
@@ -451,7 +462,7 @@ func (s *Server) handleDecodeResultIdle(ctx context.Context, dr decodeResult) er
 	}
 
 	// Normal synchronous dispatch for all other messages.
-	resp, respond := s.dispatch(dr.msg)
+	resp, respond := s.dispatch(ctx, dr.msg)
 	if respond {
 		return s.encodeResponse(resp)
 	}
@@ -564,6 +575,9 @@ func (s *Server) startToolCallAsync(ctx context.Context, msg protocol.Request) (
 	s.cancelInFlight = cancel
 	s.inFlightID = msg.ID
 	s.inFlightCh = make(chan inFlightResult, 1)
+	// Reset at spawn so a stale cancelled notification for the previous request
+	// cannot suppress this handler's response.
+	s.inFlightCancelled.Store(false)
 
 	// Inject progress notifier into handler context.
 	prog := &Progress{server: s, token: extractProgressToken(msg.Params)}
@@ -639,7 +653,7 @@ func (s *Server) cancelAndAwaitInFlight() {
 // was cancelled via notifications/cancelled, the response is suppressed per
 // MCP spec (receivers SHOULD NOT send a response for cancelled requests).
 func (s *Server) processInFlightResult(ifr inFlightResult) error {
-	if s.inFlightCancelled {
+	if s.inFlightCancelled.Load() {
 		s.clearInFlight()
 		return nil
 	}
@@ -657,7 +671,7 @@ func (s *Server) processInFlightResult(ifr inFlightResult) error {
 // clearInFlight resets all in-flight state after a tool call completes.
 func (s *Server) clearInFlight() {
 	s.cancelInFlight = nil
-	s.inFlightCancelled = false
+	s.inFlightCancelled.Store(false)
 	s.inFlightCh = nil
 	s.inFlightID = nil
 }
@@ -692,7 +706,7 @@ func (s *Server) handleDecodeError(err error) error {
 
 // dispatch routes a decoded message to the appropriate handler.
 // Returns (response, true) if a response should be sent, or (_, false) for notifications.
-func (s *Server) dispatch(msg protocol.Request) (protocol.Response, bool) {
+func (s *Server) dispatch(ctx context.Context, msg protocol.Request) (protocol.Response, bool) {
 	isNotification := len(msg.ID) == 0
 
 	// Centralized request validation.
@@ -718,11 +732,11 @@ func (s *Server) dispatch(msg protocol.Request) (protocol.Response, bool) {
 		return resp, true
 	}
 
-	return s.dispatchByState(msg), true
+	return s.dispatchByState(ctx, msg), true
 }
 
 // dispatchByState enforces the initialization state machine for non-ping requests.
-func (s *Server) dispatchByState(msg protocol.Request) protocol.Response {
+func (s *Server) dispatchByState(ctx context.Context, msg protocol.Request) protocol.Response {
 	switch s.state {
 	case stateUninitialized:
 		if msg.Method != protocol.MethodInitialize {
@@ -740,7 +754,7 @@ func (s *Server) dispatchByState(msg protocol.Request) protocol.Response {
 		if msg.Method == protocol.MethodInitialize {
 			return s.errorResponse(msg.ID, protocol.ErrServerError("already initialized"))
 		}
-		return s.handleMethod(msg)
+		return s.handleMethod(ctx, msg)
 
 	default:
 		return s.errorResponse(msg.ID, protocol.ErrInternalError("unknown server state"))
@@ -790,7 +804,7 @@ func (s *Server) handleCancelledNotification(msg protocol.Request) {
 	if !bytes.Equal(params.RequestID, s.inFlightID) {
 		return
 	}
-	s.inFlightCancelled = true
+	s.inFlightCancelled.Store(true)
 	s.cancelInFlight()
 }
 
@@ -822,8 +836,33 @@ type serverInfo struct {
 	Version string `json:"version"`
 }
 
-// handleInitialize processes the initialize request.
+// initializeParams is the subset of the initialize request we inspect for
+// version negotiation and clientInfo logging. Unknown fields are ignored.
+// The struct is unmarshal-only, so json tags need no `omitempty`.
+type initializeParams struct {
+	ClientInfo      clientInfo `json:"clientInfo"`
+	ProtocolVersion string     `json:"protocolVersion"`
+}
+
+// clientInfo mirrors the client-advertised identification block.
+type clientInfo struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
+// handleInitialize processes the initialize request. Per MCP 2025-11-25, if the
+// server supports the client's protocolVersion it echoes that version back;
+// otherwise it responds with its own supported version and the client decides
+// whether to proceed.
 func (s *Server) handleInitialize(msg protocol.Request) protocol.Response {
+	var params initializeParams
+	_ = json.Unmarshal(msg.Params, &params)
+
+	s.logger.Info("server_initializing",
+		"client_name", params.ClientInfo.Name,
+		"client_version", params.ClientInfo.Version,
+		"client_protocol_version", params.ProtocolVersion,
+	)
 	s.state = stateInitializing
 
 	caps := initializeCapabilities{
@@ -844,9 +883,14 @@ func (s *Server) handleInitialize(msg protocol.Request) protocol.Response {
 		caps.Tools = &toolsCapability{}
 	}
 
+	negotiated := protocol.MCPVersion
+	if params.ProtocolVersion == protocol.MCPVersion {
+		negotiated = params.ProtocolVersion
+	}
+
 	result := initializeResult{
 		Capabilities:    caps,
-		ProtocolVersion: protocol.MCPVersion,
+		ProtocolVersion: negotiated,
 		ServerInfo:      serverInfo{Name: s.name, Version: s.version},
 	}
 
@@ -865,7 +909,7 @@ type capabilityGuidance struct {
 }
 
 // handleMethod dispatches ready-state methods.
-func (s *Server) handleMethod(msg protocol.Request) protocol.Response {
+func (s *Server) handleMethod(ctx context.Context, msg protocol.Request) protocol.Response {
 	switch {
 	case strings.HasPrefix(msg.Method, protocol.NamespaceCompletion):
 		return s.handleUnsupportedCapability(msg)
@@ -877,12 +921,12 @@ func (s *Server) handleMethod(msg protocol.Request) protocol.Response {
 		if s.prompts == nil {
 			return s.handleUnsupportedCapability(msg)
 		}
-		return s.handlePromptsMethod(msg)
+		return s.handlePromptsMethod(ctx, msg)
 	case strings.HasPrefix(msg.Method, protocol.NamespaceResources):
 		if s.resources == nil {
 			return s.handleUnsupportedCapability(msg)
 		}
-		return s.handleResourcesMethod(msg)
+		return s.handleResourcesMethod(ctx, msg)
 	case msg.Method == protocol.MethodToolsCall:
 		// tools/call in ready state is intercepted by Run for async dispatch.
 		// If we reach here, something unexpected happened.
@@ -1104,12 +1148,12 @@ type resourcesReadResult struct {
 }
 
 // handleResourcesMethod dispatches resources/ methods.
-func (s *Server) handleResourcesMethod(msg protocol.Request) protocol.Response {
+func (s *Server) handleResourcesMethod(ctx context.Context, msg protocol.Request) protocol.Response {
 	switch msg.Method {
 	case protocol.MethodResourcesList:
 		return s.handleResourcesList(msg)
 	case protocol.MethodResourcesRead:
-		return s.handleResourcesRead(msg)
+		return s.handleResourcesRead(ctx, msg)
 	default:
 		return s.errorResponse(msg.ID, protocol.ErrMethodNotFound("unknown method: "+msg.Method))
 	}
@@ -1130,16 +1174,16 @@ func (s *Server) handleResourcesList(msg protocol.Request) protocol.Response {
 }
 
 // handleResourcesRead reads a specific resource by URI.
-func (s *Server) handleResourcesRead(msg protocol.Request) protocol.Response {
+func (s *Server) handleResourcesRead(ctx context.Context, msg protocol.Request) protocol.Response {
 	var params resourcesReadParams
 	if err := json.Unmarshal(msg.Params, &params); err != nil {
-		return s.errorResponse(msg.ID, protocol.ErrInvalidParams("invalid resources/read params"))
+		return s.errorResponse(msg.ID, protocol.ErrInvalidParams(fmt.Sprintf("invalid resources/read params: %v", err)))
 	}
 	if params.URI == "" {
 		return s.errorResponse(msg.ID, protocol.ErrInvalidParams("uri is required"))
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), s.handlerTimeout)
+	ctx, cancel := context.WithTimeout(ctx, s.handlerTimeout)
 	defer cancel()
 
 	var result resources.Result
@@ -1185,12 +1229,12 @@ type promptsGetResult struct {
 }
 
 // handlePromptsMethod dispatches prompts/ methods.
-func (s *Server) handlePromptsMethod(msg protocol.Request) protocol.Response {
+func (s *Server) handlePromptsMethod(ctx context.Context, msg protocol.Request) protocol.Response {
 	switch msg.Method {
 	case protocol.MethodPromptsList:
 		return s.handlePromptsList(msg)
 	case protocol.MethodPromptsGet:
-		return s.handlePromptsGet(msg)
+		return s.handlePromptsGet(ctx, msg)
 	default:
 		return s.errorResponse(msg.ID, protocol.ErrMethodNotFound("unknown method: "+msg.Method))
 	}
@@ -1208,10 +1252,10 @@ func (s *Server) handlePromptsList(msg protocol.Request) protocol.Response {
 }
 
 // handlePromptsGet resolves a prompt by name with arguments.
-func (s *Server) handlePromptsGet(msg protocol.Request) protocol.Response {
+func (s *Server) handlePromptsGet(ctx context.Context, msg protocol.Request) protocol.Response {
 	var params promptsGetParams
 	if err := json.Unmarshal(msg.Params, &params); err != nil {
-		return s.errorResponse(msg.ID, protocol.ErrInvalidParams("invalid prompts/get params"))
+		return s.errorResponse(msg.ID, protocol.ErrInvalidParams(fmt.Sprintf("invalid prompts/get params: %v", err)))
 	}
 	if params.Name == "" {
 		return s.errorResponse(msg.ID, protocol.ErrInvalidParams("name is required"))
@@ -1242,7 +1286,7 @@ func (s *Server) handlePromptsGet(msg protocol.Request) protocol.Response {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), s.handlerTimeout)
+	ctx, cancel := context.WithTimeout(ctx, s.handlerTimeout)
 	defer cancel()
 
 	result, err := prompt.Handler(ctx, args)
