@@ -128,11 +128,12 @@ Tool handlers receive a `*Progress` via context (`server.ProgressFromContext(ctx
 
 ## Bidirectional Transport
 
-`server.SendRequestFromContext(ctx, method, params)` enables server-to-client requests:
+`server.SendRequestFromContext(ctx, method, params)` is the primitive for server-to-client requests. No handlers for the following are built in -- consumers wire them as needed:
 - Sampling (LLM completion requests)
 - Elicitation (user input requests)
 - Roots listing
-- Responses correlated via pending-request map with atomic ID generation
+
+Responses are correlated via a pending-request map with atomic ID generation.
 
 ## JSON-RPC 2.0
 

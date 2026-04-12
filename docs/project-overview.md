@@ -24,9 +24,9 @@ The project serves two purposes:
 
 ## Features
 
-- **Tools, Resources, Prompts** -- full MCP capability set with auto-derived schemas via reflection
+- **Tools, Resources (list/read), Prompts** -- registry-driven, with auto-derived schemas via reflection
 - **Progress & Logging** -- context-injected notifications during tool execution
-- **Bidirectional transport** -- server-to-client requests (sampling, elicitation, roots)
+- **Bidirectional transport** -- generic server-to-client request primitive (basis for sampling, elicitation, roots; no built-in handlers)
 - **Three-state lifecycle** (uninitialized / initializing / ready) per the MCP spec
 - **Graceful shutdown** on SIGINT, SIGTERM, or EOF
 - **Per-message size limits** (4 MB) and handler timeouts (30s default) with panic recovery

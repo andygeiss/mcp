@@ -1,6 +1,6 @@
 # MCP Conformance Fixtures
 
-Static JSONL fixtures for black-box conformance testing of any MCP 2024-11-05 server over stdin/stdout.
+Static JSONL fixtures for black-box conformance testing of any MCP 2025-11-25 server over stdin/stdout.
 
 ## Format
 
