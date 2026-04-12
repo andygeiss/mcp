@@ -966,6 +966,29 @@ func Test_SendRequest_With_UnmarshalableParams_Should_ReturnError(t *testing.T) 
 	}
 }
 
+// Test_SendRequest_With_PendingMapFull_Should_ReturnBackpressureError verifies
+// that SendRequest refuses to grow the correlation map past maxPendingRequests
+// and returns the exported ErrPendingRequestsFull sentinel.
+func Test_SendRequest_With_PendingMapFull_Should_ReturnBackpressureError(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — preload the map at capacity with dummy entries.
+	s := newTestServer(t)
+	s.pending = make(map[string]chan protocol.Response, maxPendingRequests)
+	for i := range maxPendingRequests {
+		s.pending[fmt.Sprintf("k-%d", i)] = make(chan protocol.Response, 1)
+	}
+
+	// Act
+	_, err := s.SendRequest(context.Background(), "test/method", struct{}{})
+
+	// Assert
+	if !errors.Is(err, ErrPendingRequestsFull) {
+		t.Fatalf("expected ErrPendingRequestsFull, got: %v", err)
+	}
+	assert.That(t, "map size unchanged", len(s.pending), maxPendingRequests)
+}
+
 // Test_handleDecodeResultDuringInFlight_With_ConcurrentCompletion_Should_ProcessBoth covers
 // handleDecodeResultDuringInFlight lines 376-383: handler completes before message is fully handled.
 func Test_handleDecodeResultDuringInFlight_With_ConcurrentCompletion_Should_ProcessBoth(t *testing.T) {

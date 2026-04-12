@@ -124,6 +124,67 @@ func Test_Decode_With_BatchArray_Should_ReturnParseError(t *testing.T) {
 	assert.That(t, "error message", err.Error(), "batch requests not supported")
 }
 
+func Test_Decode_With_DeeplyNestedJSON_Should_ReturnError(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — 200 nested arrays inside a valid jsonrpc envelope; the
+	// envelope is shallow so only the params depth triggers the guard.
+	var sb strings.Builder
+	sb.WriteString(`{"jsonrpc":"2.0","method":"x","params":{"a":`)
+	for range 200 {
+		sb.WriteByte('[')
+	}
+	for range 200 {
+		sb.WriteByte(']')
+	}
+	sb.WriteString(`}}` + "\n")
+	dec := json.NewDecoder(strings.NewReader(sb.String()))
+
+	// Act
+	_, err := protocol.Decode(dec)
+
+	// Assert
+	if err == nil {
+		t.Fatal("expected depth-guard error for deeply nested JSON")
+	}
+	if !strings.Contains(err.Error(), "nesting exceeds max depth") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func Test_Decode_With_ResponseHavingBothResultAndError_Should_Reject(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — malformed response per JSON-RPC 2.0 §5.
+	input := `{"jsonrpc":"2.0","id":1,"result":{"ok":true},"error":{"code":-1,"message":"x"}}` + "\n"
+	dec := json.NewDecoder(strings.NewReader(input))
+
+	// Act
+	_, err := protocol.DecodeMessage(dec)
+
+	// Assert
+	if err == nil {
+		t.Fatal("expected error when response carries both result and error")
+	}
+	assert.That(t, "error message", err.Error(), "response has both result and error")
+}
+
+func Test_Decode_With_NullResultField_Should_NotClassifyAsResponse(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — "result":null alone used to be misclassified as a response.
+	input := `{"jsonrpc":"2.0","id":1,"method":"ping","result":null}` + "\n"
+	dec := json.NewDecoder(strings.NewReader(input))
+
+	// Act
+	msg, err := protocol.DecodeMessage(dec)
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "classified as request", msg.IsResponse, false)
+	assert.That(t, "method", msg.Request.Method, "ping")
+}
+
 func Test_Decode_With_Notification_Should_HaveZeroLengthID(t *testing.T) {
 	t.Parallel()
 
