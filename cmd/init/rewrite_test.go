@@ -3,11 +3,26 @@ package main
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
 	"github.com/andygeiss/mcp/internal/assert"
 )
+
+// isolateGit neutralizes the developer's global and system git configuration
+// and sets a throwaway identity so `git commit` succeeds deterministically in
+// tests and on a clean CI runner. Callers must not use t.Parallel — t.Setenv
+// is incompatible with parallel tests.
+func isolateGit(t *testing.T) {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("GIT_AUTHOR_NAME", "test")
+	t.Setenv("GIT_AUTHOR_EMAIL", "test@example.invalid")
+	t.Setenv("GIT_COMMITTER_NAME", "test")
+	t.Setenv("GIT_COMMITTER_EMAIL", "test@example.invalid")
+}
 
 func Test_RepoShortForm_With_VariousPaths_Should_ReturnOwnerRepo(t *testing.T) {
 	t.Parallel()
@@ -681,8 +696,12 @@ func Test_ShouldSkip_With_RegularDir_Should_ReturnFalse(t *testing.T) {
 	assert.That(t, "should not skip internal", shouldSkip(dir, subDir, info), false)
 }
 
+//nolint:paralleltest // rewriteProject ends with resetGitHistory; isolateGit uses t.Setenv which is incompatible with t.Parallel.
 func Test_RewriteProject_With_ValidProject_Should_RewriteEverything(t *testing.T) {
-	t.Parallel()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skipf("git not on PATH: %v", err)
+	}
+	isolateGit(t)
 
 	// Arrange — create a minimal project structure in a temp dir
 	dir := t.TempDir()

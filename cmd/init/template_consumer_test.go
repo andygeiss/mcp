@@ -31,11 +31,21 @@ func Test_Integration_With_TemplateConsumer_Should_PassAllQualityGates(t *testin
 	t.Log("running cmd/init...")
 	initCmd := exec.Command("go", "run", "./cmd/init", newModule)
 	initCmd.Dir = projectDir
-	initCmd.Env = os.Environ()
+	initCmd.Env = append(os.Environ(),
+		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_AUTHOR_NAME=test",
+		"GIT_AUTHOR_EMAIL=test@example.invalid",
+		"GIT_COMMITTER_NAME=test",
+		"GIT_COMMITTER_EMAIL=test@example.invalid",
+	)
 	initOut, err := initCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("cmd/init failed: %v\noutput: %s", err, initOut)
 	}
+
+	// Assert — fresh git history was created.
+	_, err = os.Stat(filepath.Join(projectDir, ".git", "HEAD"))
+	assert.That(t, ".git/HEAD exists after init", err, nil)
 
 	// Assert 1 — go build succeeds
 	t.Log("running go build...")
