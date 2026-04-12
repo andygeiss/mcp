@@ -65,6 +65,10 @@ func rewriteProject(dir, modulePath string) error {
 		return fmt.Errorf("verify zero fingerprint: %w", err)
 	}
 
+	if err := resetGitHistory(dir); err != nil {
+		return fmt.Errorf("reset git history: %w", err)
+	}
+
 	return nil
 }
 
@@ -174,6 +178,41 @@ func rewriteTextFile(path, modulePath string) error {
 		return nil
 	}
 	return writeFile(path, replaced)
+}
+
+// resetGitHistory wipes any inherited .git and creates a single fresh commit on
+// branch main. The consumer starts from a clean history under their own git
+// identity — the template's PRs, tags, and authorship do not carry over.
+// Runs last, so the initial commit captures the verified-clean project state.
+func resetGitHistory(dir string) error {
+	if err := os.RemoveAll(filepath.Join(dir, ".git")); err != nil {
+		return fmt.Errorf("remove .git: %w", err)
+	}
+
+	initCmd := exec.Command("git", "init", "-b", "main")
+	initCmd.Dir = dir
+	initCmd.Stdout = os.Stderr
+	initCmd.Stderr = os.Stderr
+	if err := initCmd.Run(); err != nil {
+		return fmt.Errorf("git init: %w", err)
+	}
+
+	addCmd := exec.Command("git", "add", ".")
+	addCmd.Dir = dir
+	addCmd.Stdout = os.Stderr
+	addCmd.Stderr = os.Stderr
+	if err := addCmd.Run(); err != nil {
+		return fmt.Errorf("git add: %w", err)
+	}
+
+	commitCmd := exec.Command("git", "commit", "-m", "feat: initial version")
+	commitCmd.Dir = dir
+	commitCmd.Stdout = os.Stderr
+	commitCmd.Stderr = os.Stderr
+	if err := commitCmd.Run(); err != nil {
+		return fmt.Errorf("git commit: %w", err)
+	}
+	return nil
 }
 
 // runGoModTidy executes go mod tidy in the project directory.

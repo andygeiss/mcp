@@ -37,7 +37,7 @@ Flat and simple — no hexagonal layers, no bounded contexts. Complexity is adde
 
 ```
 cmd/mcp/                  # main.go — wiring only: parse flags, inject os.Stdin/os.Stdout/os.Stderr, call server.Run, os.Exit
-cmd/init/                 # template rewriter — for template-repo consumers: rewrites module path, then self-deletes; the binary dir stays at cmd/mcp; not part of normal builds
+cmd/init/                 # template rewriter — for template-repo consumers: rewrites module path, self-deletes, and resets git history with an initial commit on branch main; the binary dir stays at cmd/mcp; not part of normal builds
 internal/
   assert/                 # lightweight test assertion helpers (assert.That) — stdlib only
   prompts/                # prompt registry, reflection-based argument derivation from struct tags

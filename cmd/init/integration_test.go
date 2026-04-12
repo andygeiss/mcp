@@ -31,7 +31,13 @@ func Test_Integration_With_FullInit_Should_ProduceWorkingProject(t *testing.T) {
 	// Act — run init
 	cmd := exec.Command("go", "run", "./cmd/init", newModule)
 	cmd.Dir = projectDir
-	cmd.Env = os.Environ()
+	cmd.Env = append(os.Environ(),
+		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_AUTHOR_NAME=test",
+		"GIT_AUTHOR_EMAIL=test@example.invalid",
+		"GIT_COMMITTER_NAME=test",
+		"GIT_COMMITTER_EMAIL=test@example.invalid",
+	)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	err = cmd.Run()
@@ -90,6 +96,27 @@ func Test_Integration_With_FullInit_Should_ProduceWorkingProject(t *testing.T) {
 		assert.That(t, name+" read rewritten", gotErr, nil)
 		assert.That(t, name+" byte-identical", string(got), string(orig))
 	}
+
+	// Assert — fresh git history with a single initial commit on main.
+	_, err = os.Stat(filepath.Join(projectDir, ".git", "HEAD"))
+	assert.That(t, ".git/HEAD exists", err, nil)
+	assert.That(t, "commit count", gitOutput(t, projectDir, "rev-list", "--count", "HEAD"), "1")
+	assert.That(t, "commit subject", gitOutput(t, projectDir, "log", "-1", "--format=%s"), "feat: initial version")
+	assert.That(t, "branch", gitOutput(t, projectDir, "branch", "--show-current"), "main")
+	assert.That(t, "clean tree", gitOutput(t, projectDir, "status", "--porcelain"), "")
+}
+
+// gitOutput runs `git <args>` in dir and returns stdout with surrounding
+// whitespace stripped. Fails the test on error.
+func gitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...) //nolint:gosec // test helper: args from test code
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git %v failed: %v\noutput: %s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // copyDir copies a directory recursively, skipping .git and _bmad-output.
