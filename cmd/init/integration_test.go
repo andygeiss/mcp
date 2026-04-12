@@ -55,13 +55,13 @@ func Test_Integration_With_FullInit_Should_ProduceWorkingProject(t *testing.T) {
 		t.Fatalf("go test failed: %v\noutput: %s", err, testOut)
 	}
 
-	// Assert — cmd/test-tool/ exists
-	_, err = os.Stat(filepath.Join(projectDir, "cmd", "test-tool", "main.go"))
-	assert.That(t, "new binary dir exists", err, nil)
+	// Assert — cmd/mcp/ is preserved (init no longer renames the binary dir)
+	_, err = os.Stat(filepath.Join(projectDir, "cmd", "mcp", "main.go"))
+	assert.That(t, "mcp binary dir preserved", err, nil)
 
-	// Assert — cmd/mcp/ does not exist
-	_, err = os.Stat(filepath.Join(projectDir, "cmd", "mcp"))
-	assert.That(t, "old binary dir gone", os.IsNotExist(err), true)
+	// Assert — no directory derived from the module suffix was created
+	_, err = os.Stat(filepath.Join(projectDir, "cmd", "test-tool"))
+	assert.That(t, "test-tool binary dir absent", os.IsNotExist(err), true)
 
 	// Assert — cmd/init/ was removed (self-cleanup)
 	_, err = os.Stat(filepath.Join(projectDir, "cmd", "init"))
@@ -70,6 +70,26 @@ func Test_Integration_With_FullInit_Should_ProduceWorkingProject(t *testing.T) {
 	// Assert — zero fingerprint
 	err = verifyZeroFingerprint(projectDir)
 	assert.That(t, "zero fingerprint", err, nil)
+
+	// Assert — README badges now point at the consumer's repo
+	readme, err := readFile(filepath.Join(projectDir, "README.md"))
+	assert.That(t, "read README", err, nil)
+	if bytes.Contains(readme, []byte("andygeiss/mcp")) {
+		t.Errorf("README still contains template slug: %s", readme)
+	}
+	if !bytes.Contains(readme, []byte("test-org/test-tool")) {
+		t.Errorf("README missing rewritten owner/repo short form: %s", readme)
+	}
+
+	// Assert — files without template fingerprint survive byte-identical.
+	// Guards against accidental reintroduction of cmd/mcp path substitution.
+	for _, name := range []string{".goreleaser.yml", ".mcp.json"} {
+		orig, origErr := readFile(filepath.Join(srcDir, name))
+		assert.That(t, name+" read orig", origErr, nil)
+		got, gotErr := readFile(filepath.Join(projectDir, name))
+		assert.That(t, name+" read rewritten", gotErr, nil)
+		assert.That(t, name+" byte-identical", string(got), string(orig))
+	}
 }
 
 // copyDir copies a directory recursively, skipping .git and _bmad-output.

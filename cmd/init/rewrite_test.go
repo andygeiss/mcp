@@ -9,23 +9,28 @@ import (
 	"github.com/andygeiss/mcp/internal/assert"
 )
 
-func Test_DeriveProjectName_With_ModulePath_Should_ReturnLastSegment(t *testing.T) {
+func Test_RepoShortForm_With_VariousPaths_Should_ReturnOwnerRepo(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		expected string
-		input    string
 		name     string
+		input    string
+		expected string
 	}{
-		{name: "three segments", input: "github.com/org/mytool", expected: "mytool"},
-		{name: "two segments", input: "example.com/tool", expected: "tool"},
-		{name: "no slash", input: "standalone", expected: "standalone"},
+		{name: "github owner/repo", input: "github.com/myorg/mytool", expected: "myorg/mytool"},
+		{name: "github with v2 suffix", input: "github.com/myorg/mytool/v2", expected: "myorg/mytool"},
+		{name: "gitlab host", input: "gitlab.com/group/project", expected: "group/project"},
+		{name: "custom host with subpath", input: "example.com/a/b/c", expected: "a/b"},
+		{name: "trailing slash", input: "github.com/myorg/mytool/", expected: "myorg/mytool"},
+		{name: "two segments only", input: "foo/bar", expected: ""},
+		{name: "single segment", input: "single", expected: ""},
+		{name: "empty string", input: "", expected: ""},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			assert.That(t, "project name", deriveProjectName(tt.input), tt.expected)
+			assert.That(t, "short form", repoShortForm(tt.input), tt.expected)
 		})
 	}
 }
@@ -114,44 +119,6 @@ import (
 	assert.That(t, "content", string(data), expected)
 }
 
-func Test_RenameBinaryDir_With_NewName_Should_MoveDirectory(t *testing.T) {
-	t.Parallel()
-
-	// Arrange
-	dir := t.TempDir()
-	oldDir := filepath.Join(dir, "cmd", "mcp")
-	err := os.MkdirAll(oldDir, 0o750)
-	assert.That(t, "mkdir error", err, nil)
-	err = os.WriteFile(filepath.Join(oldDir, "main.go"), []byte("package main\n"), 0o600)
-	assert.That(t, "write error", err, nil)
-
-	// Act
-	err = renameBinaryDir(dir, "mytool")
-
-	// Assert
-	assert.That(t, "rename error", err, nil)
-	_, err = os.Stat(filepath.Join(dir, "cmd", "mytool", "main.go"))
-	assert.That(t, "new file exists", err, nil)
-	_, err = os.Stat(oldDir)
-	assert.That(t, "old dir gone", os.IsNotExist(err), true)
-}
-
-func Test_RenameBinaryDir_With_SameName_Should_BeIdempotent(t *testing.T) {
-	t.Parallel()
-
-	// Arrange
-	dir := t.TempDir()
-	existingDir := filepath.Join(dir, "cmd", "mcp")
-	err := os.MkdirAll(existingDir, 0o750)
-	assert.That(t, "mkdir error", err, nil)
-
-	// Act — rename to same name
-	err = renameBinaryDir(dir, "mcp")
-
-	// Assert — no error
-	assert.That(t, "rename error", err, nil)
-}
-
 func Test_Init_With_SamePathTwice_Should_ProduceIdenticalResults(t *testing.T) {
 	t.Parallel()
 
@@ -182,35 +149,23 @@ var _ = server.NewServer
 	assert.That(t, "first gomod", err, nil)
 	err = rewriteGoFiles(dir, newPath)
 	assert.That(t, "first gofiles", err, nil)
-	err = renameBinaryDir(dir, "test-tool")
-	assert.That(t, "first rename", err, nil)
 
 	// Read state after first run
 	goModAfterFirst, _ := readFile(filepath.Join(dir, "go.mod"))
-	mainGoAfterFirst, _ := readFile(filepath.Join(dir, "cmd", "test-tool", "main.go"))
+	mainGoAfterFirst, _ := readFile(filepath.Join(dir, "cmd", "mcp", "main.go"))
 
 	// Act — second rewrite
 	err = rewriteGoMod(dir, newPath)
 	assert.That(t, "second gomod", err, nil)
 	err = rewriteGoFiles(dir, newPath)
 	assert.That(t, "second gofiles", err, nil)
-	err = renameBinaryDir(dir, "test-tool")
-	assert.That(t, "second rename", err, nil)
 
 	// Assert — identical after second run
 	goModAfterSecond, _ := readFile(filepath.Join(dir, "go.mod"))
-	mainGoAfterSecond, _ := readFile(filepath.Join(dir, "cmd", "test-tool", "main.go"))
+	mainGoAfterSecond, _ := readFile(filepath.Join(dir, "cmd", "mcp", "main.go"))
 
 	assert.That(t, "go.mod identical", string(goModAfterSecond), string(goModAfterFirst))
 	assert.That(t, "main.go identical", string(mainGoAfterSecond), string(mainGoAfterFirst))
-}
-
-func Test_DeriveProjectName_With_TrailingSlash_Should_TrimAndReturn(t *testing.T) {
-	t.Parallel()
-
-	// Act / Assert
-	assert.That(t, "trailing slash", deriveProjectName("github.com/org/tool/"), "tool")
-	assert.That(t, "multiple slashes", deriveProjectName("github.com/org/tool///"), "tool")
 }
 
 func Test_RewriteProject_With_ExtendedTemplatePath_Should_ReturnError(t *testing.T) {
@@ -256,21 +211,68 @@ func Test_IsTextFile_With_BinaryExtensions_Should_ReturnFalse(t *testing.T) {
 func Test_RewriteTextFile_With_TemplateReferences_Should_ReplaceAll(t *testing.T) {
 	t.Parallel()
 
-	// Arrange
+	// Arrange — cover full-form, short-form (badge URL), and cmd/mcp path.
 	dir := t.TempDir()
-	content := "module: github.com/andygeiss/mcp\nbinary: cmd/mcp/ and cmd/mcp run\n"
+	content := "module: github.com/andygeiss/mcp\n" +
+		"badge: https://img.shields.io/github/v/release/andygeiss/mcp\n" +
+		"codecov: https://codecov.io/gh/andygeiss/mcp\n" +
+		"binary: cmd/mcp/ and cmd/mcp run\n"
 	path := filepath.Join(dir, "README.md")
 	err := os.WriteFile(path, []byte(content), 0o600)
 	assert.That(t, "write error", err, nil)
 
 	// Act
-	err = rewriteTextFile(path, "github.com/test-org/test-tool", "test-tool")
+	err = rewriteTextFile(path, "github.com/test-org/test-tool")
+
+	// Assert — module path and bare owner/repo are replaced; cmd/mcp is untouched.
+	assert.That(t, "rewrite error", err, nil)
+	data, _ := readFile(path)
+	expected := "module: github.com/test-org/test-tool\n" +
+		"badge: https://img.shields.io/github/v/release/test-org/test-tool\n" +
+		"codecov: https://codecov.io/gh/test-org/test-tool\n" +
+		"binary: cmd/mcp/ and cmd/mcp run\n"
+	assert.That(t, "content", string(data), expected)
+}
+
+func Test_RewriteTextFile_With_NonGitHubModule_Should_StillReplaceShortForm(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — module path not on github.com still yields an owner/repo short form.
+	dir := t.TempDir()
+	content := "see github.com/andygeiss/mcp and badge release/andygeiss/mcp\n"
+	path := filepath.Join(dir, "README.md")
+	err := os.WriteFile(path, []byte(content), 0o600)
+	assert.That(t, "write error", err, nil)
+
+	// Act
+	err = rewriteTextFile(path, "gitlab.com/group/project")
 
 	// Assert
 	assert.That(t, "rewrite error", err, nil)
 	data, _ := readFile(path)
-	expected := "module: github.com/test-org/test-tool\nbinary: cmd/test-tool/ and cmd/test-tool run\n"
+	expected := "see gitlab.com/group/project and badge release/group/project\n"
 	assert.That(t, "content", string(data), expected)
+}
+
+func Test_RewriteTextFile_With_GoreleaserCmdPath_Should_PreserveBytes(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — realistic .goreleaser.yml fragment: cmd/mcp paths present,
+	// but no template fingerprint. rewriteTextFile must be a no-op so
+	// goreleaser keeps building ./cmd/mcp/ and emitting a binary named mcp.
+	dir := t.TempDir()
+	content := "project_name: mcp\nbuilds:\n  - main: ./cmd/mcp/\n    binary: mcp\n"
+	path := filepath.Join(dir, ".goreleaser.yml")
+	err := os.WriteFile(path, []byte(content), 0o600)
+	assert.That(t, "write error", err, nil)
+
+	// Act
+	err = rewriteTextFile(path, "github.com/test-org/test-tool")
+
+	// Assert — byte-identical; no cmd/mcp substitution snuck in.
+	assert.That(t, "rewrite error", err, nil)
+	data, _ := readFile(path)
+	assert.That(t, "content unchanged", string(data), content)
 }
 
 func Test_RewriteTextFile_With_NoTemplateReferences_Should_BeIdempotent(t *testing.T) {
@@ -284,7 +286,7 @@ func Test_RewriteTextFile_With_NoTemplateReferences_Should_BeIdempotent(t *testi
 	assert.That(t, "write error", err, nil)
 
 	// Act
-	err = rewriteTextFile(path, "github.com/test-org/test-tool", "test-tool")
+	err = rewriteTextFile(path, "github.com/test-org/test-tool")
 
 	// Assert
 	assert.That(t, "rewrite error", err, nil)
@@ -296,7 +298,7 @@ func Test_RewriteTextFile_With_MissingFile_Should_ReturnNil(t *testing.T) {
 	t.Parallel()
 
 	// Act
-	err := rewriteTextFile(filepath.Join(t.TempDir(), "nonexistent.md"), "github.com/x/y", "y")
+	err := rewriteTextFile(filepath.Join(t.TempDir(), "nonexistent.md"), "github.com/x/y")
 
 	// Assert
 	assert.That(t, "error", err, nil)
@@ -321,7 +323,7 @@ func Test_RewriteTextFiles_With_MixedFiles_Should_RewriteTextOnly(t *testing.T) 
 	assert.That(t, "write empty", err, nil)
 
 	// Act
-	err = rewriteTextFiles(dir, "github.com/new/mod", "mod")
+	err = rewriteTextFiles(dir, "github.com/new/mod")
 
 	// Assert
 	assert.That(t, "error", err, nil)
@@ -443,6 +445,23 @@ func Test_VerifyZeroFingerprint_With_TemplateRefs_Should_ReturnError(t *testing.
 	}
 }
 
+func Test_VerifyZeroFingerprint_With_OnlyShortForm_Should_ReturnError(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — only the bare owner/repo form is present (e.g., missed badge URL).
+	dir := t.TempDir()
+	err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("badge: release/andygeiss/mcp\n"), 0o600)
+	assert.That(t, "write error", err, nil)
+
+	// Act
+	err = verifyZeroFingerprint(dir)
+
+	// Assert
+	if err == nil {
+		t.Fatal("expected error for remaining short-form reference")
+	}
+}
+
 func Test_VerifyZeroFingerprint_With_SkippedDirs_Should_IgnoreThem(t *testing.T) {
 	t.Parallel()
 
@@ -557,57 +576,6 @@ import "github.com/andygeiss/mcp/internal/server"
 `)
 }
 
-func Test_RenameBinaryDir_With_NeitherExists_Should_ReturnError(t *testing.T) {
-	t.Parallel()
-
-	// Arrange — empty dir, no cmd/mcp or cmd/mytool
-	dir := t.TempDir()
-	err := os.MkdirAll(filepath.Join(dir, "cmd"), 0o750)
-	assert.That(t, "mkdir error", err, nil)
-
-	// Act
-	err = renameBinaryDir(dir, "mytool")
-
-	// Assert
-	if err == nil {
-		t.Fatal("expected error when neither directory exists")
-	}
-}
-
-func Test_RenameBinaryDir_With_TargetExists_Should_ReturnError(t *testing.T) {
-	t.Parallel()
-
-	// Arrange — both old and new dirs exist
-	dir := t.TempDir()
-	err := os.MkdirAll(filepath.Join(dir, "cmd", "mcp"), 0o750)
-	assert.That(t, "mkdir old", err, nil)
-	err = os.MkdirAll(filepath.Join(dir, "cmd", "mytool"), 0o750)
-	assert.That(t, "mkdir new", err, nil)
-
-	// Act
-	err = renameBinaryDir(dir, "mytool")
-
-	// Assert
-	if err == nil {
-		t.Fatal("expected error when target directory already exists")
-	}
-}
-
-func Test_RenameBinaryDir_With_AlreadyRenamed_Should_BeIdempotent(t *testing.T) {
-	t.Parallel()
-
-	// Arrange — old dir missing but new dir exists (already renamed)
-	dir := t.TempDir()
-	err := os.MkdirAll(filepath.Join(dir, "cmd", "mytool"), 0o750)
-	assert.That(t, "mkdir error", err, nil)
-
-	// Act
-	err = renameBinaryDir(dir, "mytool")
-
-	// Assert
-	assert.That(t, "error", err, nil)
-}
-
 func Test_RewriteGoMod_With_MissingFile_Should_ReturnError(t *testing.T) {
 	t.Parallel()
 
@@ -648,7 +616,7 @@ func Test_RewriteTextFiles_With_WalkError_Should_PropagateError(t *testing.T) {
 	t.Parallel()
 
 	// Act
-	err := rewriteTextFiles(filepath.Join(t.TempDir(), "nonexistent"), "github.com/x/y", "y")
+	err := rewriteTextFiles(filepath.Join(t.TempDir(), "nonexistent"), "github.com/x/y")
 
 	// Assert
 	if err == nil {
@@ -758,11 +726,11 @@ func Test_RewriteProject_With_ValidProject_Should_RewriteEverything(t *testing.T
 		t.Errorf("go.mod not rewritten: %s", modData)
 	}
 
-	// Check cmd/mcp was renamed to cmd/test-tool
-	_, err = os.Stat(filepath.Join(dir, "cmd", "test-tool", "main.go"))
-	assert.That(t, "new dir exists", err, nil)
-	_, err = os.Stat(filepath.Join(dir, "cmd", "mcp"))
-	assert.That(t, "old dir gone", os.IsNotExist(err), true)
+	// cmd/mcp is preserved — init no longer renames the binary dir.
+	_, err = os.Stat(filepath.Join(dir, "cmd", "mcp", "main.go"))
+	assert.That(t, "mcp dir preserved", err, nil)
+	_, err = os.Stat(filepath.Join(dir, "cmd", "test-tool"))
+	assert.That(t, "test-tool dir absent", os.IsNotExist(err), true)
 
 	// Check cmd/init was removed
 	_, err = os.Stat(filepath.Join(dir, "cmd", "init"))

@@ -59,13 +59,13 @@ Set `MCP_TRACE=1` in the client's environment to log every request and response 
 
 ## Scaffold your own
 
-Fork or clone this repo, then rewrite the module path and binary name:
+Fork or clone this repo, then rewrite the module path:
 
 ```bash
 make init MODULE=github.com/yourorg/yourproject
 ```
 
-This rewrites all imports, renames `cmd/mcp/` to `cmd/yourproject/`, runs `go mod tidy`, and removes `cmd/init/`.
+This rewrites all imports, repoints badge URLs (shields.io, codecov, Actions) at your repo, runs `go mod tidy`, and removes `cmd/init/`. The binary directory stays at `cmd/mcp/`, so every scaffolded project produces a binary named `mcp` -- install it with `go install github.com/yourorg/yourproject/cmd/mcp@latest`. If two MCP servers share `$GOBIN`, disambiguate with `go build -o <name>` or rename `cmd/mcp/` after init.
 
 ## Add a tool
 
