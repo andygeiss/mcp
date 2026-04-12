@@ -13,13 +13,13 @@ Single binary. Stdin/stdout transport. JSON-RPC 2.0. Nothing else.
 
 ## Why
 
-MCP servers don't need HTTP frameworks, routers, or dependency trees. This project is a spec-complete MCP server in pure Go, with auto-derived tool schemas and a three-state initialization handshake -- all backed by the standard library alone.
+MCP servers don't need HTTP frameworks, routers, or dependency trees. This project is a production-ready MCP server in pure Go covering tools, resources, prompts, logging, and progress, with auto-derived schemas and a three-state initialization handshake -- all backed by the standard library alone.
 
 Use it directly, or **scaffold your own** with `make init`.
 
 ## Features
 
-- **MCP 2025-11-25** -- spec-complete: tools, resources, prompts, completion, logging, progress
+- **MCP 2025-11-25** -- tools, resources (list/read), prompts, logging, progress
 - **JSON-RPC 2.0** over stdin/stdout -- newline-delimited, no LSP framing
 - **Auto-derived schemas** -- struct tags drive tool and prompt input schemas via reflection
 - **Bidirectional transport** -- server-to-client sampling, elicitation, and roots requests
@@ -121,6 +121,12 @@ MCP version `2025-11-25`. JSON-RPC 2.0 with these specifics:
 | Notifications | Never responded to |
 | Unknown notifications | Silently ignored |
 | Error messages | Contextual (e.g. `"unknown tool: foo"`) |
+
+### Scope
+
+Implements `tools/list`, `tools/call`, `resources/list`, `resources/read`, `prompts/list`, `prompts/get`, `logging/setLevel`, plus `notifications/initialized`, `notifications/cancelled`, `notifications/progress`, `notifications/message`, and a generic server-to-client request primitive.
+
+Not implemented -- calls are rejected with `-32601`: `resources/subscribe`, `resources/unsubscribe`, `completion/complete`, `roots/list`, `sampling/*`, `elicitation/*`, and the `*/list_changed` notifications.
 
 ## Architecture
 
