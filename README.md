@@ -1,7 +1,11 @@
 # mcp
 
+[![Release](https://img.shields.io/github/v/release/andygeiss/mcp)](https://github.com/andygeiss/mcp/releases)
+[![Go Reference](https://pkg.go.dev/badge/github.com/andygeiss/mcp.svg)](https://pkg.go.dev/github.com/andygeiss/mcp)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/andygeiss/mcp/badge)](https://scorecard.dev/viewer/?uri=github.com/andygeiss/mcp)
+[![CodeQL](https://github.com/andygeiss/mcp/actions/workflows/codeql.yml/badge.svg)](https://github.com/andygeiss/mcp/actions/workflows/codeql.yml)
 [![Coverage](https://codecov.io/gh/andygeiss/mcp/branch/main/graph/badge.svg)](https://codecov.io/gh/andygeiss/mcp)
+[![License](https://img.shields.io/github/license/andygeiss/mcp)](LICENSE)
 
 A minimal, zero-dependency Go implementation of the [Model Context Protocol](https://modelcontextprotocol.io) (MCP).
 
@@ -9,54 +13,61 @@ Single binary. Stdin/stdout transport. JSON-RPC 2.0. Nothing else.
 
 ## Why
 
-MCP servers don't need HTTP frameworks, routers, or dependency trees. This project proves it: a fully compliant MCP server in pure Go, with automatic tool schema derivation and a three-state initialization handshake -- all backed by the standard library alone.
+MCP servers don't need HTTP frameworks, routers, or dependency trees. This project is a spec-complete MCP server in pure Go, with auto-derived tool schemas and a three-state initialization handshake -- all backed by the standard library alone.
 
-Use it directly, or use it as a **template** to scaffold your own MCP server in seconds.
+Use it directly, or **scaffold your own** with `make init`.
 
 ## Features
 
-- **MCP 2025-11-25** spec-complete protocol foundation
+- **MCP 2025-11-25** -- spec-complete: tools, resources, prompts, completion, logging, progress
 - **JSON-RPC 2.0** over stdin/stdout -- newline-delimited, no LSP framing
-- **Tools, Resources, Prompts** -- all capabilities with auto-derived schemas via reflection
-- **Progress & Logging** -- context-injected notifications during tool execution
-- **Bidirectional transport** -- server-to-client requests (sampling, elicitation, roots)
-- **Three-state lifecycle** (uninitialized / initializing / ready) per the MCP spec
-- **Graceful shutdown** on SIGINT, SIGTERM, or EOF
-- **Per-message size limits** (4 MB) and handler timeouts (30s) with panic recovery
-- **Structured logging** to stderr via `slog.JSONHandler`
+- **Auto-derived schemas** -- struct tags drive tool and prompt input schemas via reflection
+- **Bidirectional transport** -- server-to-client sampling, elicitation, and roots requests
+- **Safe by default** -- per-message cap (4 MB), handler timeout (30s), panic recovery
+- **Structured diagnostics** -- `slog.JSONHandler` to stderr; stdout stays protocol-only
 - **Zero external dependencies** -- standard library only
-- **Fuzz-tested** JSON decoder with 22-entry seed corpus
-- **54 linter rules** via golangci-lint v2 -- zero suppression policy
+- **Supply-chain ready** -- cosign-signed releases, SBOMs, SLSA L3 provenance, OSS-Fuzz
 
 ## Requirements
 
 - Go 1.26+
+- Tested in CI on macOS, Linux, Windows. Release binaries are published for macOS and Linux (amd64, arm64).
 
-## Quickstart
-
-### Build
-
-```bash
-go build -ldflags "-X main.version=$(git describe --tags --always --dirty)" ./cmd/mcp/
-```
-
-### Run
+## Install
 
 ```bash
-echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}' | ./mcp
+go install github.com/andygeiss/mcp/cmd/mcp@latest
 ```
 
-### Use as a template
+Or download a signed release archive from [Releases](https://github.com/andygeiss/mcp/releases) and verify it (see [Verify a release](#verify-a-release)).
 
-Fork or clone this repo, then run the init tool to rewrite the module path and binary name:
+## Use with an MCP client
+
+Point any MCP client (Claude Desktop, VS Code, etc.) at the installed binary:
+
+```json
+{
+  "mcpServers": {
+    "mcp": {
+      "command": "/absolute/path/to/mcp"
+    }
+  }
+}
+```
+
+Set `MCP_TRACE=1` in the client's environment to log every request and response to stderr.
+
+## Scaffold your own
+
+Fork or clone this repo, then rewrite the module path and binary name:
 
 ```bash
-go run ./cmd/init github.com/yourorg/yourproject
+make init MODULE=github.com/yourorg/yourproject
 ```
 
-This rewrites all imports, renames `cmd/mcp/` to `cmd/yourproject/`, runs `go mod tidy`, and self-deletes.
+This rewrites all imports, renames `cmd/mcp/` to `cmd/yourproject/`, runs `go mod tidy`, and removes `cmd/init/`.
 
-## Adding a tool
+## Add a tool
 
 Define an input struct, write a handler, register it.
 
@@ -82,7 +93,34 @@ if err := tools.Register(registry, "greet", "Greets someone by name", tools.Gree
 }
 ```
 
-The input schema (`{"type":"object","properties":{"name":{"type":"string","description":"Name to greet"}},"required":["name"]}`) is derived automatically from struct tags. No manual schema definition needed.
+The input schema (`{"type":"object","properties":{"name":{"type":"string","description":"Name to greet"}},"required":["name"]}`) is derived from struct tags. No manual schema definition needed.
+
+## Verify a release
+
+Release archives are keyless-signed with cosign and ship with SLSA L3 provenance generated by `slsa-framework/slsa-github-generator`. Each archive has a `.sigstore.json` bundle; SHA-256 digests are in `checksums.txt`; SBOMs are attached as `*.sbom.json`.
+
+```bash
+# Replace <version>, <os>, <arch> with your target, e.g. 0.1.0, Linux, x86_64
+cosign verify-blob \
+  --bundle mcp_<version>_<os>_<arch>.tar.gz.sigstore.json \
+  --certificate-identity-regexp "^https://github.com/andygeiss/mcp/" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  mcp_<version>_<os>_<arch>.tar.gz
+```
+
+## Protocol compliance
+
+MCP version `2025-11-25`. JSON-RPC 2.0 with these specifics:
+
+| Behavior | Implementation |
+|---|---|
+| Framing | Newline-delimited JSON objects |
+| Batch requests | Rejected with `-32700` |
+| Missing `params` | Normalized to `{}` |
+| Request `id` | Preserved as `json.RawMessage`, echoed exactly |
+| Notifications | Never responded to |
+| Unknown notifications | Silently ignored |
+| Error messages | Contextual (e.g. `"unknown tool: foo"`) |
 
 ## Architecture
 
@@ -99,48 +137,32 @@ internal/
   tools/           tool registry, schema derivation, tool handlers
 ```
 
-**Dependency direction:** `cmd/mcp/ -> server/ -> protocol/`, `server/ -> tools/`, `server/ -> resources/`, `server/ -> prompts/`. Protocol and schema have zero internal dependencies.
+**Dependency direction:** `cmd/mcp/ -> server/ -> protocol/`; `server/` imports `tools/`, `resources/`, `prompts/`. `protocol/` and `schema/` have zero internal dependencies.
 
 **Transport rules:**
-- **stdout** is protocol-only. Every byte is a valid JSON-RPC message.
+- **stdout** is protocol-only -- every byte is a valid JSON-RPC message.
 - **stderr** is diagnostics-only via `slog.JSONHandler`.
 - Constructors accept `io.Reader`/`io.Writer` so tests inject buffers.
 
-## Testing
+## Development
 
 ```bash
-go test -race ./...                                            # unit tests
-go test -race ./... -tags=integration                          # include integration tests
-go test -fuzz Fuzz_Decoder ./internal/protocol -fuzztime=30s   # fuzz the decoder
-golangci-lint run ./...                                        # lint
-make check                                                     # build + test + lint
+make check      # build + test + lint
+make test       # go test -race ./...
+make fuzz       # fuzz the JSON decoder (FUZZTIME=5m to extend)
+make coverage   # enforce 90% threshold
+make bench      # benchstat against testdata/benchmarks/baseline.txt
 ```
 
-419 test functions, 33 conformance scenarios, 4 fuzz targets, 11 benchmarks, 90% coverage threshold enforced in CI.
-
-## Protocol compliance
-
-MCP version `2025-11-25`. JSON-RPC 2.0 with these specifics:
-
-| Behavior | Implementation |
-|---|---|
-| Framing | Newline-delimited JSON objects |
-| Batch requests | Rejected with `-32700` |
-| Missing `params` | Normalized to `{}` |
-| Request `id` | Preserved as `json.RawMessage`, echoed exactly |
-| Notifications | Never responded to |
-| Unknown notifications | Silently ignored |
-| Error messages | Contextual (e.g. `"unknown tool: foo"`) |
+Authoring guidelines, test conventions, and the full workflow matrix live in [`docs/development-guide.md`](docs/development-guide.md).
 
 ## Documentation
 
-Full project documentation lives in [`docs/`](docs/index.md):
-
-- [Project Overview](docs/project-overview.md) -- Executive summary, features, protocol compliance
-- [Architecture](docs/architecture.md) -- Package structure, state machine, dispatch model, schema derivation
-- [Source Tree Analysis](docs/source-tree-analysis.md) -- Annotated directory tree, per-package exports, test inventory
-- [Development Guide](docs/development-guide.md) -- Setup, testing, tool authoring, code conventions
-- [Deployment Guide](docs/deployment-guide.md) -- Build, release pipeline, CI/CD, platform support
+- [Project Overview](docs/project-overview.md)
+- [Architecture](docs/architecture.md)
+- [Source Tree Analysis](docs/source-tree-analysis.md)
+- [Development Guide](docs/development-guide.md)
+- [Deployment Guide](docs/deployment-guide.md)
 
 ## License
 
