@@ -8,9 +8,9 @@ bench:
 	go test -bench=. -count=6 -benchmem ./internal/... > current.txt
 	benchstat testdata/benchmarks/baseline.txt current.txt
 
-## Build all packages
+## Build all packages (reproducible: -trimpath matches release binaries)
 build:
-	go build -ldflags "-X main.version=$$(git describe --tags --always --dirty)" ./cmd/mcp/
+	go build -trimpath -ldflags "-X main.version=$$(git describe --tags --always --dirty)" ./cmd/mcp/
 
 ## Run the full quality pipeline (build, test, lint)
 check: build test lint
@@ -29,7 +29,7 @@ coverage:
 
 ## Run fuzz tests (override duration with FUZZTIME=2m)
 fuzz:
-	go test -fuzz Fuzz_Decoder ./internal/protocol -fuzztime=$(FUZZTIME) -timeout=0
+	go test -fuzz Fuzz_Decoder_With_ArbitraryInput ./internal/protocol -fuzztime=$(FUZZTIME) -timeout=0
 
 ## Initialize template with new module path (MODULE=github.com/org/repo)
 init:

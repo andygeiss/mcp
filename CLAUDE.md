@@ -23,7 +23,7 @@ go build ./...                                                                  
 go build -ldflags "-X main.version=$(git describe --tags --always --dirty)" ./cmd/mcp/  # build with version
 go test -race ./...                                                                     # unit tests (race detector mandatory)
 go test -race ./... -tags=integration                                                   # include integration tests
-go test -fuzz Fuzz_Decoder ./internal/protocol -fuzztime=30s                            # fuzz the JSON decoder
+go test -fuzz Fuzz_Decoder_With_ArbitraryInput ./internal/protocol -fuzztime=30s        # fuzz the JSON decoder
 golangci-lint run ./...                                                                 # lint (must pass with 0 issues)
 ```
 

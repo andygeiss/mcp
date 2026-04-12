@@ -50,8 +50,8 @@ Integration tests cover:
 ### Fuzz Testing
 
 ```bash
-make fuzz                                                    # default: 30s on Fuzz_Decoder
-go test -fuzz Fuzz_Decoder ./internal/protocol -fuzztime=30s # specific target
+make fuzz                                                                      # default: 30s on Fuzz_Decoder_With_ArbitraryInput
+go test -fuzz Fuzz_Decoder_With_ArbitraryInput ./internal/protocol -fuzztime=30s # specific target
 ```
 
 Four fuzz targets:

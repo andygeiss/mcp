@@ -10,7 +10,7 @@ import (
 
 // CI fuzzing strategy:
 //
-//	go test -fuzz Fuzz_Decoder ./internal/protocol -fuzztime=${FUZZ_TIME:-30s}
+//	go test -fuzz Fuzz_Decoder_With_ArbitraryInput ./internal/protocol -fuzztime=${FUZZ_TIME:-30s}
 //
 // Set FUZZ_TIME env var to control duration. Default 30s for CI, longer for nightly runs.
 // Corpus is committed to testdata/fuzz/ — new findings are added automatically by go test.
