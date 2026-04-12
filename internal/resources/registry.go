@@ -2,6 +2,7 @@
 package resources
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"slices"
@@ -156,7 +157,7 @@ func Register(r *Registry, uri, name, description string, handler func(ctx conte
 
 	r.resources = append(r.resources, res)
 	slices.SortFunc(r.resources, func(a, b Resource) int {
-		return strings.Compare(a.URI, b.URI)
+		return cmp.Compare(a.URI, b.URI)
 	})
 	for i, res := range r.resources {
 		r.index[res.URI] = i
@@ -181,7 +182,7 @@ func RegisterTemplate(r *Registry, uriTemplate, name, description string, handle
 
 	r.templates = append(r.templates, tmpl)
 	slices.SortFunc(r.templates, func(a, b ResourceTemplate) int {
-		return strings.Compare(a.URITemplate, b.URITemplate)
+		return cmp.Compare(a.URITemplate, b.URITemplate)
 	})
 	return nil
 }

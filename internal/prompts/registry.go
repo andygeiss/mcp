@@ -2,11 +2,11 @@
 package prompts
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
 	"slices"
-	"strings"
 
 	"github.com/andygeiss/mcp/internal/protocol"
 	"github.com/andygeiss/mcp/internal/schema"
@@ -123,7 +123,7 @@ func Register[T any](r *Registry, name, description string, handler func(ctx con
 
 	r.prompts = append(r.prompts, prompt)
 	slices.SortFunc(r.prompts, func(a, b Prompt) int {
-		return strings.Compare(a.Name, b.Name)
+		return cmp.Compare(a.Name, b.Name)
 	})
 	for i, p := range r.prompts {
 		r.index[p.Name] = i
@@ -162,7 +162,7 @@ func deriveArguments[T any]() ([]Argument, error) {
 		})
 	}
 	slices.SortFunc(args, func(a, b Argument) int {
-		return strings.Compare(a.Name, b.Name)
+		return cmp.Compare(a.Name, b.Name)
 	})
 	return args, nil
 }

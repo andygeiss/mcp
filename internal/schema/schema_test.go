@@ -387,3 +387,41 @@ func Test_DeriveInputSchema_With_UintType_Should_ReturnInteger(t *testing.T) {
 	assert.That(t, "error", err, nil)
 	assert.That(t, "val type", s.Properties["val"].Type, schema.TypeInteger)
 }
+
+// --- pointer-is-optional ---
+
+type pointerOptionalInput struct {
+	Required string  `json:"required"`
+	Optional *string `json:"optional"`
+}
+
+func Test_DeriveInputSchema_With_PointerField_Should_BeOptional(t *testing.T) {
+	t.Parallel()
+
+	// Act: *T is the idiomatic Go "nullable" marker and must map to a
+	// non-required JSON Schema property even without omitempty.
+	s, err := schema.DeriveInputSchema[pointerOptionalInput]()
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "optional unwrapped type", s.Properties["optional"].Type, schema.TypeString)
+	assert.That(t, "only non-pointer is required", s.Required, []string{"required"})
+}
+
+// --- interface{} / any support ---
+
+type anyInput struct {
+	Meta any `json:"meta"`
+}
+
+func Test_DeriveInputSchema_With_InterfaceField_Should_ReturnOpenSchema(t *testing.T) {
+	t.Parallel()
+
+	// Act: `any` accepts any JSON value; the derived property carries no
+	// type constraint (open schema).
+	s, err := schema.DeriveInputSchema[anyInput]()
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "meta has no type constraint", s.Properties["meta"].Type, "")
+}

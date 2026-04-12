@@ -1,0 +1,2 @@
+{"id":1,"jsonrpc":"2.0","result":{"capabilities":{"experimental":{"concurrency":{"maxInFlight":1}},"logging":{},"tools":{}},"protocolVersion":"2025-11-25","serverInfo":{"name":"mcp","version":"test"}}}
+{"id":2,"jsonrpc":"2.0","result":{"tools":[{"description":"test tool","inputSchema":{"properties":{"message":{"description":"test message","type":"string"}},"required":["message"],"type":"object"},"name":"test"}]}}

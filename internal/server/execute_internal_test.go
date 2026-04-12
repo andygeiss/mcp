@@ -23,10 +23,14 @@ func newTestServer(t *testing.T) *Server {
 	var stdout bytes.Buffer
 	enc := json.NewEncoder(&stdout)
 	enc.SetEscapeHTML(false)
+	levelVar := new(slog.LevelVar)
+	levelVar.Set(slog.LevelInfo)
 	return &Server{
+		done:           make(chan struct{}),
 		enc:            enc,
 		handlerTimeout: time.Second,
-		logger:         slog.New(slog.NewJSONHandler(&bytes.Buffer{}, &slog.HandlerOptions{Level: slog.LevelInfo})),
+		logLevel:       levelVar,
+		logger:         slog.New(slog.NewJSONHandler(&bytes.Buffer{}, &slog.HandlerOptions{Level: levelVar})),
 		name:           "test",
 		registry:       tools.NewRegistry(),
 		safetyMargin:   100 * time.Millisecond,
@@ -140,7 +144,8 @@ func Test_encodeResponse_With_TraceEnabled_Should_LogTrace(t *testing.T) {
 	var stderr bytes.Buffer
 	s := newTestServer(t)
 	s.trace = true
-	s.logger = slog.New(slog.NewJSONHandler(&stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	s.logLevel.Set(slog.LevelDebug)
+	s.logger = slog.New(slog.NewJSONHandler(&stderr, &slog.HandlerOptions{Level: s.logLevel}))
 
 	resp := protocol.NewErrorResponse(json.RawMessage(`1`), protocol.InternalError, "test")
 
@@ -341,7 +346,7 @@ func Test_handleLoggingSetLevel_With_ValidLevel_Should_Succeed(t *testing.T) {
 
 	// Assert
 	assert.That(t, "no error", resp.Error == nil, true)
-	assert.That(t, "log level set", s.logLevel, "debug")
+	assert.That(t, "log level set", s.logLevel.Level(), slog.LevelDebug)
 }
 
 // Test_handleResourcesRead_With_TemplateMatch_Should_ReturnContent covers
@@ -1030,7 +1035,8 @@ func Test_handleDecodeResultDuringInFlight_With_TraceEnabled_Should_LogTrace(t *
 	s := newTestServer(t)
 	s.state = stateReady
 	s.trace = true
-	s.logger = slog.New(slog.NewJSONHandler(&stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	s.logLevel.Set(slog.LevelDebug)
+	s.logger = slog.New(slog.NewJSONHandler(&stderr, &slog.HandlerOptions{Level: s.logLevel}))
 	s.inFlightCh = make(chan inFlightResult, 1)
 	s.inFlightID = json.RawMessage(`1`)
 
@@ -1161,7 +1167,8 @@ func Test_sendNotification_With_TraceEnabled_Should_LogTrace(t *testing.T) {
 	var stderr bytes.Buffer
 	s := newTestServer(t)
 	s.trace = true
-	s.logger = slog.New(slog.NewJSONHandler(&stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	s.logLevel.Set(slog.LevelDebug)
+	s.logger = slog.New(slog.NewJSONHandler(&stderr, &slog.HandlerOptions{Level: s.logLevel}))
 
 	// Act
 	err := s.sendNotification("test/method", map[string]string{"key": "val"})
@@ -1171,4 +1178,47 @@ func Test_sendNotification_With_TraceEnabled_Should_LogTrace(t *testing.T) {
 	if !bytes.Contains(stderr.Bytes(), []byte("trace_notification")) {
 		t.Fatal("expected trace_notification log entry in stderr")
 	}
+}
+
+// Test_routeResponse_With_DuplicateResponse_Should_NotBlock covers the
+// non-blocking send + delete-under-lock behavior that prevents a malicious
+// or buggy client from wedging the decode goroutine by sending two responses
+// for the same server→client request ID.
+func Test_routeResponse_With_DuplicateResponse_Should_NotBlock(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	s := newTestServer(t)
+	s.pending = make(map[string]chan protocol.Response)
+	id := json.RawMessage(`"srv-1"`)
+	ch := make(chan protocol.Response, 1)
+	s.pending[string(id)] = ch
+
+	// Act — first response is delivered and consumed; a second identical
+	// response must be dropped (no waiter left, channel buffer full) without
+	// blocking the routing goroutine.
+	first := protocol.Response{ID: id, JSONRPC: protocol.Version, Result: json.RawMessage(`1`)}
+	second := protocol.Response{ID: id, JSONRPC: protocol.Version, Result: json.RawMessage(`2`)}
+
+	done := make(chan struct{})
+	go func() {
+		s.routeResponse(first)
+		s.routeResponse(second)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("routeResponse blocked on duplicate delivery")
+	}
+
+	// Assert — only the first response reached the waiter; the second was
+	// dropped. The pending entry was removed on first delivery.
+	delivered := <-ch
+	assert.That(t, "first result", string(delivered.Result), "1")
+	s.pendingMu.Lock()
+	_, stillPending := s.pending[string(id)]
+	s.pendingMu.Unlock()
+	assert.That(t, "pending entry cleaned", stillPending, false)
 }

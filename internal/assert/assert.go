@@ -7,6 +7,8 @@ import (
 )
 
 // That marks the test as failed when got and want are not deeply equal.
+// The receiver is named `tb` per the Go thelper convention for testing.TB —
+// unlike `*testing.T`, which conventionally uses `t`.
 func That[T any](tb testing.TB, desc string, got, want T) {
 	tb.Helper()
 	if !reflect.DeepEqual(got, want) {
