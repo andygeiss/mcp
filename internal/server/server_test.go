@@ -155,7 +155,7 @@ func Test_Server_With_DuplicateInitialize_Should_Return32600(t *testing.T) {
 	assert.That(t, "error", err, nil)
 	assert.That(t, "response count", len(responses), 2)
 	assert.That(t, "second error code", responses[1].Error.Code, protocol.ServerError)
-	assert.That(t, "second error message", responses[1].Error.Message, "already initialized")
+	assert.That(t, "second error message", responses[1].Error.Message, "initialize already received, awaiting notifications/initialized")
 }
 
 func Test_Server_With_PingInAnyState_Should_ReturnEmptyObject(t *testing.T) {
@@ -1169,36 +1169,32 @@ func Test_Server_With_Notification_Should_IncrementRequestCountOnly(t *testing.T
 func Test_Server_With_InitializedNotification_In_Each_State_Should_Transition_Or_Ignore(t *testing.T) {
 	t.Parallel()
 
+	// Per MCP: notifications are fire-and-forget. An out-of-state
+	// notifications/initialized must be silently ignored — no response,
+	// no non-debug log entry. Only the initializing→ready transition is
+	// observable.
 	tests := []struct {
 		name          string
 		input         string
-		expectReady   bool   // true if tools/list should succeed
-		expectWarnLog bool   // true if "unexpected notifications/initialized" should appear
-		toolsListID   string // the id of the tools/list request
+		expectReady   bool
 		responseCount int
 	}{
 		{
 			name:          "uninitialized",
 			input:         initializedNotification + `{"jsonrpc":"2.0","method":"tools/list","id":1,"params":{}}` + "\n",
 			expectReady:   false,
-			expectWarnLog: true,
-			toolsListID:   "1",
 			responseCount: 1,
 		},
 		{
 			name:          "initializing",
 			input:         initRequest + initializedNotification + `{"jsonrpc":"2.0","method":"tools/list","id":2,"params":{}}` + "\n",
 			expectReady:   true,
-			expectWarnLog: false,
-			toolsListID:   "2",
 			responseCount: 2,
 		},
 		{
 			name:          "ready",
 			input:         handshake() + initializedNotification + `{"jsonrpc":"2.0","method":"tools/list","id":2,"params":{}}` + "\n",
 			expectReady:   true,
-			expectWarnLog: true,
-			toolsListID:   "2",
 			responseCount: 2,
 		},
 	}
@@ -1227,7 +1223,6 @@ func Test_Server_With_InitializedNotification_In_Each_State_Should_Transition_Or
 			}
 			assert.That(t, "response count", len(responses), tt.responseCount)
 
-			// Check last response (tools/list)
 			lastResp := responses[len(responses)-1]
 			if tt.expectReady {
 				assert.That(t, "tools/list success", lastResp.Error == nil, true)
@@ -1235,24 +1230,22 @@ func Test_Server_With_InitializedNotification_In_Each_State_Should_Transition_Or
 				assert.That(t, "error code", lastResp.Error.Code, protocol.ServerError)
 			}
 
-			// Check warn log
+			// Out-of-state notifications/initialized must never log at a
+			// non-debug level, regardless of current state.
 			entries := parseLogEntries(t, &stderr)
-			warn := findLogEntry(entries, "unexpected notifications/initialized")
-			if tt.expectWarnLog && warn == nil {
-				t.Fatal("expected 'unexpected notifications/initialized' log entry")
-			}
-			if !tt.expectWarnLog && warn != nil {
-				t.Fatal("unexpected warn log entry")
+			if warn := findLogEntry(entries, "unexpected notifications/initialized"); warn != nil {
+				t.Fatal("unexpected log entry for out-of-state notifications/initialized")
 			}
 		})
 	}
 }
 
-func Test_Server_With_Malformed_Cancelled_Notification_Should_Log_Warn(t *testing.T) {
+func Test_Server_With_Malformed_Cancelled_Notification_Should_SilentlyIgnore(t *testing.T) {
 	t.Parallel()
 
 	// Arrange — register a blocking handler so there's an in-flight request
-	// when the malformed cancel notification arrives
+	// when the malformed cancel notification arrives. Per MCP, malformed
+	// notifications are silently ignored: no response, no non-debug log.
 	r := tools.NewRegistry()
 	if err := tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) tools.Result {
 		<-ctx.Done()
@@ -1273,13 +1266,12 @@ func Test_Server_With_Malformed_Cancelled_Notification_Should_Log_Warn(t *testin
 	// Act
 	err := srv.Run(context.Background())
 
-	// Assert — no error response (notification), warn logged to stderr
+	// Assert — no response; no warn log for malformed notification.
 	assert.That(t, "error", err, nil)
 
 	entries := parseLogEntries(t, &stderr)
-	warn := findLogEntry(entries, "unmarshal cancelled notification failed")
-	if warn == nil {
-		t.Fatal("expected 'unmarshal cancelled notification failed' log entry in stderr")
+	if warn := findLogEntry(entries, "unmarshal cancelled notification failed"); warn != nil {
+		t.Fatal("unexpected log entry for malformed notifications/cancelled")
 	}
 }
 
@@ -2507,7 +2499,7 @@ func Test_Server_With_ElicitationNamespace_Should_ReturnUnsupportedCapability(t 
 }
 
 // Test_Server_With_ReservedRPCMethod_Should_ReturnMethodNotFound covers
-// handleMethod line 725-726 for rpc.* methods.
+// the rpc.* prefix rejection in dispatch (applies in any state, not just ready).
 func Test_Server_With_ReservedRPCMethod_Should_ReturnMethodNotFound(t *testing.T) {
 	t.Parallel()
 
@@ -2526,6 +2518,25 @@ func Test_Server_With_ReservedRPCMethod_Should_ReturnMethodNotFound(t *testing.T
 	}
 }
 
+// Test_Server_With_ReservedRPCMethod_BeforeInitialize_Should_ReturnMethodNotFound
+// covers the JSON-RPC 2.0 §4.3 reservation: rpc.* must yield -32601 regardless
+// of server state. Prior to the fix, rpc.* before initialize returned -32000
+// (server not initialized), which the spec disallows.
+func Test_Server_With_ReservedRPCMethod_BeforeInitialize_Should_ReturnMethodNotFound(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — no handshake, rpc.* in uninitialized state.
+	input := `{"jsonrpc":"2.0","method":"rpc.discover","id":1,"params":{}}` + "\n"
+
+	// Act
+	responses, err := runServer(t, testRegistry(), input)
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "response count", len(responses), 1)
+	assert.That(t, "error code", responses[0].Error.Code, protocol.MethodNotFound)
+}
+
 // Test_Server_With_DuplicateInitInInitializing_Should_ReturnError covers
 // dispatchByState line 594: sending initialize while in initializing state.
 func Test_Server_With_DuplicateInitInInitializing_Should_ReturnError(t *testing.T) {
@@ -2541,7 +2552,7 @@ func Test_Server_With_DuplicateInitInInitializing_Should_ReturnError(t *testing.
 	assert.That(t, "error", err, nil)
 	assert.That(t, "response count", len(responses), 2)
 	assert.That(t, "error code", responses[1].Error.Code, protocol.ServerError)
-	assert.That(t, "error message", responses[1].Error.Message, "already initialized")
+	assert.That(t, "error message", responses[1].Error.Message, "initialize already received, awaiting notifications/initialized")
 }
 
 // Test_Server_With_MethodInInitializing_Should_ReturnError covers
@@ -2900,7 +2911,7 @@ func Test_Server_With_ResourcesRead_Should_ReturnContent(t *testing.T) {
 	assert.That(t, "content uri", result.Contents[0].URI, "config://app")
 }
 
-func Test_Server_With_ResourcesReadUnknown_Should_ReturnError(t *testing.T) {
+func Test_Server_With_ResourcesReadUnknown_Should_ReturnResourceNotFound(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
@@ -2912,7 +2923,7 @@ func Test_Server_With_ResourcesReadUnknown_Should_ReturnError(t *testing.T) {
 	// Assert
 	assert.That(t, "error", err, nil)
 	assert.That(t, "response count", len(responses), 2)
-	assert.That(t, "error code", responses[1].Error.Code, protocol.InvalidParams)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.ResourceNotFound)
 }
 
 func Test_Server_With_ResourcesCapability_Should_AdvertiseInInitialize(t *testing.T) {
@@ -3630,16 +3641,31 @@ func Test_Server_With_SendRequest_Should_CorrelateResponse(t *testing.T) {
 	_, _ = stdinW.Write([]byte(response + "\n"))
 
 	// Third message: the tool call result
-	var toolResp json.RawMessage
+	var toolResp protocol.Response
 	_ = dec.Decode(&toolResp)
 
 	// Close stdin to trigger shutdown
 	_ = stdinW.Close()
 	err := <-done
 
-	// Assert
+	// Assert — the end-to-end correlation pipeline must deliver the client
+	// response back into the tool handler, so the tool's text result must
+	// contain the echoed payload. Asserting only the method name (as the
+	// prior version did) leaves the correlation path untested.
 	assert.That(t, "error", err, nil)
 	assert.That(t, "method", srvReq.Method, "sampling/createMessage")
+
+	var result struct {
+		Content []struct {
+			Text string `json:"text"`
+			Type string `json:"type"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal(toolResp.Result, &result); err != nil {
+		t.Fatalf("unmarshal tool result: %v", err)
+	}
+	assert.That(t, "content count", len(result.Content), 1)
+	assert.That(t, "echoed client payload", result.Content[0].Text, `client said: "world"`)
 }
 
 func testResourcesRegistryWithTemplate() *resources.Registry {
@@ -3831,7 +3857,7 @@ func Test_Server_With_ResourcesReadTemplateHandlerCodeError_Should_ReturnCodeErr
 	assert.That(t, "error message", responses[1].Error.Message, "access denied")
 }
 
-func Test_Server_With_ResourcesReadNoMatchStaticOrTemplate_Should_ReturnInvalidParams(t *testing.T) {
+func Test_Server_With_ResourcesReadNoMatchStaticOrTemplate_Should_ReturnResourceNotFound(t *testing.T) {
 	t.Parallel()
 
 	// Arrange — registry has both static and template, but URI matches neither
@@ -3840,10 +3866,11 @@ func Test_Server_With_ResourcesReadNoMatchStaticOrTemplate_Should_ReturnInvalidP
 	// Act
 	responses, err := runServer(t, testRegistry(), input, server.WithResources(testResourcesRegistryWithTemplate()))
 
-	// Assert
+	// Assert: MCP 2025-11-25 requires -32002 (resource not found), distinct
+	// from -32602 (malformed params) so clients can distinguish.
 	assert.That(t, "error", err, nil)
 	assert.That(t, "response count", len(responses), 2)
-	assert.That(t, "error code", responses[1].Error.Code, protocol.InvalidParams)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.ResourceNotFound)
 }
 
 func Test_Server_With_TraceEnabledNotification_Should_LogTraceNotification(t *testing.T) {
@@ -3880,33 +3907,42 @@ func Test_Server_With_TraceEnabledNotification_Should_LogTraceNotification(t *te
 	}
 }
 
-func Test_Server_With_ResourcesListAndTemplates_Should_ReturnBoth(t *testing.T) {
+func Test_Server_With_ResourcesListAndTemplates_Should_ReturnSeparately(t *testing.T) {
 	t.Parallel()
 
-	// Arrange — registry with both static resources and templates
-	input := handshake() + `{"jsonrpc":"2.0","method":"resources/list","id":2,"params":{}}` + "\n"
+	// Arrange — registry with both static resources and templates.
+	// MCP 2025-11-25 splits them across resources/list and
+	// resources/templates/list, so we verify each method independently.
+	input := handshake() +
+		`{"jsonrpc":"2.0","method":"resources/list","id":2,"params":{}}` + "\n" +
+		`{"jsonrpc":"2.0","method":"resources/templates/list","id":3,"params":{}}` + "\n"
 
 	// Act
 	responses, err := runServer(t, testRegistry(), input, server.WithResources(testResourcesRegistryWithTemplate()))
 
 	// Assert
 	assert.That(t, "error", err, nil)
-	assert.That(t, "response count", len(responses), 2)
-	assert.That(t, "no error", responses[1].Error == nil, true)
+	assert.That(t, "response count", len(responses), 3)
+	assert.That(t, "resources/list ok", responses[1].Error == nil, true)
+	assert.That(t, "templates/list ok", responses[2].Error == nil, true)
 
-	var result struct {
+	var listResult struct {
 		Resources []struct {
 			URI string `json:"uri"`
 		} `json:"resources"`
+	}
+	_ = json.Unmarshal(responses[1].Result, &listResult)
+	assert.That(t, "resource count", len(listResult.Resources), 1)
+	assert.That(t, "resource uri", listResult.Resources[0].URI, "config://app")
+
+	var tmplResult struct {
 		ResourceTemplates []struct {
 			URITemplate string `json:"uriTemplate"`
 		} `json:"resourceTemplates"`
 	}
-	_ = json.Unmarshal(responses[1].Result, &result)
-	assert.That(t, "resource count", len(result.Resources), 1)
-	assert.That(t, "template count", len(result.ResourceTemplates), 1)
-	assert.That(t, "resource uri", result.Resources[0].URI, "config://app")
-	assert.That(t, "template uri", result.ResourceTemplates[0].URITemplate, "file://{path}")
+	_ = json.Unmarshal(responses[2].Result, &tmplResult)
+	assert.That(t, "template count", len(tmplResult.ResourceTemplates), 1)
+	assert.That(t, "template uri", tmplResult.ResourceTemplates[0].URITemplate, "file://{path}")
 }
 
 func Test_Server_With_ToolCallErrorResult_Should_ReturnErrorFlag(t *testing.T) {

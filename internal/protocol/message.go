@@ -49,6 +49,13 @@ func ErrParseError(msg string) *CodeError {
 	return &CodeError{Code: ParseError, Message: msg}
 }
 
+// ErrResourceNotFound creates a CodeError with the ResourceNotFound code for
+// resources/read requests targeting a URI that matches no registered resource
+// or template.
+func ErrResourceNotFound(msg string) *CodeError {
+	return &CodeError{Code: ResourceNotFound, Message: msg}
+}
+
 // ErrServerError creates a CodeError with the ServerError code for state-related
 // rejections (not initialized, already initialized, server busy).
 func ErrServerError(msg string) *CodeError {

@@ -8,11 +8,14 @@ import (
 	"fmt"
 )
 
-// maxJSONDepth caps nesting depth of any decoded JSON-RPC message. The stdlib
-// json decoder has no native depth limit, so we scan the raw bytes for balanced
-// `{` / `[` before handing them to Unmarshal. 64 comfortably covers legal MCP
-// payloads while preventing stack-exhaustion attacks.
-const maxJSONDepth = 64
+// ErrBatchNotSupported is returned by DecodeMessage when the top-level JSON is
+// an array. Exposed as a sentinel so the server can surface a specific wire
+// message instead of a generic parse error.
+var ErrBatchNotSupported = errors.New("batch requests not supported")
+
+// ErrJSONDepthExceeded is returned by DecodeMessage when a JSON-RPC payload
+// nests more than MaxJSONDepth levels deep.
+var ErrJSONDepthExceeded = fmt.Errorf("json nesting exceeds max depth %d", MaxJSONDepth)
 
 // IncomingMessage is a union type for messages arriving on stdin. It
 // distinguishes client requests/notifications (which have a Method field)
@@ -49,10 +52,10 @@ func DecodeMessage(dec *json.Decoder) (IncomingMessage, error) {
 
 	// Batch detection: JSON array at top level is not supported.
 	if len(raw) > 0 && raw[0] == '[' {
-		return IncomingMessage{}, errors.New("batch requests not supported")
+		return IncomingMessage{}, ErrBatchNotSupported
 	}
 
-	if err := checkDepth(raw, maxJSONDepth); err != nil {
+	if err := checkDepth(raw, MaxJSONDepth); err != nil {
 		return IncomingMessage{}, fmt.Errorf("decode message: %w", err)
 	}
 
@@ -191,7 +194,7 @@ func NullID() json.RawMessage {
 }
 
 // checkDepth scans raw JSON bytes and returns an error if nesting exceeds
-// max. It tracks string state to ignore brackets inside string literals.
+// limit. It tracks string state to ignore brackets inside string literals.
 func checkDepth(raw json.RawMessage, limit int) error {
 	depth, inString, escaped := 0, false, false
 	for _, b := range raw {
@@ -210,7 +213,7 @@ func checkDepth(raw json.RawMessage, limit int) error {
 		case b == '{' || b == '[':
 			depth++
 			if depth > limit {
-				return fmt.Errorf("json nesting exceeds max depth %d", limit)
+				return ErrJSONDepthExceeded
 			}
 		case b == '}' || b == ']':
 			depth--

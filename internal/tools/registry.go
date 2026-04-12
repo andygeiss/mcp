@@ -2,11 +2,11 @@
 package tools
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
 	"slices"
-	"strings"
 
 	"github.com/andygeiss/mcp/internal/protocol"
 	"github.com/andygeiss/mcp/internal/schema"
@@ -149,7 +149,7 @@ func Register[T any](r *Registry, name, description string, handler func(ctx con
 
 	r.tools = append(r.tools, tool)
 	slices.SortFunc(r.tools, func(a, b Tool) int {
-		return strings.Compare(a.Name, b.Name)
+		return cmp.Compare(a.Name, b.Name)
 	})
 	for i, t := range r.tools {
 		r.index[t.Name] = i

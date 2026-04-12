@@ -49,13 +49,15 @@ type Server struct {
 	cancelInFlight    context.CancelFunc
 	counting          *countingReader
 	dec               *json.Decoder
+	done              chan struct{}
 	enc               *json.Encoder
 	errorCount        atomic.Int64
 	handlerTimeout    time.Duration
 	inFlightCancelled atomic.Bool
 	inFlightCh        chan inFlightResult
 	inFlightID        json.RawMessage
-	logLevel          string
+	instructions      string
+	logLevel          *slog.LevelVar
 	logger            *slog.Logger
 	name              string
 	nextReqID         atomic.Int64
@@ -103,6 +105,14 @@ func WithHandlerTimeout(d time.Duration) Option {
 	}
 }
 
+// WithInstructions sets the free-form usage guidance returned in the
+// initialize response. Clients may surface this text to the user.
+func WithInstructions(instructions string) Option {
+	return func(s *Server) {
+		s.instructions = instructions
+	}
+}
+
 // WithPrompts attaches a prompt registry to the server. When set, the
 // server advertises the prompts capability and dispatches prompts/ methods.
 func WithPrompts(p *prompts.Registry) Option {
@@ -120,7 +130,10 @@ func WithResources(r *resources.Registry) Option {
 }
 
 // WithTrace enables protocol trace mode. When enabled, every incoming request
-// and outgoing response is logged to stderr. Zero overhead when disabled.
+// and outgoing response is logged to stderr at debug level. Zero overhead
+// when disabled. Enabling trace elevates the logger's level to debug so the
+// trace entries are actually emitted — any subsequent logging/setLevel call
+// from the client may lower it again.
 func WithTrace(enabled bool) Option {
 	return func(s *Server) {
 		s.trace = enabled
@@ -144,21 +157,28 @@ func NewServer(name, version string, registry *tools.Registry, stdin io.Reader, 
 	cr := newCountingReader(stdin, maxMessageSize)
 	enc := json.NewEncoder(stdout)
 	enc.SetEscapeHTML(false)
+	levelVar := new(slog.LevelVar)
+	levelVar.Set(slog.LevelInfo)
 	s := &Server{
 		counting:       cr,
 		dec:            json.NewDecoder(cr),
+		done:           make(chan struct{}),
 		enc:            enc,
 		handlerTimeout: defaultHandlerTimeout,
-		pending:        make(map[string]chan protocol.Response),
-		safetyMargin:   defaultSafetyMargin,
-		logger:         slog.New(slog.NewJSONHandler(stderr, &slog.HandlerOptions{Level: slog.LevelInfo})),
+		logLevel:       levelVar,
+		logger:         slog.New(slog.NewJSONHandler(stderr, &slog.HandlerOptions{Level: levelVar})),
 		name:           name,
+		pending:        make(map[string]chan protocol.Response),
 		registry:       registry,
+		safetyMargin:   defaultSafetyMargin,
 		state:          stateUninitialized,
 		version:        version,
 	}
 	for _, opt := range opts {
 		opt(s)
+	}
+	if s.trace {
+		s.logLevel.Set(slog.LevelDebug)
 	}
 	return s
 }
@@ -182,6 +202,7 @@ func (s *Server) Run(ctx context.Context) error {
 	)
 	var runErr error
 	defer func() {
+		close(s.done)
 		s.logShutdown(ctx, runErr, startTime)
 	}()
 
@@ -265,17 +286,28 @@ func (s *Server) SendRequest(ctx context.Context, method string, params any) (pr
 		return resp, nil
 	case <-ctx.Done():
 		return protocol.Response{}, ctx.Err()
+	case <-s.done:
+		return protocol.Response{}, errors.New("server shutting down")
 	}
 }
 
 // routeResponse delivers a client response to the pending request map.
-// If no pending request matches the response ID, the response is silently dropped.
+// If no pending request matches the response ID, the response is silently
+// dropped. A non-blocking send under the lock prevents a duplicate response
+// from deadlocking the decode goroutine if the buffered channel is full.
 func (s *Server) routeResponse(resp protocol.Response) {
 	s.pendingMu.Lock()
 	ch, ok := s.pending[string(resp.ID)]
-	s.pendingMu.Unlock()
 	if ok {
-		ch <- resp
+		delete(s.pending, string(resp.ID))
+	}
+	s.pendingMu.Unlock()
+	if !ok {
+		return
+	}
+	select {
+	case ch <- resp:
+	default:
 	}
 }
 
@@ -379,7 +411,7 @@ func (s *Server) handleDecodeResultDuringInFlight(ctx context.Context, dr decode
 		if raw, err := json.Marshal(dr.msg); err != nil {
 			s.logger.Warn("trace_marshal_request", "error", err)
 		} else {
-			s.logger.Info("trace_request", "direction", "←", "message", string(raw))
+			s.logger.Debug("trace_request", "direction", "←", "message", string(raw))
 		}
 	}
 
@@ -445,7 +477,7 @@ func (s *Server) handleDecodeResultIdle(ctx context.Context, dr decodeResult) er
 		if raw, err := json.Marshal(dr.msg); err != nil {
 			s.logger.Warn("trace_marshal_request", "error", err)
 		} else {
-			s.logger.Info("trace_request", "direction", "←", "message", string(raw))
+			s.logger.Debug("trace_request", "direction", "←", "message", string(raw))
 		}
 	}
 
@@ -486,7 +518,7 @@ func (s *Server) sendNotification(method string, params any) error {
 		if traceRaw, err := json.Marshal(n); err != nil {
 			s.logger.Warn("trace_marshal_notification", "error", err)
 		} else {
-			s.logger.Info("trace_notification", "direction", "→", "message", string(traceRaw))
+			s.logger.Debug("trace_notification", "direction", "→", "message", string(traceRaw))
 		}
 	}
 	s.stdoutMu.Lock()
@@ -507,7 +539,7 @@ func (s *Server) encodeResponse(resp protocol.Response) error {
 		if raw, err := json.Marshal(resp); err != nil {
 			s.logger.Warn("trace_marshal_response", "error", err)
 		} else {
-			s.logger.Info("trace_response", "direction", "→", "message", string(raw))
+			s.logger.Debug("trace_response", "direction", "→", "message", string(raw))
 		}
 	}
 	s.stdoutMu.Lock()
@@ -677,7 +709,9 @@ func (s *Server) clearInFlight() {
 }
 
 // handleDecodeError processes errors from the decoder, returning nil for clean
-// shutdown (EOF) or an error for fatal conditions.
+// shutdown (EOF) or an error for fatal conditions. The wire message is a
+// sanitized, well-known string — raw decoder errors (which may echo user
+// input or reveal stdlib internals) are confined to the stderr log.
 func (s *Server) handleDecodeError(err error) error {
 	// Check for size limit BEFORE EOF — the countingReader returns
 	// errMessageTooLarge which errors.Is can match through any wrapping.
@@ -688,13 +722,21 @@ func (s *Server) handleDecodeError(err error) error {
 	}
 
 	s.errorCount.Add(1)
-	msg := err.Error()
-	if isTooLarge {
-		msg = "message exceeds 4MB size limit"
+
+	var wire string
+	switch {
+	case isTooLarge:
+		wire = "message exceeds 4MB size limit"
+	case errors.Is(err, protocol.ErrBatchNotSupported):
+		wire = protocol.ErrBatchNotSupported.Error()
+	case errors.Is(err, protocol.ErrJSONDepthExceeded):
+		wire = protocol.ErrJSONDepthExceeded.Error()
+	default:
+		wire = "parse error"
 	}
 
 	s.logger.Error("decode_error", "error", err)
-	resp := protocol.NewErrorResponse(protocol.NullID(), protocol.ParseError, msg)
+	resp := protocol.NewErrorResponse(protocol.NullID(), protocol.ParseError, wire)
 	s.stdoutMu.Lock()
 	encErr := protocol.Encode(s.enc, resp)
 	s.stdoutMu.Unlock()
@@ -732,6 +774,12 @@ func (s *Server) dispatch(ctx context.Context, msg protocol.Request) (protocol.R
 		return resp, true
 	}
 
+	// rpc.* is reserved by JSON-RPC 2.0 §4.3 — reject in any state with
+	// -32601 (method not found), never the state-gate -32000.
+	if strings.HasPrefix(msg.Method, protocol.PrefixRPC) {
+		return s.errorResponse(msg.ID, protocol.ErrMethodNotFound("reserved method: "+msg.Method)), true
+	}
+
 	return s.dispatchByState(ctx, msg), true
 }
 
@@ -746,7 +794,7 @@ func (s *Server) dispatchByState(ctx context.Context, msg protocol.Request) prot
 
 	case stateInitializing:
 		if msg.Method == protocol.MethodInitialize {
-			return s.errorResponse(msg.ID, protocol.ErrServerError("already initialized"))
+			return s.errorResponse(msg.ID, protocol.ErrServerError("initialize already received, awaiting notifications/initialized"))
 		}
 		return s.errorResponse(msg.ID, protocol.ErrServerError("server initializing, awaiting notifications/initialized"))
 
@@ -775,13 +823,15 @@ func (s *Server) errorResponse(id json.RawMessage, err error) protocol.Response 
 }
 
 // handleNotification processes notification messages (no response sent).
+// Per MCP: notifications are fire-and-forget — unknown or out-of-state
+// notifications are silently ignored, never logged at non-debug level, and
+// never responded to.
 func (s *Server) handleNotification(msg protocol.Request) {
 	switch msg.Method {
 	case protocol.NotificationCancelled:
 		s.handleCancelledNotification(msg)
 	case protocol.NotificationInitialized:
 		if s.state != stateInitializing {
-			s.logger.Warn("unexpected notifications/initialized", "current_state", s.state)
 			return
 		}
 		s.state = stateReady
@@ -791,14 +841,14 @@ func (s *Server) handleNotification(msg protocol.Request) {
 }
 
 // handleCancelledNotification cancels the in-flight tool handler if the
-// request ID matches. Non-matching or stale cancellations are silently ignored.
+// request ID matches. Non-matching, stale, or malformed cancellations are
+// silently ignored per the notification contract.
 func (s *Server) handleCancelledNotification(msg protocol.Request) {
 	if s.cancelInFlight == nil {
 		return
 	}
 	var params cancelledParams
 	if err := json.Unmarshal(msg.Params, &params); err != nil {
-		s.logger.Warn("unmarshal cancelled notification failed", "error", err)
 		return
 	}
 	if !bytes.Equal(params.RequestID, s.inFlightID) {
@@ -811,6 +861,7 @@ func (s *Server) handleCancelledNotification(msg protocol.Request) {
 // initializeResult is the result of the initialize method.
 type initializeResult struct {
 	Capabilities    initializeCapabilities `json:"capabilities"`
+	Instructions    string                 `json:"instructions,omitempty"`
 	ProtocolVersion string                 `json:"protocolVersion"`
 	ServerInfo      serverInfo             `json:"serverInfo"`
 }
@@ -890,6 +941,7 @@ func (s *Server) handleInitialize(msg protocol.Request) protocol.Response {
 
 	result := initializeResult{
 		Capabilities:    caps,
+		Instructions:    s.instructions,
 		ProtocolVersion: negotiated,
 		ServerInfo:      serverInfo{Name: s.name, Version: s.version},
 	}
@@ -908,7 +960,8 @@ type capabilityGuidance struct {
 	SupportedCapabilities []string `json:"supportedCapabilities"`
 }
 
-// handleMethod dispatches ready-state methods.
+// handleMethod dispatches ready-state methods. rpc.* reservation is enforced
+// earlier in dispatch() so it applies in any state.
 func (s *Server) handleMethod(ctx context.Context, msg protocol.Request) protocol.Response {
 	switch {
 	case strings.HasPrefix(msg.Method, protocol.NamespaceCompletion):
@@ -933,8 +986,6 @@ func (s *Server) handleMethod(ctx context.Context, msg protocol.Request) protoco
 		return s.errorResponse(msg.ID, protocol.ErrInternalError("unexpected tools/call in handleMethod"))
 	case msg.Method == protocol.MethodToolsList:
 		return s.handleToolsList(msg)
-	case strings.HasPrefix(msg.Method, protocol.PrefixRPC):
-		return s.errorResponse(msg.ID, protocol.ErrMethodNotFound("reserved method: "+msg.Method))
 	default:
 		return s.errorResponse(msg.ID, protocol.ErrMethodNotFound("unknown method: "+msg.Method))
 	}
@@ -1059,8 +1110,7 @@ func (s *Server) runToolHandler(ctx context.Context, tool tools.Tool, params jso
 		defer cancel()
 		result, err := tool.Handler(hctx, params)
 		if err != nil {
-			var pe *protocol.CodeError
-			if errors.As(err, &pe) {
+			if pe, ok := errors.AsType[*protocol.CodeError](err); ok {
 				ch <- toolOutcome{err: &toolError{code: pe.Code, data: pe.Data, message: pe.Message}}
 			} else {
 				s.logger.Error("tool_handler_error", "tool_name", tool.Name, "error", err)
@@ -1130,11 +1180,17 @@ func (s *Server) dispatchToolCall(ctx context.Context, tool tools.Tool, params j
 
 // --- Resources ---
 
-// resourcesListResult is the result of resources/list.
+// resourcesListResult is the result of resources/list. Templates are returned
+// by the distinct resources/templates/list method per MCP 2025-11-25.
 type resourcesListResult struct {
+	NextCursor string               `json:"nextCursor,omitempty"`
+	Resources  []resources.Resource `json:"resources"`
+}
+
+// resourcesTemplatesListResult is the result of resources/templates/list.
+type resourcesTemplatesListResult struct {
 	NextCursor        string                       `json:"nextCursor,omitempty"`
-	ResourceTemplates []resources.ResourceTemplate `json:"resourceTemplates,omitempty"`
-	Resources         []resources.Resource         `json:"resources"`
+	ResourceTemplates []resources.ResourceTemplate `json:"resourceTemplates"`
 }
 
 // resourcesReadParams is the expected structure of resources/read params.
@@ -1154,21 +1210,31 @@ func (s *Server) handleResourcesMethod(ctx context.Context, msg protocol.Request
 		return s.handleResourcesList(msg)
 	case protocol.MethodResourcesRead:
 		return s.handleResourcesRead(ctx, msg)
+	case protocol.MethodResourcesTemplatesList:
+		return s.handleResourcesTemplatesList(msg)
 	default:
 		return s.errorResponse(msg.ID, protocol.ErrMethodNotFound("unknown method: "+msg.Method))
 	}
 }
 
-// handleResourcesList returns all registered resources and templates.
+// handleResourcesList returns all registered static resources.
 func (s *Server) handleResourcesList(msg protocol.Request) protocol.Response {
-	result := resourcesListResult{
-		Resources:         s.resources.Resources(),
-		ResourceTemplates: s.resources.Templates(),
-	}
+	result := resourcesListResult{Resources: s.resources.Resources()}
 	resp, err := protocol.NewResultResponse(msg.ID, result)
 	if err != nil {
 		s.logger.Error("marshal_resources_list", "error", err)
 		return s.errorResponse(msg.ID, protocol.ErrInternalError("failed to marshal resources list"))
+	}
+	return resp
+}
+
+// handleResourcesTemplatesList returns all registered resource templates.
+func (s *Server) handleResourcesTemplatesList(msg protocol.Request) protocol.Response {
+	result := resourcesTemplatesListResult{ResourceTemplates: s.resources.Templates()}
+	resp, err := protocol.NewResultResponse(msg.ID, result)
+	if err != nil {
+		s.logger.Error("marshal_resources_templates_list", "error", err)
+		return s.errorResponse(msg.ID, protocol.ErrInternalError("failed to marshal resource templates list"))
 	}
 	return resp
 }
@@ -1194,7 +1260,7 @@ func (s *Server) handleResourcesRead(ctx context.Context, msg protocol.Request) 
 	} else if tmpl, ok := s.resources.LookupTemplate(params.URI); ok {
 		result, err = tmpl.Handler(ctx, params.URI)
 	} else {
-		return s.errorResponse(msg.ID, protocol.ErrInvalidParams("unknown resource: "+params.URI))
+		return s.errorResponse(msg.ID, protocol.ErrResourceNotFound("resource not found: "+params.URI))
 	}
 	if err != nil {
 		return s.errorResponse(msg.ID, err)
@@ -1312,16 +1378,33 @@ type loggingSetLevelParams struct {
 	Level string `json:"level"`
 }
 
-// handleLoggingSetLevel sets the server's client-facing log level.
+// rfc5424ToSlog maps the eight RFC 5424 severity keywords required by the MCP
+// logging/setLevel spec to slog levels. debug → Debug; info/notice → Info;
+// warning → Warn; error and above → Error.
+var rfc5424ToSlog = map[string]slog.Level{
+	"alert":     slog.LevelError,
+	"critical":  slog.LevelError,
+	"debug":     slog.LevelDebug,
+	"emergency": slog.LevelError,
+	"error":     slog.LevelError,
+	"info":      slog.LevelInfo,
+	"notice":    slog.LevelInfo,
+	"warning":   slog.LevelWarn,
+}
+
+// handleLoggingSetLevel sets the server's stderr log level. The level must be
+// one of the eight RFC 5424 severity keywords required by MCP; any other value
+// is rejected with -32602.
 func (s *Server) handleLoggingSetLevel(msg protocol.Request) protocol.Response {
 	var params loggingSetLevelParams
 	if err := json.Unmarshal(msg.Params, &params); err != nil {
 		return s.errorResponse(msg.ID, protocol.ErrInvalidParams("invalid logging/setLevel params"))
 	}
-	if params.Level == "" {
-		return s.errorResponse(msg.ID, protocol.ErrInvalidParams("level is required"))
+	slogLevel, ok := rfc5424ToSlog[params.Level]
+	if !ok {
+		return s.errorResponse(msg.ID, protocol.ErrInvalidParams("invalid log level: "+params.Level))
 	}
-	s.logLevel = params.Level
+	s.logLevel.Set(slogLevel)
 	s.logger.Info("log_level_changed", "level", params.Level)
 
 	resp, err := protocol.NewResultResponse(msg.ID, json.RawMessage("{}"))

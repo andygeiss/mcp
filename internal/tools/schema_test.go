@@ -196,7 +196,7 @@ type pointerFieldInput struct {
 	Value *string `json:"value"`
 }
 
-func Test_DeriveSchema_With_PointerField_Should_UnwrapToUnderlyingType(t *testing.T) {
+func Test_DeriveSchema_With_PointerField_Should_UnwrapToUnderlyingTypeAndBeOptional(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
@@ -210,10 +210,12 @@ func Test_DeriveSchema_With_PointerField_Should_UnwrapToUnderlyingType(t *testin
 	// Act
 	tool, _ := r.Lookup("ptr")
 
-	// Assert
+	// Assert: *T unwraps to the underlying JSON type AND is treated as
+	// optional (not in the required list) since pointer is the idiomatic
+	// Go "nullable" marker.
 	valProp := tool.InputSchema.Properties["value"]
 	assert.That(t, "value type", valProp.Type, "string")
-	assert.That(t, "required", tool.InputSchema.Required, []string{"value"})
+	assert.That(t, "required", tool.InputSchema.Required, []string(nil))
 }
 
 type nestedSliceInput struct {

@@ -16,6 +16,7 @@ var version = "dev"
 
 func main() {
 	if err := run(); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
 }
@@ -26,6 +27,9 @@ func run() error {
 		return nil
 	}
 
+	// Go 1.26: NotifyContext propagates the signal as the context cause,
+	// so context.Cause(ctx) inside the server can surface the signal name
+	// in the shutdown log.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 

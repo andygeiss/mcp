@@ -138,10 +138,19 @@ func collectField(field reflect.StructField, props map[string]Property, required
 
 	props[name] = prop
 
-	if !strings.Contains(opts, "omitempty") {
+	if !hasOption(opts, "omitempty") && field.Type.Kind() != reflect.Pointer {
 		*required = append(*required, name)
 	}
 	return nil
+}
+
+// hasOption reports whether a comma-separated json tag options list contains
+// the exact option, avoiding substring false positives like "someomitemptyopt".
+func hasOption(opts, want string) bool {
+	if opts == "" {
+		return false
+	}
+	return slices.Contains(strings.Split(opts, ","), want)
 }
 
 // deriveProperty builds a Property for the given Go type.
@@ -181,6 +190,9 @@ func derivePrimitive(t reflect.Type) (Property, bool) {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
 		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		return Property{Type: TypeInteger}, true
+	case reflect.Interface:
+		// Untyped interface ({}/any) accepts any JSON value — emit an open schema.
+		return Property{}, true
 	case reflect.String:
 		return Property{Type: TypeString}, true
 	default:
