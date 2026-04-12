@@ -15,6 +15,18 @@ func main() {
 	}
 }
 
+// validateModulePath enforces the canonical host/owner/repo form. The rewriter
+// derives a bare "owner/repo" slug from the module path to substitute into
+// badge URLs (shields.io, codecov, GitHub). Paths with fewer than three
+// segments have no such slug and would leave the template fingerprint behind.
+func validateModulePath(modulePath string) error {
+	parts := strings.Split(modulePath, "/")
+	if len(parts) < 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
+		return fmt.Errorf("run: invalid module path %q: must be of the form host/owner/repo (e.g. github.com/myorg/myrepo); template badge URLs require an owner/repo slug", modulePath)
+	}
+	return nil
+}
+
 func run() error {
 	if len(os.Args) < 2 {
 		fmt.Fprintln(os.Stderr, "usage: go run ./cmd/init <module-path>")
@@ -22,8 +34,8 @@ func run() error {
 	}
 
 	modulePath := strings.TrimRight(os.Args[1], "/")
-	if !strings.Contains(modulePath, "/") {
-		return fmt.Errorf("run: invalid module path %q: must contain at least one '/'", modulePath)
+	if err := validateModulePath(modulePath); err != nil {
+		return err
 	}
 
 	dir, err := os.Getwd()
