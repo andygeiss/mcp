@@ -55,6 +55,7 @@
    ```bash
    go run ./cmd/init github.com/yourorg/yourproject
    ```
+   Rewrites the module path and self-deletes. The binary directory stays at `cmd/mcp/` — every scaffold produces a binary named `mcp`.
 
 ---
 

@@ -12,16 +12,23 @@ import (
 const (
 	templateBinaryName = "mcp"
 	templateModulePath = "github.com/andygeiss/mcp"
+	templateRepoPath   = "andygeiss/mcp"
 )
 
-// deriveProjectName returns the last segment of a module path.
-func deriveProjectName(modulePath string) string {
-	modulePath = strings.TrimRight(modulePath, "/")
-	i := strings.LastIndex(modulePath, "/")
-	if i < 0 {
-		return modulePath
+// repoShortForm returns the "owner/repo" portion of a module path — the two
+// segments after the host. Returns "" when the path has fewer than three
+// segments. A trailing `/vN` major-version suffix is naturally ignored
+// because only the first two post-host segments are kept.
+//
+//	github.com/myorg/mytool        -> "myorg/mytool"
+//	github.com/myorg/mytool/v2     -> "myorg/mytool"
+//	gitlab.com/group/project       -> "group/project"
+func repoShortForm(modulePath string) string {
+	parts := strings.Split(strings.TrimRight(modulePath, "/"), "/")
+	if len(parts) < 3 {
+		return ""
 	}
-	return modulePath[i+1:]
+	return parts[1] + "/" + parts[2]
 }
 
 // rewriteProject performs all rewrite operations on the project rooted at dir.
@@ -29,7 +36,6 @@ func rewriteProject(dir, modulePath string) error {
 	if modulePath != templateModulePath && strings.HasPrefix(modulePath, templateModulePath) {
 		return fmt.Errorf("module path %q must not extend template path %q", modulePath, templateModulePath)
 	}
-	projectName := deriveProjectName(modulePath)
 
 	if err := rewriteGoMod(dir, modulePath); err != nil {
 		return fmt.Errorf("rewrite go.mod: %w", err)
@@ -39,12 +45,8 @@ func rewriteProject(dir, modulePath string) error {
 		return fmt.Errorf("rewrite go files: %w", err)
 	}
 
-	if err := rewriteTextFiles(dir, modulePath, projectName); err != nil {
+	if err := rewriteTextFiles(dir, modulePath); err != nil {
 		return fmt.Errorf("rewrite text files: %w", err)
-	}
-
-	if err := renameBinaryDir(dir, projectName); err != nil {
-		return fmt.Errorf("rename binary dir: %w", err)
 	}
 
 	if err := runGoModTidy(dir); err != nil {
@@ -133,7 +135,7 @@ func rewriteImportsInFile(path, modulePath string) error {
 }
 
 // rewriteTextFiles walks all non-.go text files and rewrites template references.
-func rewriteTextFiles(dir, modulePath, projectName string) error {
+func rewriteTextFiles(dir, modulePath string) error {
 	return filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -147,12 +149,16 @@ func rewriteTextFiles(dir, modulePath, projectName string) error {
 		if !isTextFile(path) {
 			return nil
 		}
-		return rewriteTextFile(path, modulePath, projectName)
+		return rewriteTextFile(path, modulePath)
 	})
 }
 
-// rewriteTextFile replaces module path and binary name references in a text file.
-func rewriteTextFile(path, modulePath, projectName string) error {
+// rewriteTextFile replaces module path and bare "owner/repo" references in a
+// text file. The full module path is substituted first so any embedded
+// occurrence of the short form (inside the full form) is consumed before the
+// short-form pass runs — that second pass then only touches the bare slug
+// used by badge URLs (shields.io, codecov, etc.).
+func rewriteTextFile(path, modulePath string) error {
 	data, err := readFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -161,36 +167,13 @@ func rewriteTextFile(path, modulePath, projectName string) error {
 		return fmt.Errorf("read %s: %w", path, err)
 	}
 	replaced := bytes.ReplaceAll(data, []byte(templateModulePath), []byte(modulePath))
-	replaced = bytes.ReplaceAll(replaced, []byte("cmd/"+templateBinaryName+"/"), []byte("cmd/"+projectName+"/"))
-	replaced = bytes.ReplaceAll(replaced, []byte("cmd/"+templateBinaryName+" "), []byte("cmd/"+projectName+" "))
+	if short := repoShortForm(modulePath); short != "" {
+		replaced = bytes.ReplaceAll(replaced, []byte(templateRepoPath), []byte(short))
+	}
 	if bytes.Equal(data, replaced) {
 		return nil
 	}
 	return writeFile(path, replaced)
-}
-
-// renameBinaryDir renames cmd/mcp/ to cmd/<projectName>/.
-func renameBinaryDir(dir, projectName string) error {
-	oldDir := filepath.Clean(filepath.Join(dir, "cmd", templateBinaryName))
-	newDir := filepath.Clean(filepath.Join(dir, "cmd", projectName))
-
-	if oldDir == newDir {
-		return nil
-	}
-
-	if _, err := os.Stat(oldDir); os.IsNotExist(err) {
-		// Already renamed — idempotent.
-		if _, statErr := os.Stat(newDir); statErr == nil {
-			return nil
-		}
-		return fmt.Errorf("neither %s nor %s exists", oldDir, newDir)
-	}
-
-	if _, err := os.Stat(newDir); err == nil {
-		return fmt.Errorf("target directory already exists: %s", newDir)
-	}
-
-	return os.Rename(oldDir, newDir)
 }
 
 // runGoModTidy executes go mod tidy in the project directory.
@@ -242,7 +225,7 @@ func verifyZeroFingerprint(dir string) error {
 		if readErr != nil {
 			return readErr
 		}
-		if bytes.Contains(data, []byte(templateModulePath)) {
+		if bytes.Contains(data, []byte(templateModulePath)) || bytes.Contains(data, []byte(templateRepoPath)) {
 			rel, _ := filepath.Rel(dir, path)
 			remaining = append(remaining, rel)
 		}

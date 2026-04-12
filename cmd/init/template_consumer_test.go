@@ -62,8 +62,9 @@ func Test_Integration_With_TemplateConsumer_Should_PassAllQualityGates(t *testin
 	err = os.WriteFile(filepath.Join(toolsDir, "greet.go"), fixtureData, 0o600) //nolint:gosec // test-only: writing to t.TempDir()
 	assert.That(t, "write greet.go", err, nil)
 
-	// Register greet tool in main.go (after echo, alphabetical order)
-	mainGoPath := filepath.Join(projectDir, "cmd", "testserver", "main.go")
+	// Register greet tool in main.go (after echo, alphabetical order).
+	// The binary directory stays at cmd/mcp regardless of module path.
+	mainGoPath := filepath.Join(projectDir, "cmd", "mcp", "main.go")
 	mainData, err := os.ReadFile(filepath.Clean(mainGoPath))
 	assert.That(t, "read main.go", err, nil)
 
