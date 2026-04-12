@@ -28,12 +28,22 @@ func validateModulePath(modulePath string) error {
 }
 
 func run() error {
-	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: go run ./cmd/init <module-path>")
+	args := os.Args[1:]
+	force := false
+	positional := make([]string, 0, len(args))
+	for _, a := range args {
+		if a == "--force" {
+			force = true
+			continue
+		}
+		positional = append(positional, a)
+	}
+	if len(positional) < 1 {
+		fmt.Fprintln(os.Stderr, "usage: go run ./cmd/init [--force] <module-path>")
 		return errors.New("run: missing module path argument")
 	}
 
-	modulePath := strings.TrimRight(os.Args[1], "/")
+	modulePath := strings.TrimRight(positional[0], "/")
 	if err := validateModulePath(modulePath); err != nil {
 		return err
 	}
@@ -44,7 +54,7 @@ func run() error {
 	}
 
 	fmt.Fprintf(os.Stderr, "initializing project: %s\n", modulePath)
-	if err := rewriteProject(dir, modulePath); err != nil {
+	if err := rewriteProject(dir, modulePath, force); err != nil {
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "project initialized successfully\n")

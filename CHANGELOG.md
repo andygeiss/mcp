@@ -6,6 +6,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ## [Unreleased]
 
+### Added
+
+- `cmd/init`: refuses to run when the working tree has uncommitted changes. The trailing `resetGitHistory` step is destructive, so the guard prevents silent loss of in-progress edits. Pass `--force` to override.
+- `internal/schema`: `time.Time` now derives as `{"type":"string","format":"date-time"}`; `json.RawMessage` derives as an unconstrained schema (any JSON); recursive types fail fast with a clear error instead of exhausting the depth budget.
+
+### Changed
+
+- `internal/protocol`: removed unused constants for out-of-scope methods (`MethodCompletionComplete`, `MethodResourcesSubscribe`, `MethodResourcesUnsubscribe`) and notifications (`NotificationResourcesListChanged`, `NotificationToolsListChanged`, `NotificationPromptsListChanged`). Remaining method/notification constants are alphabetized.
+- `internal/server`: capability structs (`prompts`, `resources`, `tools`) are now empty objects — previously they advertised `listChanged: false` / `subscribe: false` for features the server does not implement. The capability is still advertised (key presence signals support); the zero-value flags were noise.
+
 ## [1.0.0] — 2026-04-12
 
 Initial stable release. See [VERSIONING.md](VERSIONING.md) for the public-API boundary, compatibility guarantees, and support window. No code changes since [0.6.10]; this tag marks the point at which the documented surface becomes covered by semver.

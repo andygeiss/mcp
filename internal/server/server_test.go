@@ -2929,16 +2929,15 @@ func Test_Server_With_ResourcesCapability_Should_AdvertiseInInitialize(t *testin
 	assert.That(t, "response count", len(responses), 1)
 
 	var result struct {
-		Capabilities struct {
-			Resources struct {
-				ListChanged bool `json:"listChanged"`
-				Subscribe   bool `json:"subscribe"`
-			} `json:"resources"`
-			Tools struct{} `json:"tools"`
-		} `json:"capabilities"`
+		Capabilities map[string]json.RawMessage `json:"capabilities"`
 	}
 	err = json.Unmarshal(responses[0].Result, &result)
 	assert.That(t, "unmarshal error", err, nil)
+	_, hasResources := result.Capabilities["resources"]
+	assert.That(t, "resources advertised", hasResources, true)
+	_, hasTools := result.Capabilities["tools"]
+	assert.That(t, "tools advertised", hasTools, true)
+	assert.That(t, "resources body", string(result.Capabilities["resources"]), "{}")
 }
 
 func Test_Server_Without_Resources_Should_RejectResourcesMethods(t *testing.T) {

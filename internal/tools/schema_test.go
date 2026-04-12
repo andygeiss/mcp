@@ -382,8 +382,8 @@ func Test_DeriveSchema_With_SelfReferentialType_Should_ReturnError(t *testing.T)
 	if err == nil {
 		t.Fatal("expected error for self-referential type")
 	}
-	if !strings.Contains(err.Error(), "exceeded max depth") {
-		t.Errorf("error message should contain \"exceeded max depth\", got: %s", err.Error())
+	if !strings.Contains(err.Error(), "recursive type") {
+		t.Errorf("error message should contain \"recursive type\", got: %s", err.Error())
 	}
 }
 

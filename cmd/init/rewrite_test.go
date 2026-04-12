@@ -187,7 +187,7 @@ func Test_RewriteProject_With_ExtendedTemplatePath_Should_ReturnError(t *testing
 	t.Parallel()
 
 	// Act
-	err := rewriteProject(t.TempDir(), "github.com/andygeiss/mcp-extended")
+	err := rewriteProject(t.TempDir(), "github.com/andygeiss/mcp-extended", false)
 
 	// Assert
 	if err == nil {
@@ -734,7 +734,7 @@ func Test_RewriteProject_With_ValidProject_Should_RewriteEverything(t *testing.T
 	assert.That(t, "write README.md", err, nil)
 
 	// Act
-	err = rewriteProject(dir, "github.com/test-org/test-tool")
+	err = rewriteProject(dir, "github.com/test-org/test-tool", false)
 
 	// Assert
 	assert.That(t, "rewrite error", err, nil)

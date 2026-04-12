@@ -67,6 +67,8 @@ make init MODULE=github.com/yourorg/yourproject
 
 This rewrites all imports, repoints badge URLs (shields.io, codecov, Actions) at your repo, runs `go mod tidy`, and removes `cmd/init/`. The binary directory stays at `cmd/mcp/`, so every scaffolded project produces a binary named `mcp` -- install it with `go install github.com/yourorg/yourproject/cmd/mcp@latest`. If two MCP servers share `$GOBIN`, disambiguate with `go build -o <name>` or rename `cmd/mcp/` after init.
 
+The rewriter refuses to run if the working tree is dirty — `resetGitHistory` is destructive and would wipe uncommitted edits. Commit/stash first, or pass `--force` to override: `go run ./cmd/init --force github.com/yourorg/yourproject`.
+
 ## Add a tool
 
 Define an input struct, write a handler, register it.
