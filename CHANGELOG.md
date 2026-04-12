@@ -6,11 +6,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-04-12
+
+Initial stable release. See [VERSIONING.md](VERSIONING.md) for the public-API boundary, compatibility guarantees, and support window. No code changes since [0.6.10]; this tag marks the point at which the documented surface becomes covered by semver.
+
+## [0.6.10] — 2026-04-12
+
 ### Added
 
 - `VERSIONING.md` defining the v1.0.0 public-API boundary, compatibility guarantees, and support window.
 - `CHANGELOG.md` (this file).
 - Branch protection on `main`: required `ci-ok` status check, required signed commits, linear history, admin enforcement, no force-pushes, no deletions.
+
+## [0.6.9] — 2026-04-12
 
 ### Changed
 
@@ -61,7 +69,10 @@ Pre-release development leading up to the first signed release. Highlights:
 - 90 % coverage threshold enforced in CI.
 - OpenSSF Scorecard, CodeQL, and govulncheck running in CI; GitHub Actions pinned to SHAs; Dependabot weekly for `gomod` and `github-actions`.
 
-[Unreleased]: https://github.com/andygeiss/mcp/compare/v0.6.8...HEAD
+[Unreleased]: https://github.com/andygeiss/mcp/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/andygeiss/mcp/releases/tag/v1.0.0
+[0.6.10]: https://github.com/andygeiss/mcp/releases/tag/v0.6.10
+[0.6.9]: https://github.com/andygeiss/mcp/releases/tag/v0.6.9
 [0.6.8]: https://github.com/andygeiss/mcp/releases/tag/v0.6.8
 [0.6.7]: https://github.com/andygeiss/mcp/releases/tag/v0.6.7
 [0.6.6]: https://github.com/andygeiss/mcp/releases/tag/v0.6.6
