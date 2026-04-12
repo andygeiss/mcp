@@ -8,6 +8,12 @@ import (
 	"fmt"
 )
 
+// maxJSONDepth caps nesting depth of any decoded JSON-RPC message. The stdlib
+// json decoder has no native depth limit, so we scan the raw bytes for balanced
+// `{` / `[` before handing them to Unmarshal. 64 comfortably covers legal MCP
+// payloads while preventing stack-exhaustion attacks.
+const maxJSONDepth = 64
+
 // IncomingMessage is a union type for messages arriving on stdin. It
 // distinguishes client requests/notifications (which have a Method field)
 // from client responses to server-initiated requests (which have Result or
@@ -46,9 +52,24 @@ func DecodeMessage(dec *json.Decoder) (IncomingMessage, error) {
 		return IncomingMessage{}, errors.New("batch requests not supported")
 	}
 
-	// Classify: a response has "result" or "error" (no "method"); a request
-	// has "method". Check for response indicators to handle case-insensitive
-	// field matching correctly (encoding/json v1 is case-insensitive).
+	if err := checkDepth(raw, maxJSONDepth); err != nil {
+		return IncomingMessage{}, fmt.Errorf("decode message: %w", err)
+	}
+
+	isResponse, err := classifyResponse(raw)
+	if err != nil {
+		return IncomingMessage{}, err
+	}
+	if isResponse {
+		return decodeResponseMessage(raw)
+	}
+	return decodeRequestMessage(raw)
+}
+
+// classifyResponse decides whether raw is a JSON-RPC response (has result or
+// error, no method) or a request/notification. Rejects messages that carry
+// both result and error per JSON-RPC 2.0 §5.
+func classifyResponse(raw json.RawMessage) (bool, error) {
 	var probe struct {
 		Method string          `json:"method"`
 		Result json.RawMessage `json:"result"`
@@ -56,20 +77,29 @@ func DecodeMessage(dec *json.Decoder) (IncomingMessage, error) {
 	}
 	_ = json.Unmarshal(raw, &probe)
 
-	isResponse := (len(probe.Result) > 0 || len(probe.Error) > 0) && probe.Method == ""
-	if !isResponse {
-		// It's a request or notification.
-		var msg Request
-		if err := json.Unmarshal(raw, &msg); err != nil {
-			return IncomingMessage{}, fmt.Errorf("decode message: %w", err)
-		}
-		if len(msg.Params) == 0 || bytes.Equal(msg.Params, []byte("null")) {
-			msg.Params = json.RawMessage("{}")
-		}
-		return IncomingMessage{Request: msg}, nil
+	hasResult := isPresent(probe.Result)
+	hasError := isPresent(probe.Error)
+	if hasResult && hasError {
+		return false, errors.New("response has both result and error")
 	}
+	return (hasResult || hasError) && probe.Method == "", nil
+}
 
-	// It's a response to a server-initiated request.
+// decodeRequestMessage unmarshals raw as a Request, normalizing absent/null
+// params to {} for downstream handlers.
+func decodeRequestMessage(raw json.RawMessage) (IncomingMessage, error) {
+	var msg Request
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		return IncomingMessage{}, fmt.Errorf("decode message: %w", err)
+	}
+	if len(msg.Params) == 0 || bytes.Equal(msg.Params, []byte("null")) {
+		msg.Params = json.RawMessage("{}")
+	}
+	return IncomingMessage{Request: msg}, nil
+}
+
+// decodeResponseMessage unmarshals raw as a Response routed to the pending map.
+func decodeResponseMessage(raw json.RawMessage) (IncomingMessage, error) {
 	var resp Response
 	if err := json.Unmarshal(raw, &resp); err != nil {
 		return IncomingMessage{}, fmt.Errorf("decode message: %w", err)
@@ -158,4 +188,39 @@ func NewResultResponse(id json.RawMessage, result any) (Response, error) {
 // where the request ID is unknown. Returned as a fresh copy to prevent mutation.
 func NullID() json.RawMessage {
 	return json.RawMessage("null")
+}
+
+// checkDepth scans raw JSON bytes and returns an error if nesting exceeds
+// max. It tracks string state to ignore brackets inside string literals.
+func checkDepth(raw json.RawMessage, limit int) error {
+	depth, inString, escaped := 0, false, false
+	for _, b := range raw {
+		switch {
+		case escaped:
+			escaped = false
+		case inString:
+			switch b {
+			case '\\':
+				escaped = true
+			case '"':
+				inString = false
+			}
+		case b == '"':
+			inString = true
+		case b == '{' || b == '[':
+			depth++
+			if depth > limit {
+				return fmt.Errorf("json nesting exceeds max depth %d", limit)
+			}
+		case b == '}' || b == ']':
+			depth--
+		}
+	}
+	return nil
+}
+
+// isPresent reports whether a json.RawMessage carries a non-null value. A raw
+// value of "null" (or empty) is treated as absent for response classification.
+func isPresent(raw json.RawMessage) bool {
+	return len(raw) > 0 && !bytes.Equal(raw, []byte("null"))
 }
