@@ -47,6 +47,12 @@ func Test_Integration_With_TemplateConsumer_Should_PassAllQualityGates(t *testin
 	_, err = os.Stat(filepath.Join(projectDir, ".git", "HEAD"))
 	assert.That(t, ".git/HEAD exists after init", err, nil)
 
+	// Assert — template-only content is stripped.
+	for _, name := range []string{".claude", "CLAUDE.md", "_bmad", "_bmad-output"} {
+		_, statErr := os.Stat(filepath.Join(projectDir, name))
+		assert.That(t, name+" removed from consumer project", os.IsNotExist(statErr), true)
+	}
+
 	// Assert 1 — go build succeeds
 	t.Log("running go build...")
 	runInDir(t, projectDir, "go", "build", "./...")

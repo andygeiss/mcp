@@ -124,6 +124,8 @@ MCP version `2025-11-25`. JSON-RPC 2.0 with these specifics:
 | Unknown notifications | Silently ignored |
 | Error messages | Contextual (e.g. `"unknown tool: foo"`) |
 
+Transport rationale and alternatives considered: [docs/adr/ADR-001](docs/adr/ADR-001-stdio-ndjson-transport.md).
+
 ### Scope
 
 Implements `tools/list`, `tools/call`, `resources/list`, `resources/read`, `prompts/list`, `prompts/get`, `logging/setLevel`, plus `notifications/initialized`, `notifications/cancelled`, `notifications/progress`, `notifications/message`, and a generic server-to-client request primitive.

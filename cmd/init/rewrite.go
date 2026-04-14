@@ -39,43 +39,29 @@ func rewriteProject(dir, modulePath string, force bool) error {
 	if modulePath != templateModulePath && strings.HasPrefix(modulePath, templateModulePath) {
 		return fmt.Errorf("module path %q must not extend template path %q", modulePath, templateModulePath)
 	}
-
 	if err := checkCleanWorkingTree(dir, force); err != nil {
 		return err
 	}
 
-	if err := rewriteGoMod(dir, modulePath); err != nil {
-		return fmt.Errorf("rewrite go.mod: %w", err)
+	steps := []struct {
+		name string
+		fn   func() error
+	}{
+		{"rewrite go.mod", func() error { return rewriteGoMod(dir, modulePath) }},
+		{"rewrite go files", func() error { return rewriteGoFiles(dir, modulePath) }},
+		{"rewrite text files", func() error { return rewriteTextFiles(dir, modulePath) }},
+		{"go mod tidy", func() error { return runGoModTidy(dir) }},
+		{"self-cleanup", func() error { return selfCleanup(dir) }},
+		{"remove build artifacts", func() error { return removeBuildArtifacts(dir) }},
+		{"remove template-only content", func() error { return removeTemplateOnlyContent(dir) }},
+		{"verify zero fingerprint", func() error { return verifyZeroFingerprint(dir) }},
+		{"reset git history", func() error { return resetGitHistory(dir) }},
 	}
-
-	if err := rewriteGoFiles(dir, modulePath); err != nil {
-		return fmt.Errorf("rewrite go files: %w", err)
+	for _, step := range steps {
+		if err := step.fn(); err != nil {
+			return fmt.Errorf("%s: %w", step.name, err)
+		}
 	}
-
-	if err := rewriteTextFiles(dir, modulePath); err != nil {
-		return fmt.Errorf("rewrite text files: %w", err)
-	}
-
-	if err := runGoModTidy(dir); err != nil {
-		return fmt.Errorf("go mod tidy: %w", err)
-	}
-
-	if err := selfCleanup(dir); err != nil {
-		return fmt.Errorf("self-cleanup: %w", err)
-	}
-
-	if err := removeBuildArtifacts(dir); err != nil {
-		return fmt.Errorf("remove build artifacts: %w", err)
-	}
-
-	if err := verifyZeroFingerprint(dir); err != nil {
-		return fmt.Errorf("verify zero fingerprint: %w", err)
-	}
-
-	if err := resetGitHistory(dir); err != nil {
-		return fmt.Errorf("reset git history: %w", err)
-	}
-
 	return nil
 }
 
@@ -321,6 +307,20 @@ func selfCleanup(dir string) error {
 		return nil
 	}
 	return os.RemoveAll(initDir)
+}
+
+// removeTemplateOnlyContent deletes files and directories that exist to support
+// the template itself but have no place in a consumer's project: Andy's
+// engineering-context document (CLAUDE.md), the BMad workflow directories
+// (_bmad, _bmad-output), and Claude Code's local config (.claude). os.RemoveAll
+// is idempotent — missing paths are a no-op.
+func removeTemplateOnlyContent(dir string) error {
+	for _, name := range []string{".claude", "CLAUDE.md", "_bmad", "_bmad-output"} {
+		if err := os.RemoveAll(filepath.Join(dir, name)); err != nil {
+			return fmt.Errorf("remove %s: %w", name, err)
+		}
+	}
+	return nil
 }
 
 // shouldSkip returns true for directories that should not be processed.
