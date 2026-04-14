@@ -11,12 +11,19 @@ import (
 
 // Test_ClaudeMD_Claims_Should_HaveMatchingTests verifies that key behavioral
 // claims in CLAUDE.md have corresponding tests. This catches drift between
-// documentation and implementation.
+// documentation and implementation. When CLAUDE.md is absent — as it is in a
+// scaffold produced by `make init`, which strips template-only content — the
+// test skips cleanly. The claim patterns below are template-specific; rewriting
+// them for a consumer's own CLAUDE.md is the consumer's call.
 func Test_ClaudeMD_Claims_Should_HaveMatchingTests(t *testing.T) {
 	t.Parallel()
 
 	projectRoot := findProjectRoot(t)
-	claudeMD := readFileContent(t, filepath.Join(projectRoot, "CLAUDE.md"))
+	claudeMDPath := filepath.Join(projectRoot, "CLAUDE.md")
+	if _, err := os.Stat(claudeMDPath); os.IsNotExist(err) {
+		t.Skip("CLAUDE.md not present — template-only test skipped")
+	}
+	claudeMD := readFileContent(t, claudeMDPath)
 	testFiles := collectTestFiles(t, projectRoot)
 
 	claims := []struct {
