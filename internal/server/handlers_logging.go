@@ -1,0 +1,49 @@
+package server
+
+import (
+	"encoding/json"
+	"log/slog"
+
+	"github.com/andygeiss/mcp/internal/protocol"
+)
+
+// loggingSetLevelParams is the expected structure of logging/setLevel params.
+type loggingSetLevelParams struct {
+	Level string `json:"level"`
+}
+
+// rfc5424ToSlog maps the eight RFC 5424 severity keywords required by the MCP
+// logging/setLevel spec to slog levels. debug → Debug; info/notice → Info;
+// warning → Warn; error and above → Error.
+var rfc5424ToSlog = map[string]slog.Level{
+	"alert":     slog.LevelError,
+	"critical":  slog.LevelError,
+	"debug":     slog.LevelDebug,
+	"emergency": slog.LevelError,
+	"error":     slog.LevelError,
+	"info":      slog.LevelInfo,
+	"notice":    slog.LevelInfo,
+	"warning":   slog.LevelWarn,
+}
+
+// handleLoggingSetLevel sets the server's stderr log level. The level must be
+// one of the eight RFC 5424 severity keywords required by MCP; any other value
+// is rejected with -32602.
+func (s *Server) handleLoggingSetLevel(msg protocol.Request) protocol.Response {
+	var params loggingSetLevelParams
+	if err := json.Unmarshal(msg.Params, &params); err != nil {
+		return s.errorResponse(msg.ID, protocol.ErrInvalidParams("invalid logging/setLevel params"))
+	}
+	slogLevel, ok := rfc5424ToSlog[params.Level]
+	if !ok {
+		return s.errorResponse(msg.ID, protocol.ErrInvalidParams("invalid log level: "+params.Level))
+	}
+	s.logLevel.Set(slogLevel)
+	s.logger.Info("log_level_changed", "level", params.Level)
+
+	resp, err := protocol.NewResultResponse(msg.ID, json.RawMessage("{}"))
+	if err != nil {
+		return s.errorResponse(msg.ID, protocol.ErrInternalError("failed to marshal logging/setLevel result"))
+	}
+	return resp
+}
