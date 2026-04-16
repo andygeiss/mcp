@@ -8,7 +8,7 @@ Flat and simple -- no hexagonal layers, no bounded contexts. A single CLI binary
 
 ```
 cmd/mcp/                  main.go -- wiring only: flags, I/O injection, os.Exit
-cmd/init/                 template rewriter -- rewrites the module path for scaffold consumers, self-deletes after use (binary dir remains cmd/mcp)
+cmd/scaffold/             template rewriter -- rewrites the module path for scaffold consumers, self-deletes after use (binary dir remains cmd/mcp)
 internal/
   assert/                 lightweight test assertion helpers (assert.That)
   prompts/                prompt registry, reflection-based argument derivation

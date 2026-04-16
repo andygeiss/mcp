@@ -29,7 +29,7 @@ func Test_Integration_With_FullInit_Should_ProduceWorkingProject(t *testing.T) {
 	newModule := "github.com/test-org/test-tool"
 
 	// Act — run init
-	cmd := exec.Command("go", "run", "./cmd/init", newModule)
+	cmd := exec.Command("go", "run", "./cmd/scaffold", newModule)
 	cmd.Dir = projectDir
 	cmd.Env = append(os.Environ(),
 		"GIT_CONFIG_NOSYSTEM=1",
@@ -69,9 +69,9 @@ func Test_Integration_With_FullInit_Should_ProduceWorkingProject(t *testing.T) {
 	_, err = os.Stat(filepath.Join(projectDir, "cmd", "test-tool"))
 	assert.That(t, "test-tool binary dir absent", os.IsNotExist(err), true)
 
-	// Assert — cmd/init/ was removed (self-cleanup)
-	_, err = os.Stat(filepath.Join(projectDir, "cmd", "init"))
-	assert.That(t, "init dir gone", os.IsNotExist(err), true)
+	// Assert — cmd/scaffold/ was removed (self-cleanup)
+	_, err = os.Stat(filepath.Join(projectDir, "cmd", "scaffold"))
+	assert.That(t, "scaffold dir gone", os.IsNotExist(err), true)
 
 	// Assert — zero fingerprint
 	err = verifyZeroFingerprint(projectDir)

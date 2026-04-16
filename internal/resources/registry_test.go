@@ -456,6 +456,26 @@ func Test_LookupTemplate_With_VariableAnchorNotFound_Should_NotMatch(t *testing.
 	assert.That(t, "found", ok, false)
 }
 
+func Test_LookupTemplate_With_LiteralConsumingURIBeforeAdjacentVars_Should_NotMatch(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — template `a{x}{y}` against URI `a`. Literal "a" consumes the
+	// entire URI; adjacent {x}{y} must each match 1+ char but the remaining
+	// URI is empty. Exercises advancePastVariable's uri=="" branch.
+	r := resources.NewRegistry()
+	_ = resources.RegisterTemplate(r, "a{x}{y}", "LitAdj", "literal then adjacent",
+		func(_ context.Context, uri string) (resources.Result, error) {
+			return resources.TextResult(uri, "data"), nil
+		},
+	)
+
+	// Act
+	_, ok := r.LookupTemplate("a")
+
+	// Assert
+	assert.That(t, "found", ok, false)
+}
+
 func Test_Templates_Should_ReturnSortedByURITemplate(t *testing.T) {
 	t.Parallel()
 

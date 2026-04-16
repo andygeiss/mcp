@@ -91,6 +91,14 @@ func (s *Server) handleResourcesRead(ctx context.Context, msg protocol.Request) 
 	} else {
 		return s.errorResponse(msg.ID, protocol.ErrResourceNotFound("resource not found: "+params.URI))
 	}
+	// Timeout/cancellation maps to ServerTimeout regardless of the handler's
+	// return value — consistent with tools/call and MCP §Error Codes.
+	if ctx.Err() != nil {
+		return s.errorResponse(msg.ID, &protocol.CodeError{
+			Code:    protocol.ServerTimeout,
+			Message: fmt.Sprintf("resource %q read timed out", params.URI),
+		})
+	}
 	if err != nil {
 		return s.errorResponse(msg.ID, err)
 	}

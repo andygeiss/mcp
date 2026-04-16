@@ -39,7 +39,7 @@ func run() error {
 		positional = append(positional, a)
 	}
 	if len(positional) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: go run ./cmd/init [--force] <module-path>")
+		fmt.Fprintln(os.Stderr, "usage: go run ./cmd/scaffold [--force] <module-path>")
 		return errors.New("run: missing module path argument")
 	}
 

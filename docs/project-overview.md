@@ -7,7 +7,7 @@
 The project serves two purposes:
 
 1. **Working MCP server** with tools, resources, prompts, progress, logging, and bidirectional transport.
-2. **Template scaffold** -- run `go run ./cmd/init github.com/yourorg/yourproject` to bootstrap a new MCP server project.
+2. **Template scaffold** -- run `go run ./cmd/scaffold github.com/yourorg/yourproject` to bootstrap a new MCP server project.
 
 ## Key Properties
 
@@ -32,7 +32,7 @@ The project serves two purposes:
 - **Per-message size limits** (4 MB) and handler timeouts (30s default) with panic recovery
 - **Structured logging** to stderr via `slog.JSONHandler`
 - **Fuzz-tested** JSON decoder with 22-entry seed corpus
-- **Template scaffold** via `cmd/init` for project bootstrapping
+- **Template scaffold** via `cmd/scaffold` for project bootstrapping
 
 ## Security
 

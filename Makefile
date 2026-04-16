@@ -33,7 +33,7 @@ fuzz:
 
 ## Initialize template with new module path (MODULE=github.com/org/repo)
 init:
-	go run ./cmd/init/ $(MODULE)
+	go run ./cmd/scaffold/ $(MODULE)
 
 ## Run linter (must pass with zero issues)
 lint:

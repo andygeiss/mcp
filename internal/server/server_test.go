@@ -2926,6 +2926,37 @@ func Test_Server_With_ResourcesReadUnknown_Should_ReturnResourceNotFound(t *test
 	assert.That(t, "error code", responses[1].Error.Code, protocol.ResourceNotFound)
 }
 
+func Test_Server_With_ResourcesReadTimeout_Should_ReturnServerTimeout(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — resource handler that respects ctx and returns on deadline.
+	r := resources.NewRegistry()
+	if err := resources.Register(r, "slow://blob", "Slow", "blocks until timeout",
+		func(ctx context.Context, _ string) (resources.Result, error) {
+			<-ctx.Done()
+			return resources.Result{}, ctx.Err()
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	input := handshake() + `{"jsonrpc":"2.0","method":"resources/read","id":2,"params":{"uri":"slow://blob"}}` + "\n"
+
+	// Act — a short handler timeout forces ServerTimeout (-32001).
+	responses, err := runServer(t, testRegistry(), input,
+		server.WithResources(r),
+		server.WithHandlerTimeout(100*time.Millisecond),
+	)
+
+	// Assert
+	assert.That(t, "run error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.ServerTimeout)
+	if !strings.Contains(responses[1].Error.Message, "slow://blob") {
+		t.Errorf("expected URI in timeout message, got: %s", responses[1].Error.Message)
+	}
+}
+
 func Test_Server_With_ResourcesCapability_Should_AdvertiseInInitialize(t *testing.T) {
 	t.Parallel()
 
@@ -2988,6 +3019,37 @@ func testPromptsRegistry() *prompts.Registry {
 		panic("testPromptsRegistry: " + err.Error())
 	}
 	return r
+}
+
+func Test_Server_With_PromptsGetTimeout_Should_ReturnServerTimeout(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — prompt handler blocks until ctx.Done (honoring the deadline).
+	r := prompts.NewRegistry()
+	if err := prompts.Register(r, "slow", "blocks until timeout",
+		func(ctx context.Context, _ struct{}) prompts.Result {
+			<-ctx.Done()
+			return prompts.Result{}
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	input := handshake() + `{"jsonrpc":"2.0","method":"prompts/get","id":2,"params":{"name":"slow","arguments":{}}}` + "\n"
+
+	// Act — a short handler timeout forces ServerTimeout (-32001).
+	responses, err := runServer(t, testRegistry(), input,
+		server.WithPrompts(r),
+		server.WithHandlerTimeout(100*time.Millisecond),
+	)
+
+	// Assert
+	assert.That(t, "run error", err, nil)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.ServerTimeout)
+	if !strings.Contains(responses[1].Error.Message, "slow") {
+		t.Errorf("expected prompt name in timeout message, got: %s", responses[1].Error.Message)
+	}
 }
 
 func Test_Server_With_PromptsList_Should_ReturnPrompts(t *testing.T) {

@@ -31,16 +31,6 @@ type ContentBlock struct {
 	URI      string `json:"uri,omitempty"`
 }
 
-// InputSchema aliases schema.InputSchema so tools and prompts share the same
-// JSON Schema vocabulary.
-type InputSchema = schema.InputSchema
-
-// OutputSchema aliases schema.OutputSchema for structured tool output.
-type OutputSchema = schema.OutputSchema
-
-// Property aliases schema.Property.
-type Property = schema.Property
-
 // Registry holds registered tools sorted alphabetically by name.
 // Not safe for concurrent use — register all tools before starting the server.
 type Registry struct {
@@ -57,13 +47,13 @@ type Result struct {
 
 // Tool represents a registered MCP tool with its handler.
 type Tool struct {
-	Annotations  *Annotations  `json:"annotations,omitempty"`
-	Description  string        `json:"description"`
-	Handler      toolHandler   `json:"-"`
-	InputSchema  InputSchema   `json:"inputSchema"`
-	Name         string        `json:"name"`
-	OutputSchema *OutputSchema `json:"outputSchema,omitempty"`
-	Title        string        `json:"title,omitempty"`
+	Annotations  *Annotations         `json:"annotations,omitempty"`
+	Description  string               `json:"description"`
+	Handler      toolHandler          `json:"-"`
+	InputSchema  schema.InputSchema   `json:"inputSchema"`
+	Name         string               `json:"name"`
+	OutputSchema *schema.OutputSchema `json:"outputSchema,omitempty"`
+	Title        string               `json:"title,omitempty"`
 }
 
 // toolHandler is the low-level function signature used internally by the

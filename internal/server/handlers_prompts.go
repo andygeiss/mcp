@@ -50,6 +50,26 @@ func (s *Server) handlePromptsList(msg protocol.Request) protocol.Response {
 	return resp
 }
 
+// validatePromptArgs checks that required arguments are present and no
+// unknown arguments were supplied. Returns a *protocol.CodeError on mismatch.
+func validatePromptArgs(prompt prompts.Prompt, args map[string]string) error {
+	known := make(map[string]bool, len(prompt.Arguments))
+	for _, arg := range prompt.Arguments {
+		known[arg.Name] = true
+		if arg.Required {
+			if _, ok := args[arg.Name]; !ok {
+				return protocol.ErrInvalidParams("missing required argument: " + arg.Name)
+			}
+		}
+	}
+	for name := range args {
+		if !known[name] {
+			return protocol.ErrInvalidParams("unknown argument: " + name)
+		}
+	}
+	return nil
+}
+
 // handlePromptsGet resolves a prompt by name with arguments.
 func (s *Server) handlePromptsGet(ctx context.Context, msg protocol.Request) protocol.Response {
 	var params promptsGetParams
@@ -70,25 +90,22 @@ func (s *Server) handlePromptsGet(ctx context.Context, msg protocol.Request) pro
 		args = make(map[string]string)
 	}
 
-	known := make(map[string]bool, len(prompt.Arguments))
-	for _, arg := range prompt.Arguments {
-		known[arg.Name] = true
-		if arg.Required {
-			if _, ok := args[arg.Name]; !ok {
-				return s.errorResponse(msg.ID, protocol.ErrInvalidParams("missing required argument: "+arg.Name))
-			}
-		}
-	}
-	for name := range args {
-		if !known[name] {
-			return s.errorResponse(msg.ID, protocol.ErrInvalidParams("unknown argument: "+name))
-		}
+	if err := validatePromptArgs(prompt, args); err != nil {
+		return s.errorResponse(msg.ID, err)
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, s.handlerTimeout)
 	defer cancel()
 
 	result, err := prompt.Handler(ctx, args)
+	// Timeout/cancellation maps to ServerTimeout regardless of the handler's
+	// return value — consistent with tools/call and MCP §Error Codes.
+	if ctx.Err() != nil {
+		return s.errorResponse(msg.ID, &protocol.CodeError{
+			Code:    protocol.ServerTimeout,
+			Message: fmt.Sprintf("prompt %q execution timed out", params.Name),
+		})
+	}
 	if err != nil {
 		return s.errorResponse(msg.ID, err)
 	}

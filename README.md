@@ -65,9 +65,9 @@ Fork or clone this repo, then rewrite the module path:
 make init MODULE=github.com/yourorg/yourproject
 ```
 
-This rewrites all imports, repoints badge URLs (shields.io, codecov, Actions) at your repo, runs `go mod tidy`, and removes `cmd/init/`. The binary directory stays at `cmd/mcp/`, so every scaffolded project produces a binary named `mcp` -- install it with `go install github.com/yourorg/yourproject/cmd/mcp@latest`. If two MCP servers share `$GOBIN`, disambiguate with `go build -o <name>` or rename `cmd/mcp/` after init.
+This rewrites all imports, repoints badge URLs (shields.io, codecov, Actions) at your repo, runs `go mod tidy`, and removes `cmd/scaffold/`. The binary directory stays at `cmd/mcp/`, so every scaffolded project produces a binary named `mcp` -- install it with `go install github.com/yourorg/yourproject/cmd/mcp@latest`. If two MCP servers share `$GOBIN`, disambiguate with `go build -o <name>` or rename `cmd/mcp/` after init.
 
-The rewriter refuses to run if the working tree is dirty — `resetGitHistory` is destructive and would wipe uncommitted edits. Commit/stash first, or pass `--force` to override: `go run ./cmd/init --force github.com/yourorg/yourproject`.
+The rewriter refuses to run if the working tree is dirty — `resetGitHistory` is destructive and would wipe uncommitted edits. Commit/stash first, or pass `--force` to override: `go run ./cmd/scaffold --force github.com/yourorg/yourproject`.
 
 ## Add a tool
 
@@ -136,7 +136,7 @@ Not implemented -- calls are rejected with `-32601`: `resources/subscribe`, `res
 
 ```
 cmd/mcp/           main.go -- wiring only: flags, I/O injection, os.Exit
-cmd/init/          template rewriter -- not part of normal builds
+cmd/scaffold/      template rewriter -- not part of normal builds
 internal/
   assert/          test assertion helpers
   prompts/         prompt registry, argument derivation

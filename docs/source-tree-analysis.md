@@ -89,7 +89,7 @@ mcp/
 | Directory | Role | Key Files |
 |---|---|---|
 | `cmd/mcp/` | Binary entry point | `main.go` (44 lines, wiring only) |
-| `cmd/init/` | Template scaffold | `rewrite.go` (module rewriting, self-cleanup) |
+| `cmd/scaffold/` | Template scaffold | `rewrite.go` (module rewriting, self-cleanup) |
 | `internal/protocol/` | JSON-RPC 2.0 foundation | `message.go`, `codec.go`, `constants.go` |
 | `internal/server/` | Core engine | `server.go` (~8K lines, lifecycle + dispatch) |
 | `internal/tools/` | Tool system | `registry.go`, `echo.go`, `validate.go` |
@@ -103,7 +103,7 @@ mcp/
 - `main()`, `run() error`
 - `version` string (set via ldflags)
 
-### cmd/init
+### cmd/scaffold
 - `main()`, `run() error`
 - `rewriteProject(dir, modulePath) error`
 
@@ -148,7 +148,7 @@ mcp/
 
 | Package | Unit Tests | Integration Tests | Fuzz Targets | Benchmarks |
 |---|---|---|---|---|
-| cmd/init | -- | 2 | -- | -- |
+| cmd/scaffold | -- | 2 | -- | -- |
 | cmd/mcp | 1 | 2 | -- | -- |
 | internal/protocol | 3 files | -- | 1 | 3 |
 | internal/server | 2 files | 4 | 1 | 2 |
