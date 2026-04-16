@@ -27,9 +27,9 @@ func Test_Integration_With_TemplateConsumer_Should_PassAllQualityGates(t *testin
 
 	newModule := "github.com/testorg/testserver"
 
-	// Act 1 — run cmd/init
-	t.Log("running cmd/init...")
-	initCmd := exec.Command("go", "run", "./cmd/init", newModule)
+	// Act 1 — run cmd/scaffold
+	t.Log("running cmd/scaffold...")
+	initCmd := exec.Command("go", "run", "./cmd/scaffold", newModule)
 	initCmd.Dir = projectDir
 	initCmd.Env = append(os.Environ(),
 		"GIT_CONFIG_NOSYSTEM=1",
@@ -40,7 +40,7 @@ func Test_Integration_With_TemplateConsumer_Should_PassAllQualityGates(t *testin
 	)
 	initOut, err := initCmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("cmd/init failed: %v\noutput: %s", err, initOut)
+		t.Fatalf("cmd/scaffold failed: %v\noutput: %s", err, initOut)
 	}
 
 	// Assert — fresh git history was created.
@@ -71,7 +71,7 @@ func Test_Integration_With_TemplateConsumer_Should_PassAllQualityGates(t *testin
 
 	// Act 2 — add greet tool (copy fixture + register)
 	t.Log("adding greet tool to scaffold...")
-	fixtureData, err := os.ReadFile(filepath.Clean(filepath.Join(srcDir, "cmd", "init", "testdata", "greet.go.fixture")))
+	fixtureData, err := os.ReadFile(filepath.Clean(filepath.Join(srcDir, "cmd", "scaffold", "testdata", "greet.go.fixture")))
 	assert.That(t, "read fixture", err, nil)
 
 	toolsDir := filepath.Join(projectDir, "internal", "tools")

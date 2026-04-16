@@ -11,12 +11,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 - `internal/server`: MCP `initialize` now negotiates `protocolVersion` — echoes the client's version when it matches the server's supported version, otherwise falls back to the server's version. `clientInfo` is logged at the uninitialized→initializing transition.
 - `internal/server`: `ErrPendingRequestsFull` sentinel and `maxPendingRequests` cap (1024) on the server-to-client correlation map; `SendRequest` now returns the sentinel under back-pressure instead of growing the map without bound.
 - `internal/protocol`: JSON nesting depth guard (`maxJSONDepth = 64`) scanned before `Unmarshal` to prevent stack-exhaustion on pathological payloads.
-- `cmd/init`: refuses to run when the working tree has uncommitted changes. The trailing `resetGitHistory` step is destructive, so the guard prevents silent loss of in-progress edits. Pass `--force` to override.
+- `cmd/scaffold`: refuses to run when the working tree has uncommitted changes. The trailing `resetGitHistory` step is destructive, so the guard prevents silent loss of in-progress edits. Pass `--force` to override.
 - `internal/schema`: `time.Time` now derives as `{"type":"string","format":"date-time"}`; `json.RawMessage` derives as an unconstrained schema (any JSON); recursive types fail fast with a clear error instead of exhausting the depth budget.
 
 ### Changed
 
-- `internal/tools`: `InputSchema`, `OutputSchema`, and `Property` are now type aliases to the `internal/schema` types so tools and prompts share the same JSON Schema vocabulary. Consumer source compiles unchanged.
+- `internal/tools`: the `Tool` struct now references `schema.InputSchema` / `*schema.OutputSchema` directly instead of aliasing them — `tools.InputSchema`, `tools.OutputSchema`, and `tools.Property` are removed. Callers import `internal/schema` to reach the JSON Schema types, matching `internal/prompts`. This aligns tools and prompts on the same vocabulary without a shadow namespace.
+- `cmd/init` → `cmd/scaffold`: the template rewriter binary directory was renamed to remove the collision with `go mod init`. The user-facing surface (`make init MODULE=…`) is unchanged.
 - `internal/server`: request context is now threaded through `dispatch → handle{Resources,Prompts}{Method,Read,Get}` so client disconnect and server shutdown cancel resource/prompt handlers promptly (previously rooted at `context.Background()`).
 - `internal/protocol`: response classification now rejects messages carrying both `result` and `error` per JSON-RPC 2.0 §5; a `null` value in either field is treated as absent so `{"result":null}` is no longer misclassified as a valid response.
 - `internal/prompts`: argument marshal/unmarshal errors are returned as `*protocol.CodeError{InvalidParams}` at the handler boundary (consistent with `internal/tools`).

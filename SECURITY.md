@@ -24,7 +24,7 @@ Use [GitHub Security Advisories](https://github.com/andygeiss/mcp/security/advis
 ## Scope
 
 - The MCP server binary (`cmd/mcp`) is in scope
-- The `cmd/init` template rewriter is not security-critical
+- The `cmd/scaffold` template rewriter is not security-critical
 
 ## Bug Bounty
 

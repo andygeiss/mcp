@@ -1,5 +1,7 @@
 package tools
 
+import "github.com/andygeiss/mcp/internal/schema"
+
 // Annotations describes optional behavioral hints for a tool, enabling MCP
 // clients to make informed decisions before invocation.
 type Annotations struct {
@@ -23,9 +25,9 @@ func WithAnnotations(a Annotations) Option {
 // WithOutputSchema returns an Option that declares a JSON Schema for the tool's
 // structured output. Tools with an output schema may return [StructuredResult]
 // to provide machine-readable content alongside the human-readable text.
-func WithOutputSchema(schema OutputSchema) Option {
+func WithOutputSchema(out schema.OutputSchema) Option {
 	return func(t *Tool) {
-		t.OutputSchema = &schema
+		t.OutputSchema = &out
 	}
 }
 

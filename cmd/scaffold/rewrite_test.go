@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/andygeiss/mcp/internal/assert"
@@ -355,10 +356,10 @@ func Test_SelfCleanup_With_ExistingDir_Should_RemoveIt(t *testing.T) {
 
 	// Arrange
 	dir := t.TempDir()
-	initDir := filepath.Join(dir, "cmd", "init")
-	err := os.MkdirAll(initDir, 0o750)
+	scaffoldDir := filepath.Join(dir, "cmd", "scaffold")
+	err := os.MkdirAll(scaffoldDir, 0o750)
 	assert.That(t, "mkdir error", err, nil)
-	err = os.WriteFile(filepath.Join(initDir, "main.go"), []byte("package main\n"), 0o600)
+	err = os.WriteFile(filepath.Join(scaffoldDir, "main.go"), []byte("package main\n"), 0o600)
 	assert.That(t, "write error", err, nil)
 
 	// Act
@@ -366,7 +367,7 @@ func Test_SelfCleanup_With_ExistingDir_Should_RemoveIt(t *testing.T) {
 
 	// Assert
 	assert.That(t, "cleanup error", err, nil)
-	_, err = os.Stat(initDir)
+	_, err = os.Stat(scaffoldDir)
 	assert.That(t, "dir gone", os.IsNotExist(err), true)
 }
 
@@ -424,8 +425,8 @@ func Test_RemoveBuildArtifacts_With_Binaries_Should_RemoveThem(t *testing.T) {
 	dir := t.TempDir()
 	err := os.WriteFile(filepath.Join(dir, "mcp"), []byte("binary"), 0o600)
 	assert.That(t, "write mcp", err, nil)
-	err = os.WriteFile(filepath.Join(dir, "init"), []byte("binary"), 0o600)
-	assert.That(t, "write init", err, nil)
+	err = os.WriteFile(filepath.Join(dir, "scaffold"), []byte("binary"), 0o600)
+	assert.That(t, "write scaffold", err, nil)
 
 	// Act
 	err = removeBuildArtifacts(dir)
@@ -434,8 +435,8 @@ func Test_RemoveBuildArtifacts_With_Binaries_Should_RemoveThem(t *testing.T) {
 	assert.That(t, "remove error", err, nil)
 	_, err = os.Stat(filepath.Join(dir, "mcp"))
 	assert.That(t, "mcp gone", os.IsNotExist(err), true)
-	_, err = os.Stat(filepath.Join(dir, "init"))
-	assert.That(t, "init gone", os.IsNotExist(err), true)
+	_, err = os.Stat(filepath.Join(dir, "scaffold"))
+	assert.That(t, "scaffold gone", os.IsNotExist(err), true)
 }
 
 func Test_RemoveBuildArtifacts_With_NoBinaries_Should_BeIdempotent(t *testing.T) {
@@ -759,11 +760,11 @@ func Test_RewriteProject_With_ValidProject_Should_RewriteEverything(t *testing.T
 	err = os.WriteFile(filepath.Join(dir, "cmd", "mcp", "main.go"), []byte(mainGo), 0o600)
 	assert.That(t, "write main.go", err, nil)
 
-	// cmd/init/ (for self-cleanup)
-	err = os.MkdirAll(filepath.Join(dir, "cmd", "init"), 0o750)
-	assert.That(t, "mkdir cmd/init", err, nil)
-	err = os.WriteFile(filepath.Join(dir, "cmd", "init", "main.go"), []byte("package main\n"), 0o600)
-	assert.That(t, "write init main.go", err, nil)
+	// cmd/scaffold/ (for self-cleanup)
+	err = os.MkdirAll(filepath.Join(dir, "cmd", "scaffold"), 0o750)
+	assert.That(t, "mkdir cmd/scaffold", err, nil)
+	err = os.WriteFile(filepath.Join(dir, "cmd", "scaffold", "main.go"), []byte("package main\n"), 0o600)
+	assert.That(t, "write scaffold main.go", err, nil)
 
 	// README.md with template references
 	readme := "# github.com/andygeiss/mcp\n\nbuild: cmd/mcp/ or cmd/mcp run\n"
@@ -798,9 +799,9 @@ func Test_RewriteProject_With_ValidProject_Should_RewriteEverything(t *testing.T
 	_, err = os.Stat(filepath.Join(dir, "cmd", "test-tool"))
 	assert.That(t, "test-tool dir absent", os.IsNotExist(err), true)
 
-	// Check cmd/init was removed
-	_, err = os.Stat(filepath.Join(dir, "cmd", "init"))
-	assert.That(t, "init dir gone", os.IsNotExist(err), true)
+	// Check cmd/scaffold was removed
+	_, err = os.Stat(filepath.Join(dir, "cmd", "scaffold"))
+	assert.That(t, "scaffold dir gone", os.IsNotExist(err), true)
 
 	// Check README.md was rewritten
 	readmeData, _ := readFile(filepath.Join(dir, "README.md"))
@@ -832,4 +833,61 @@ func Test_RunGoModTidy_With_ValidProject_Should_Succeed(t *testing.T) {
 
 	// Assert
 	assert.That(t, "tidy error", err, nil)
+}
+
+func Test_CheckCleanWorkingTree_With_DirtyTree_Should_ReturnError(t *testing.T) { //nolint:paralleltest // isolateGit uses t.Setenv
+	isolateGit(t)
+
+	// Arrange — real git repo with a committed file and an uncommitted edit.
+	dir := t.TempDir()
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...) //nolint:gosec // test helper, fixed args
+		cmd.Dir = dir
+		if out, runErr := cmd.CombinedOutput(); runErr != nil {
+			t.Fatalf("git %v: %v\n%s", args, runErr, out)
+		}
+	}
+	runGit("init", "-b", "main")
+	err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("initial\n"), 0o600)
+	assert.That(t, "write initial README", err, nil)
+	runGit("add", ".")
+	runGit("commit", "-m", "seed")
+	// Dirty the tree.
+	err = os.WriteFile(filepath.Join(dir, "README.md"), []byte("uncommitted edit\n"), 0o600)
+	assert.That(t, "dirty the tree", err, nil)
+
+	// Act
+	err = checkCleanWorkingTree(dir, false)
+
+	// Assert
+	if err == nil {
+		t.Fatal("expected error on dirty tree")
+	}
+	if !strings.Contains(err.Error(), "uncommitted changes") {
+		t.Errorf("expected uncommitted-changes message, got: %v", err)
+	}
+}
+
+func Test_CheckCleanWorkingTree_With_BrokenGitDir_Should_ReturnError(t *testing.T) { //nolint:paralleltest // isolateGit uses t.Setenv
+	isolateGit(t)
+
+	// Arrange — .git exists as a directory but lacks the metadata git status
+	// needs, so `git status --porcelain` fails. Simulates a corrupted repo,
+	// interrupted init, or permissions issue. Without the check, the scaffold
+	// would proceed to resetGitHistory and wipe whatever is there.
+	dir := t.TempDir()
+	err := os.MkdirAll(filepath.Join(dir, ".git"), 0o750)
+	assert.That(t, "mkdir .git", err, nil)
+
+	// Act
+	err = checkCleanWorkingTree(dir, false)
+
+	// Assert
+	if err == nil {
+		t.Fatal("expected error when git status fails")
+	}
+	if !strings.Contains(err.Error(), "git status") {
+		t.Errorf("expected git-status error wrap, got: %v", err)
+	}
 }

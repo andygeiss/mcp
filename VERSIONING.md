@@ -13,7 +13,7 @@ The public API is deliberately narrow. Only the following are covered by semver 
 2. **Stdin/stdout protocol**: conformance with the MCP methods listed under [`Scope`](README.md#scope) in the README, plus the project-specific capability advertised during `initialize`:
    - `experimental.concurrency.maxInFlight: 1` (sequential dispatch)
 3. **Default runtime limits**: 4 MB per-message cap, 30 s handler timeout, 4 096-char tool input cap, 10-level schema recursion. Raising any of these is a breaking change; tightening them for a security fix is allowed under `MINOR`.
-4. **Scaffold contract** (`cmd/init`, invoked via `make init MODULE=...`): the module-path argument and the rewrite rules that transform this repository into a new MCP server project.
+4. **Scaffold contract** (`cmd/scaffold`, invoked via `make init MODULE=...`): the module-path argument and the rewrite rules that transform this repository into a new MCP server project.
 
 ## Not covered
 

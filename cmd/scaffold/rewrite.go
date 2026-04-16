@@ -247,7 +247,7 @@ func runGoModTidy(dir string) error {
 
 // removeBuildArtifacts removes any compiled binaries from the project root.
 func removeBuildArtifacts(dir string) error {
-	for _, name := range []string{templateBinaryName, "init"} {
+	for _, name := range []string{templateBinaryName, "scaffold"} {
 		path := filepath.Join(dir, name)
 		if info, err := os.Stat(path); err == nil && !info.IsDir() {
 			if rmErr := os.Remove(path); rmErr != nil {
@@ -300,13 +300,13 @@ func verifyZeroFingerprint(dir string) error {
 	return nil
 }
 
-// selfCleanup removes the cmd/init/ directory after successful init.
+// selfCleanup removes the cmd/scaffold/ directory after successful init.
 func selfCleanup(dir string) error {
-	initDir := filepath.Join(dir, "cmd", "init")
-	if _, err := os.Stat(initDir); os.IsNotExist(err) {
+	scaffoldDir := filepath.Join(dir, "cmd", "scaffold")
+	if _, err := os.Stat(scaffoldDir); os.IsNotExist(err) {
 		return nil
 	}
-	return os.RemoveAll(initDir)
+	return os.RemoveAll(scaffoldDir)
 }
 
 // removeTemplateOnlyContent deletes files and directories that exist to support

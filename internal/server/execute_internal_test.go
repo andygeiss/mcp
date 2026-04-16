@@ -971,6 +971,73 @@ func Test_SendRequest_With_UnmarshalableParams_Should_ReturnError(t *testing.T) 
 	}
 }
 
+// Test_SendRequest_With_ContextCancelled_Should_CleanupPendingEntry verifies
+// that a SendRequest caller whose context times out before the client responds
+// (a) returns ctx.Err(), and (b) removes its entry from the pending map so the
+// map cannot grow without bound under misbehaving clients.
+func Test_SendRequest_With_ContextCancelled_Should_CleanupPendingEntry(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	s := newTestServer(t)
+	s.pending = make(map[string]chan protocol.Response)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	// Act — no client response will ever arrive; ctx.Done fires first.
+	_, err := s.SendRequest(ctx, "ping", struct{}{})
+
+	// Assert
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected DeadlineExceeded, got: %v", err)
+	}
+	s.pendingMu.Lock()
+	size := len(s.pending)
+	s.pendingMu.Unlock()
+	assert.That(t, "pending cleaned", size, 0)
+}
+
+// Test_SendRequest_With_ServerShutdown_Should_CleanupPendingEntry verifies
+// that when the server's Run loop exits with a SendRequest still in flight,
+// the caller unblocks on s.done and the pending entry is removed. Without
+// this cleanup, shutdown leaks a goroutine per pending server-to-client
+// request.
+func Test_SendRequest_With_ServerShutdown_Should_CleanupPendingEntry(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	s := newTestServer(t)
+	s.pending = make(map[string]chan protocol.Response)
+
+	// Act — call SendRequest in a goroutine, then close s.done to simulate
+	// Run returning. No ctx cancellation, no client response.
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := s.SendRequest(context.Background(), "ping", struct{}{})
+		errCh <- err
+	}()
+
+	// Give SendRequest time to enter its select, then trigger shutdown.
+	// 20ms is generous on loaded CI; the select blocks until one of the
+	// three channels fires.
+	time.Sleep(20 * time.Millisecond)
+	close(s.done)
+
+	// Assert
+	select {
+	case err := <-errCh:
+		if err == nil || err.Error() != "server shutting down" {
+			t.Fatalf("expected shutdown error, got: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("SendRequest did not unblock on s.done close")
+	}
+	s.pendingMu.Lock()
+	size := len(s.pending)
+	s.pendingMu.Unlock()
+	assert.That(t, "pending cleaned", size, 0)
+}
+
 // Test_SendRequest_With_PendingMapFull_Should_ReturnBackpressureError verifies
 // that SendRequest refuses to grow the correlation map past maxPendingRequests
 // and returns the exported ErrPendingRequestsFull sentinel.

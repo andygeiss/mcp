@@ -11,6 +11,7 @@ testdata/fuzz/
 # BMad workflow
 _bmad/
 _bmad-output/
+docs/project-scan-report.json
 
 # Claude Code local config
 .claude/

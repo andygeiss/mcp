@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/andygeiss/mcp/internal/assert"
+	"github.com/andygeiss/mcp/internal/schema"
 	"github.com/andygeiss/mcp/internal/tools"
 )
 
@@ -99,9 +100,9 @@ func Test_WithOutputSchema_With_Schema_Should_SetOutputSchema(t *testing.T) {
 
 	// Arrange
 	r := tools.NewRegistry()
-	schema := tools.OutputSchema{
+	out := schema.OutputSchema{
 		Type: "object",
-		Properties: map[string]tools.Property{
+		Properties: map[string]schema.Property{
 			"count": {Type: "integer", Description: "item count"},
 		},
 		Required: []string{"count"},
@@ -110,7 +111,7 @@ func Test_WithOutputSchema_With_Schema_Should_SetOutputSchema(t *testing.T) {
 	// Act
 	if err := tools.Register(r, "structured", "test", func(_ context.Context, _ struct{}) tools.Result {
 		return tools.TextResult("ok")
-	}, tools.WithOutputSchema(schema)); err != nil {
+	}, tools.WithOutputSchema(out)); err != nil {
 		t.Fatal(err)
 	}
 
