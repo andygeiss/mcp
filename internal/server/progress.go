@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"errors"
 
 	"github.com/andygeiss/mcp/internal/protocol"
 )
@@ -45,6 +44,12 @@ func (p *Progress) Log(level, logger, data string) {
 
 // Report sends a progress notification. No-op if the client didn't provide a token
 // or if the receiver is nil.
+//
+// AI10 invariant: callers MUST NOT invoke Report while the handler is parked
+// in protocol.SendRequest / outbound-awaiting. Interleaving progress with an
+// awaited outbound response is not supported; the per-handler timeout
+// (protocol.ServerTimeout, -32001) is the sole slow-client recovery
+// mechanism. Convention-only — not CI-enforced.
 func (p *Progress) Report(current, total int64) {
 	if p == nil || p.token == nil {
 		return
@@ -60,17 +65,6 @@ func (p *Progress) Report(current, total int64) {
 func ProgressFromContext(ctx context.Context) *Progress {
 	p, _ := ctx.Value(progressKey{}).(*Progress)
 	return p
-}
-
-// SendRequestFromContext sends a JSON-RPC 2.0 request to the client from within
-// a tool handler. Returns the client's response. Returns an error if called
-// outside of a tool handler context.
-func SendRequestFromContext(ctx context.Context, method string, params any) (protocol.Response, error) {
-	p := ProgressFromContext(ctx)
-	if p == nil || p.server == nil {
-		return protocol.Response{}, errors.New("SendRequest: not in a tool handler context")
-	}
-	return p.server.SendRequest(ctx, method, params)
 }
 
 // withProgress injects a Progress into the context.

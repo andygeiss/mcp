@@ -65,9 +65,65 @@ Fork or clone this repo, then rewrite the module path:
 make init MODULE=github.com/yourorg/yourproject
 ```
 
+Open `internal/tools/echo.go` — your first tool, wired up and ready to rename.
+
 This rewrites all imports, repoints badge URLs (shields.io, codecov, Actions) at your repo, runs `go mod tidy`, and removes `cmd/scaffold/`. The binary directory stays at `cmd/mcp/`, so every scaffolded project produces a binary named `mcp` -- install it with `go install github.com/yourorg/yourproject/cmd/mcp@latest`. If two MCP servers share `$GOBIN`, disambiguate with `go build -o <name>` or rename `cmd/mcp/` after init.
 
 The rewriter refuses to run if the working tree is dirty — `resetGitHistory` is destructive and would wipe uncommitted edits. Commit/stash first, or pass `--force` to override: `go run ./cmd/scaffold --force github.com/yourorg/yourproject`.
+
+## Your first tool
+
+After `make init` succeeds, the welcome banner names three steps. Here's what each one looks like:
+
+### Edit — `internal/tools/echo.go`
+
+Open the starter tool. The first line is your anchor:
+
+```go
+// START HERE — your first tool. Edit, copy, rename. It's yours.
+
+// Package tools holds the registered MCP tools and the registry primitives
+// that wire them into the server.
+package tools
+
+import "context"
+
+type EchoInput struct {
+    Message string `json:"message" description:"The message to echo back"`
+}
+
+func Echo(_ context.Context, input EchoInput) Result {
+    return TextResult(input.Message)
+}
+```
+
+Replace the `Echo` body, rename the input struct, and edit the `description` tag — that's the text the agent reads when deciding whether to call your tool.
+
+### Wire — `cmd/mcp/main.go`
+
+Register it with one line:
+
+```go
+if err := tools.Register(registry, "echo", "Echoes the input message", tools.Echo); err != nil {
+    return fmt.Errorf("register echo: %w", err)
+}
+```
+
+Need a clean copy-target for tool number two? Open `internal/tools/_TOOL_TEMPLATE.go` — same shape, no working logic, ready to rename.
+
+### Verify — `make smoke`
+
+```bash
+make smoke
+```
+
+On success you see exactly:
+
+```
+Your server works. It exposes N tool(s).
+```
+
+On failure the target prints two diagnostic hints (forgot to register? doesn't compile?) followed by the captured stderr — usually enough to get unstuck without leaving the terminal.
 
 ## Add a tool
 

@@ -3620,18 +3620,18 @@ func Test_Server_With_NilProgressLog_Should_NotPanic(t *testing.T) {
 	p.Log("info", "test", "hello")
 }
 
-func Test_Server_With_SendRequestFromContextWithoutHandler_Should_ReturnError(t *testing.T) {
+func Test_Server_With_SendRequestWithoutPeerInContext_Should_ReturnSentinel(t *testing.T) {
 	t.Parallel()
 
-	// Arrange — plain context without Progress
+	// Arrange — plain context without Peer
 	ctx := context.Background()
 
 	// Act
-	_, err := server.SendRequestFromContext(ctx, "test/method", nil)
+	_, err := protocol.SendRequest(ctx, "test/method", nil)
 
 	// Assert
-	if err == nil {
-		t.Fatal("expected error when calling SendRequestFromContext outside handler context")
+	if !errors.Is(err, protocol.ErrNoPeerInContext) {
+		t.Fatalf("expected protocol.ErrNoPeerInContext, got: %v", err)
 	}
 }
 
@@ -3658,7 +3658,7 @@ func Test_Server_With_SendRequest_Should_CorrelateResponse(t *testing.T) {
 	// Arrange — register a tool that uses SendRequest to call the client
 	r := tools.NewRegistry()
 	if err := tools.Register(r, "bidir", "bidirectional tool", func(ctx context.Context, _ testInput) tools.Result {
-		resp, err := server.SendRequestFromContext(ctx, "sampling/createMessage", map[string]string{"prompt": "hello"})
+		resp, err := protocol.SendRequest(ctx, "sampling/createMessage", map[string]string{"prompt": "hello"})
 		if err != nil {
 			return tools.ErrorResult("send request failed: " + err.Error())
 		}
@@ -3678,8 +3678,10 @@ func Test_Server_With_SendRequest_Should_CorrelateResponse(t *testing.T) {
 		done <- srv.Run(context.Background())
 	}()
 
-	// Act — write handshake
-	_, _ = stdinW.Write([]byte(handshake()))
+	// Act — write handshake advertising sampling capability so the AI9
+	// capability gate in (*Server).SendRequest does not reject the outbound.
+	bidirHandshake := `{"jsonrpc":"2.0","method":"initialize","id":1,"params":{"capabilities":{"sampling":{}}}}` + "\n" + initializedNotification
+	_, _ = stdinW.Write([]byte(bidirHandshake))
 
 	// Read stdout with a decoder (thread-safe via pipe)
 	dec := json.NewDecoder(stdoutR)

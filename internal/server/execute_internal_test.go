@@ -710,9 +710,9 @@ func Test_routeResponse_With_UnknownID_Should_DropSilently(t *testing.T) {
 
 	// Arrange
 	s := newTestServer(t)
-	s.pending = make(map[string]chan protocol.Response)
+	s.pending = make(map[string]pendingEntry)
 
-	resp := protocol.Response{
+	resp := &protocol.Response{
 		JSONRPC: "2.0",
 		ID:      json.RawMessage(`"unknown-id"`),
 	}
@@ -960,7 +960,7 @@ func Test_SendRequest_With_UnmarshalableParams_Should_ReturnError(t *testing.T) 
 
 	// Arrange
 	s := newTestServer(t)
-	s.pending = make(map[string]chan protocol.Response)
+	s.pending = make(map[string]pendingEntry)
 
 	// Act
 	_, err := s.SendRequest(context.Background(), "test/method", make(chan int))
@@ -980,7 +980,7 @@ func Test_SendRequest_With_ContextCancelled_Should_CleanupPendingEntry(t *testin
 
 	// Arrange
 	s := newTestServer(t)
-	s.pending = make(map[string]chan protocol.Response)
+	s.pending = make(map[string]pendingEntry)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
 
@@ -1007,7 +1007,7 @@ func Test_SendRequest_With_ServerShutdown_Should_CleanupPendingEntry(t *testing.
 
 	// Arrange
 	s := newTestServer(t)
-	s.pending = make(map[string]chan protocol.Response)
+	s.pending = make(map[string]pendingEntry)
 
 	// Act — call SendRequest in a goroutine, then close s.done to simulate
 	// Run returning. No ctx cancellation, no client response.
@@ -1026,8 +1026,8 @@ func Test_SendRequest_With_ServerShutdown_Should_CleanupPendingEntry(t *testing.
 	// Assert
 	select {
 	case err := <-errCh:
-		if err == nil || err.Error() != "server shutting down" {
-			t.Fatalf("expected shutdown error, got: %v", err)
+		if !errors.Is(err, protocol.ErrServerShutdown) {
+			t.Fatalf("expected protocol.ErrServerShutdown, got: %v", err)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("SendRequest did not unblock on s.done close")
@@ -1040,25 +1040,25 @@ func Test_SendRequest_With_ServerShutdown_Should_CleanupPendingEntry(t *testing.
 
 // Test_SendRequest_With_PendingMapFull_Should_ReturnBackpressureError verifies
 // that SendRequest refuses to grow the correlation map past maxPendingRequests
-// and returns the exported ErrPendingRequestsFull sentinel.
+// and returns the protocol.ErrPendingRequestsFull sentinel.
 func Test_SendRequest_With_PendingMapFull_Should_ReturnBackpressureError(t *testing.T) {
 	t.Parallel()
 
 	// Arrange — preload the map at capacity with dummy entries.
 	s := newTestServer(t)
-	s.pending = make(map[string]chan protocol.Response, maxPendingRequests)
+	s.pending = make(map[string]pendingEntry, maxPendingRequests)
 	for i := range maxPendingRequests {
-		s.pending[fmt.Sprintf("k-%d", i)] = make(chan protocol.Response, 1)
+		s.pending[fmt.Sprintf("k-%d", i)] = pendingEntry{respChan: make(chan *protocol.Response, 1)}
 	}
 
 	// Act
 	_, err := s.SendRequest(context.Background(), "test/method", struct{}{})
 
 	// Assert
-	if !errors.Is(err, ErrPendingRequestsFull) {
-		t.Fatalf("expected ErrPendingRequestsFull, got: %v", err)
+	if !errors.Is(err, protocol.ErrPendingRequestsFull) {
+		t.Fatalf("expected protocol.ErrPendingRequestsFull, got: %v", err)
 	}
-	assert.That(t, "map size unchanged", len(s.pending), maxPendingRequests)
+	assert.That(t, "map size unchanged", s.pendingCount(), maxPendingRequests)
 }
 
 // Test_handleDecodeResultDuringInFlight_With_ConcurrentCompletion_Should_ProcessBoth covers
@@ -1256,16 +1256,16 @@ func Test_routeResponse_With_DuplicateResponse_Should_NotBlock(t *testing.T) {
 
 	// Arrange
 	s := newTestServer(t)
-	s.pending = make(map[string]chan protocol.Response)
-	id := json.RawMessage(`"srv-1"`)
-	ch := make(chan protocol.Response, 1)
-	s.pending[string(id)] = ch
+	s.pending = make(map[string]pendingEntry)
+	id := json.RawMessage(`1`)
+	ch := make(chan *protocol.Response, 1)
+	s.pending[string(id)] = pendingEntry{respChan: ch}
 
 	// Act — first response is delivered and consumed; a second identical
 	// response must be dropped (no waiter left, channel buffer full) without
 	// blocking the routing goroutine.
-	first := protocol.Response{ID: id, JSONRPC: protocol.Version, Result: json.RawMessage(`1`)}
-	second := protocol.Response{ID: id, JSONRPC: protocol.Version, Result: json.RawMessage(`2`)}
+	first := &protocol.Response{ID: id, JSONRPC: protocol.Version, Result: json.RawMessage(`1`)}
+	second := &protocol.Response{ID: id, JSONRPC: protocol.Version, Result: json.RawMessage(`2`)}
 
 	done := make(chan struct{})
 	go func() {
@@ -1288,4 +1288,13 @@ func Test_routeResponse_With_DuplicateResponse_Should_NotBlock(t *testing.T) {
 	_, stillPending := s.pending[string(id)]
 	s.pendingMu.Unlock()
 	assert.That(t, "pending entry cleaned", stillPending, false)
+}
+
+// pendingCount returns the number of in-flight outbound requests in the
+// correlation map. Test-only primitive used by synctest scenarios to assert
+// zero-leak invariant after each scenario completes.
+func (s *Server) pendingCount() int {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+	return len(s.pending)
 }

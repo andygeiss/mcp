@@ -86,6 +86,14 @@ linters:
           deny:
             - pkg: "log$"
               desc: "use log/slog for all logging"
+        no-server-in-handlers:
+          list-mode: lax
+          files:
+            - "**/internal/tools/**"
+            - "**/internal/prompts/**"
+          deny:
+            - pkg: "github.com/andygeiss/mcp/internal/server"
+              desc: "handlers must not import internal/server; use protocol.Peer (Invariant I1)"
     exhaustive:
       default-signifies-exhaustive: true
     forbidigo:
@@ -94,6 +102,10 @@ linters:
           msg: "stdout is protocol-only; use fmt.Fprint with the injected io.Writer"
         - pattern: '^(print|println)$'
           msg: "use fmt.Fprint with the injected io.Writer"
+        - pattern: '^os\.Stdout$'
+          msg: "handlers must not write to stdout; stdout is protocol-reserved (Invariant I4)"
+        - pattern: 'fmt\.Fprint[^(]*\(\s*os\.Stdout'
+          msg: "handlers must not write to stdout; use slog to stderr (Invariant I4)"
       analyze-types: true
     funlen:
       lines: 80

@@ -1,5 +1,10 @@
 package protocol
 
+// ErrorCode is a strongly typed JSON-RPC 2.0 error code. Used in
+// ErrClientRejected to carry the structured code returned by a client for a
+// server-initiated request.
+type ErrorCode int
+
 // JSON-RPC 2.0 error codes.
 const (
 	InternalError  = -32603
@@ -14,6 +19,19 @@ const (
 	ResourceNotFound = -32002 // resources/read target URI does not match any registered resource or template
 	ServerError      = -32000 // server state prevents processing a structurally valid request
 	ServerTimeout    = -32001 // tool handler timed out or was cancelled
+)
+
+// ErrorCode-typed mirrors of the well-known codes for use with ErrClientRejected
+// and any future API that wants compile-time type safety on the code field.
+const (
+	ErrCodeInternalError    ErrorCode = -32603
+	ErrCodeInvalidParams    ErrorCode = -32602
+	ErrCodeInvalidRequest   ErrorCode = -32600
+	ErrCodeMethodNotFound   ErrorCode = -32601
+	ErrCodeParseError       ErrorCode = -32700
+	ErrCodeResourceNotFound ErrorCode = -32002
+	ErrCodeServerError      ErrorCode = -32000
+	ErrCodeServerTimeout    ErrorCode = -32001
 )
 
 // MaxConcurrentRequests is a protocol-level constraint advertising sequential

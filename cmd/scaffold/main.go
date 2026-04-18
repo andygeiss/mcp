@@ -4,9 +4,31 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 )
+
+// welcomeBanner is the post-success orientation message emitted to stderr after
+// `make init` completes. Per FR5c (PRD amendment Story 1.4) and architecture
+// D4, the banner names the next imperative steps and points at the README.
+// Suppressed when rewriteProject returns an error so the user is not misled
+// about scaffold state.
+const welcomeBanner = `Your MCP server is running.
+
+  Edit:   internal/tools/echo.go
+  Wire:   cmd/mcp/main.go
+  Verify: make smoke
+
+Full guide: README.md
+`
+
+// emitWelcome writes the welcome banner to the supplied stderr writer. The
+// io.Writer seam lets tests capture and assert against it. A write error here
+// is non-fatal — the scaffold has already succeeded; we just lose the banner.
+func emitWelcome(stderr io.Writer) {
+	_, _ = fmt.Fprint(stderr, welcomeBanner)
+}
 
 func main() {
 	if err := run(); err != nil {
@@ -57,6 +79,6 @@ func run() error {
 	if err := rewriteProject(dir, modulePath, force); err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "project initialized successfully\n")
+	emitWelcome(os.Stderr)
 	return nil
 }

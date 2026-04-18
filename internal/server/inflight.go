@@ -105,6 +105,9 @@ func (s *Server) startToolCallAsync(ctx context.Context, msg protocol.Request) (
 	// Inject progress notifier into handler context.
 	prog := &Progress{server: s, token: extractProgressToken(msg.Params)}
 	callCtx = withProgress(callCtx, prog)
+	// Inject the server as the outbound Peer so handlers reach the bidi path
+	// via protocol.SendRequest without importing internal/server (Invariant I1).
+	callCtx = protocol.ContextWithPeer(callCtx, s)
 
 	go func() {
 		defer cancel()

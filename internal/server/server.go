@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -26,9 +27,9 @@ const (
 	maxPendingRequests = 1024
 )
 
-// ErrPendingRequestsFull is returned by SendRequest when the pending map is at
-// capacity. It signals back-pressure — the caller should retry later.
-var ErrPendingRequestsFull = errors.New("pending server-to-client requests full")
+// Compile-time guarantee that *Server satisfies protocol.Peer. Any signature
+// drift breaks the build before tests run.
+var _ protocol.Peer = (*Server)(nil)
 
 // Server states. stateUninitialized must be iota 0 so the zero value of
 // Server.state matches the uninitialized lifecycle stage.
@@ -38,6 +39,15 @@ const (
 	stateReady
 )
 
+// pendingEntry tracks a single in-flight outbound (server-to-client) request.
+// respChan is buffer-1 and is NEVER closed (Invariant I3 — closing races the
+// cancel path; cleanup is `delete(map, id)` and the unreferenced channel is GC'd).
+type pendingEntry struct {
+	createdAt time.Time
+	method    string
+	respChan  chan *protocol.Response
+}
+
 // Server is the MCP server that communicates over stdin/stdout using JSON-RPC 2.0.
 // It manages a three-state lifecycle: uninitialized → initializing (after
 // initialize request) → ready (after notifications/initialized). Methods
@@ -45,6 +55,7 @@ const (
 // ready state.
 type Server struct {
 	cancelInFlight    context.CancelFunc
+	clientCaps        atomic.Pointer[protocol.ClientCapabilities]
 	counting          *countingReader
 	dec               *json.Decoder
 	done              chan struct{}
@@ -58,8 +69,8 @@ type Server struct {
 	logLevel          *slog.LevelVar
 	logger            *slog.Logger
 	name              string
-	nextReqID         atomic.Int64
-	pending           map[string]chan protocol.Response
+	outboundIDCounter atomic.Int64
+	pending           map[string]pendingEntry
 	pendingMu         sync.Mutex
 	prompts           *prompts.Registry
 	registry          *tools.Registry
@@ -146,7 +157,7 @@ func NewServer(name, version string, registry *tools.Registry, stdin io.Reader, 
 		logLevel:       levelVar,
 		logger:         slog.New(slog.NewJSONHandler(stderr, &slog.HandlerOptions{Level: levelVar})),
 		name:           name,
-		pending:        make(map[string]chan protocol.Response),
+		pending:        make(map[string]pendingEntry),
 		registry:       registry,
 		safetyMargin:   defaultSafetyMargin,
 		state:          stateUninitialized,
@@ -191,7 +202,8 @@ func (s *Server) Run(ctx context.Context) error {
 			incoming, err := protocol.DecodeMessage(s.dec)
 			exceeded := s.counting.Exceeded()
 			if err == nil && incoming.IsResponse {
-				s.routeResponse(incoming.Response)
+				respCopy := incoming.Response
+				s.routeResponse(&respCopy)
 				decodeCh <- decodeResult{routed: true, exceeded: exceeded}
 				return
 			}
@@ -219,30 +231,36 @@ func (s *Server) Run(ctx context.Context) error {
 }
 
 // SendRequest sends a JSON-RPC 2.0 request to the client and waits for the
-// response. This enables server-to-client capabilities like sampling,
-// elicitation, and roots/list. Safe for concurrent use from handler goroutines.
-func (s *Server) SendRequest(ctx context.Context, method string, params any) (protocol.Response, error) {
-	id := s.nextReqID.Add(1)
-	idJSON, _ := json.Marshal(fmt.Sprintf("srv-%d", id))
-
-	ch := make(chan protocol.Response, 1)
-	key := string(idJSON)
-	s.pendingMu.Lock()
-	if len(s.pending) >= maxPendingRequests {
-		s.pendingMu.Unlock()
-		return protocol.Response{}, ErrPendingRequestsFull
+// response. Enables server-to-client capabilities like sampling, elicitation,
+// and roots/list. Safe for concurrent use from handler goroutines.
+//
+// Cancellation semantics (AI7 + ADR-003 §Failure Modes):
+//   - Client response → return *Response, nil.
+//   - Server shutdown (s.done closed) → return nil, protocol.ErrServerShutdown.
+//   - Handler ctx cancel → emit notifications/cancelled with the outbound ID
+//     BEFORE pending-entry cleanup, then return ctx.Err(). Shutdown takes
+//     priority over ctx.Done via a post-select manual check.
+func (s *Server) SendRequest(ctx context.Context, method string, params any) (*protocol.Response, error) {
+	// AI9 capability gate: side-effect-free synchronous reject when the client
+	// did not advertise the capability needed by the method.
+	if needed, gated := protocol.MethodCapability(method); gated {
+		if !s.clientCaps.Load().Has(needed) {
+			return nil, &protocol.CapabilityNotAdvertisedError{Capability: needed, Method: method}
+		}
 	}
-	s.pending[key] = ch
-	s.pendingMu.Unlock()
-	defer func() {
-		s.pendingMu.Lock()
-		delete(s.pending, key)
-		s.pendingMu.Unlock()
-	}()
+
+	id := s.outboundIDCounter.Add(1)
+	idJSON := strconv.AppendInt(nil, id, 10)
+
+	respChan, cleanup, err := s.registerPending(id, method)
+	if err != nil {
+		return nil, err
+	}
 
 	raw, err := json.Marshal(params)
 	if err != nil {
-		return protocol.Response{}, fmt.Errorf("marshal request params: %w", err)
+		cleanup()
+		return nil, fmt.Errorf("marshal request params: %w", err)
 	}
 
 	req := protocol.Request{
@@ -256,35 +274,101 @@ func (s *Server) SendRequest(ctx context.Context, method string, params any) (pr
 	err = s.enc.Encode(&req)
 	s.stdoutMu.Unlock()
 	if err != nil {
-		return protocol.Response{}, fmt.Errorf("encode request: %w", err)
+		cleanup()
+		return nil, fmt.Errorf("encode request: %w", err)
 	}
 
 	select {
-	case resp := <-ch:
+	case resp := <-respChan:
+		cleanup()
 		return resp, nil
-	case <-ctx.Done():
-		return protocol.Response{}, ctx.Err()
 	case <-s.done:
-		return protocol.Response{}, errors.New("server shutting down")
+		// Cleanup is fine here too; the channel is GC'd either way.
+		cleanup()
+		return nil, protocol.ErrServerShutdown
+	case <-ctx.Done():
+		// Fall through to the priority check + A7 emission below.
 	}
+
+	// Priority check: shutdown wins over ctx.Done — never emit
+	// notifications/cancelled to a client we are no longer talking to.
+	select {
+	case <-s.done:
+		cleanup()
+		return nil, protocol.ErrServerShutdown
+	default:
+	}
+
+	// A7: emit cancel notification BEFORE removing the pending entry.
+	s.emitOutboundCancel(req.ID, ctx.Err())
+	cleanup()
+	return nil, ctx.Err()
+}
+
+// emitOutboundCancel sends notifications/cancelled with the abandoned outbound
+// ID. Best-effort: a writer error is logged at warn and not returned. Per AI7
+// server→client symmetry, this MUST be invoked BEFORE the pending-entry
+// cleanup so that observable state (still-present entry while cancel is in
+// flight) is consistent.
+func (s *Server) emitOutboundCancel(id json.RawMessage, cause error) {
+	reason := "context_canceled"
+	if cause != nil {
+		reason = cause.Error()
+	}
+	params := struct {
+		Reason    string          `json:"reason,omitempty"`
+		RequestID json.RawMessage `json:"requestId"`
+	}{
+		Reason:    reason,
+		RequestID: id,
+	}
+	if err := s.sendNotification(protocol.NotificationCancelled, params); err != nil {
+		s.logger.Warn("outbound_cancel_emit_failed", "id", string(id), "error", err)
+	}
+}
+
+// registerPending atomically reserves a slot in the pending map and returns
+// the response channel + a cleanup closure. Callers MUST invoke cleanup once
+// the outbound request is no longer in flight (response received, ctx
+// cancelled, or shutdown). cleanup is idempotent and never closes respChan
+// (Invariant I3). Returns protocol.ErrPendingRequestsFull when the map is at
+// capacity (NFR-R3 scenario d). This is the SOLE insert site for s.pending.
+func (s *Server) registerPending(id int64, method string) (<-chan *protocol.Response, func(), error) {
+	key := strconv.FormatInt(id, 10)
+	ch := make(chan *protocol.Response, 1)
+	s.pendingMu.Lock()
+	if len(s.pending) >= maxPendingRequests {
+		s.pendingMu.Unlock()
+		return nil, nil, protocol.ErrPendingRequestsFull
+	}
+	s.pending[key] = pendingEntry{createdAt: time.Now(), method: method, respChan: ch}
+	s.pendingMu.Unlock()
+	cleanup := func() {
+		s.pendingMu.Lock()
+		delete(s.pending, key)
+		s.pendingMu.Unlock()
+	}
+	return ch, cleanup, nil
 }
 
 // routeResponse delivers a client response to the pending request map.
 // If no pending request matches the response ID, the response is silently
-// dropped. A non-blocking send under the lock prevents a duplicate response
-// from deadlocking the decode goroutine if the buffered channel is full.
-func (s *Server) routeResponse(resp protocol.Response) {
+// dropped (logged at warn). A non-blocking send under the lock prevents a
+// duplicate response from deadlocking the decode goroutine if the buffered
+// channel is full.
+func (s *Server) routeResponse(resp *protocol.Response) {
 	s.pendingMu.Lock()
-	ch, ok := s.pending[string(resp.ID)]
+	entry, ok := s.pending[string(resp.ID)]
 	if ok {
 		delete(s.pending, string(resp.ID))
 	}
 	s.pendingMu.Unlock()
 	if !ok {
+		s.logger.Warn("late_outbound_response", "id", string(resp.ID))
 		return
 	}
 	select {
-	case ch <- resp:
+	case entry.respChan <- resp:
 	default:
 	}
 }
