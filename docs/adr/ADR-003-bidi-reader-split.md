@@ -12,7 +12,7 @@ v1.3.0 brings the bidirectional trio (sampling, elicitation, roots) — three pr
 2. **Inbound response** — `id` set, `method` absent; correlates a server-initiated request and unblocks the awaiting handler goroutine (new in v1.3.0).
 3. **Inbound notification** — no `id`; routed to `handleNotification`, which already handles `notifications/cancelled` and `notifications/initialized` per CLAUDE.md.
 
-The G4 pre-authorship inspection (Story 1.1) confirmed that inbound `notifications/cancelled` is **already wired** in the existing dispatch loop (`internal/server/dispatch.go:117-130`), so the classifier topology must be **three-shape**, not two — see [g4-inbound-cancel-finding-2026-04-18.md](../../_bmad-output/planning-artifacts/g4-inbound-cancel-finding-2026-04-18.md) for the full citation trail.
+Inbound `notifications/cancelled` is **already wired** in the existing dispatch loop — `(*Server).handleNotification` routes the cancel method at `internal/server/dispatch.go:100-112`, and `(*Server).handleCancelledNotification` at `internal/server/dispatch.go:117-130` unmarshals `cancelledParams`, compares `requestId` against `s.inFlightID`, and on match cancels the handler context and sets `s.inFlightCancelled`. The classifier topology therefore must be **three-shape**, not two — folding the existing cancel path into any new subsystem would be a regression.
 
 This ADR settles how the new response-correlation surface is wired into the reader without breaking the architectural invariants:
 
@@ -42,7 +42,7 @@ The `Peer` interface — see Peer Stability Surface below — is the only type a
 ## Consequences
 
 - **Synctest-bubble safe.** A single reader plus a single mutex makes the entire bidi machine deterministic under `synctest.Bubble`. Story 2.5 will land scenarios for: in-flight outbound + reader EOF, double-cancel race, capability-gated outbound rejection, late response after cancel, writer-mutex contention.
-- **Story 2.3 cascade.** Cluster A's pointer-return migration of `(*Server).SendRequest` flips response shape from `protocol.Response` to `*protocol.Response`. The G8 audit ([g8-server-test-breakage-audit-2026-04-18.md](../../_bmad-output/planning-artifacts/g8-server-test-breakage-audit-2026-04-18.md)) found 26 single-response value decls + ~30 slice decls in `internal/server/server_test.go` that the `runServer` helper signature change handles in one anchor edit. Items (b) typed-error refs and (d) depguard violations are already at zero — no migration churn.
+- **Pointer-return cascade.** The pointer-return shape of `(*Server).SendRequest` (returns `*protocol.Response`, not `protocol.Response`) propagates to every test that decodes server output. A pre-implementation audit counted 26 single-response value decls plus ~30 slice decls in `internal/server/server_test.go`; the `runServer` test helper is the single migration anchor. No cross-package typed-error relocation is required (no handler package imports server-level sentinel errors), and no depguard violations exist from `internal/tools` or `internal/prompts` into `internal/server` — the dependency rule is already respected today.
 - **Code clarity.** The reader gains a 3-arm switch but loses no existing branches. The pending map is one struct, one mutex, two methods (`add` / `deliver`). Total new server LOC is on the order of 150 lines.
 - **Existing dispatch loop is preserved.** Inbound request dispatch, the in-flight cancellation flag, and the response-suppression logic (`internal/server/inflight.go`) are untouched. The G4 invariant — `notifications/cancelled` cancels the in-flight handler context and suppresses the response — is enforced by the existing tests at `internal/server/server_test.go:1278, 1315, 1662, 2803`, which MUST continue to pass unmodified.
 - **No drain on shutdown.** SIGTERM cancels the server context; pending outbound requests receive their context-done signal and return `protocol.ErrServerShutdown` to the awaiting handler. No "wait for stragglers" — exit promptly per ADR-001's stdio contract.
@@ -80,8 +80,8 @@ The reader-split MUST preserve the following architectural invariants from the P
 | ID | Invariant | Enforcement point |
 |---|---|---|
 | **AI7** | Inbound `notifications/cancelled` cancels handler ctx and suppresses response. | `dispatch.go:117-130` (G4 finding); existing tests at `:1278, :1315`. |
-| **AI8** | Errors crossing the reader↔pending-map boundary are typed sentinels in `protocol`. | `protocol.ErrServerShutdown`, `protocol.ErrPendingFull`, `protocol.ErrCapabilityNotSupported` (Story 2.1). |
-| **AI9** | Outbound sampling/elicitation rejected if client did not advertise the capability during `initialize`. | Capability gate at `Peer.SendRequest` (Story 2.4). |
+| **AI8** | Errors crossing the reader↔pending-map boundary are typed sentinels in `protocol`. | `protocol.ErrServerShutdown`, `protocol.ErrPendingRequestsFull`, `*protocol.CapabilityNotAdvertisedError`. |
+| **AI9** | Outbound sampling/elicitation rejected if client did not advertise the capability during `initialize`. | Capability gate at `Peer.SendRequest` (via `protocol.MethodCapability`). |
 | **AI10** | Handler awaiting an outbound response may NOT interleave `notifications/progress` with the awaited reply. | Documented invariant on `Progress.Report`; enforced by single writer mutex. |
 
 ## Failure Modes
