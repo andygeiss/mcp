@@ -43,9 +43,11 @@ go test -race ./... -tags=integration
 Integration tests cover:
 - Full server lifecycle via stdin/stdout buffers
 - SIGINT/SIGTERM graceful shutdown (Unix only)
-- Template rewriter end-to-end cycle
+- Template rewriter end-to-end cycle (`cmd/scaffold`)
 - Stdout protocol-only enforcement
-- MCP conformance suite (33 scenarios)
+- MCP conformance suite (37 file-driven scenarios in `internal/server/testdata/conformance/`)
+- Bidirectional transport: `Peer.SendRequest`, outbound cancellation (A7), shutdown races (`synctest_test.go`)
+- Smoke test (`internal/tools/smoke_integration_test.go`) backing `make smoke`
 
 ### Fuzz Testing
 
@@ -54,11 +56,12 @@ make fuzz                                                                      #
 go test -fuzz Fuzz_Decoder_With_ArbitraryInput ./internal/protocol -fuzztime=30s # specific target
 ```
 
-Four fuzz targets:
-1. `Fuzz_Decoder_With_ArbitraryInput` -- protocol decoder resilience (22 seed corpus entries)
-2. `Fuzz_Server_Pipeline` -- end-to-end server fuzz
-3. `Fuzz_ValidateInput_With_ArbitraryInput` -- input validation
-4. `Fuzz_ValidatePath_With_ArbitraryInput` -- path validation
+Five fuzz targets:
+1. `Fuzz_Decoder_With_ArbitraryInput` (`internal/protocol`) -- protocol decoder resilience
+2. `Fuzz_Server_Pipeline` (`internal/server`) -- end-to-end server fuzz
+3. `Fuzz_ValidateInput_With_ArbitraryInput` (`internal/tools`) -- input validation
+4. `Fuzz_ValidatePath_With_ArbitraryInput` (`internal/tools`) -- path validation
+5. `Fuzz_LookupTemplate_With_ArbitraryInputs` (`internal/resources`) -- URI template matcher
 
 Nightly CI runs all targets for 5 minutes each.
 
@@ -84,7 +87,7 @@ Enforces 90% minimum coverage. CI fails if coverage drops below threshold.
 golangci-lint run ./...
 ```
 
-54 linter rules. Zero suppression policy -- fix the code, never add `//nolint` or modify `.golangci.yml`.
+golangci-lint v2 configured in `.golangci.yml`. Zero suppression policy -- fix the code, never add `//nolint` or modify `.golangci.yml` to silence findings.
 
 ### Full Check
 
@@ -130,13 +133,40 @@ func Greet(_ context.Context, input GreetInput) Result {
 ```go
 func MyTool(ctx context.Context, input MyInput) tools.Result {
     p := server.ProgressFromContext(ctx)
-    p.Report(0, 100)   // progress notification (requires client progressToken)
-    p.Log(slog.LevelInfo, "my_tool", map[string]any{"status": "started"})
+    p.Report(0, 100)                      // requires client _meta.progressToken
+    p.Log("info", "my_tool", "started")   // notifications/message
     // ... work ...
     p.Report(100, 100)
     return tools.TextResult("done")
 }
 ```
+
+AI10 invariant: do not interleave `Report` calls with an outbound `protocol.SendRequest` that is awaiting a reply.
+
+## Server-to-Client Requests (v1.3.0)
+
+Tool and prompt handlers can initiate JSON-RPC requests back to the client for sampling, elicitation, and roots:
+
+```go
+import "github.com/andygeiss/mcp/internal/protocol"
+
+func MyTool(ctx context.Context, input MyInput) tools.Result {
+    resp, err := protocol.SendRequest(ctx, "sampling/createMessage", map[string]any{
+        "messages": []map[string]any{{"role": "user", "content": "..."}},
+    })
+    if err != nil {
+        // errors.Is(err, protocol.ErrServerShutdown)
+        // errors.Is(err, protocol.ErrPendingRequestsFull)
+        // errors.Is(err, protocol.ErrNoPeerInContext)
+        // errors.AsType[*protocol.CapabilityNotAdvertisedError](err)
+        return tools.ErrorResult(err.Error())
+    }
+    // inspect resp.Result or resp.Error
+    return tools.TextResult("ok")
+}
+```
+
+Gated methods: `sampling/createMessage`, `elicitation/create`, `roots/list`. The server synchronously rejects with `*protocol.CapabilityNotAdvertisedError` if the client did not advertise the required capability during `initialize`.
 
 ## Test Conventions
 
@@ -162,15 +192,16 @@ func MyTool(ctx context.Context, input MyInput) tools.Result {
 | Target | Description |
 |---|---|
 | `bench` | Run benchmarks, compare with baseline (20% threshold) |
-| `build` | Compile binary with version ldflags |
+| `build` | Compile binary with `-trimpath` and version ldflags |
 | `check` | Full pipeline: build + test + lint |
 | `coverage` | Run with race detector, enforce 90% threshold |
-| `fuzz` | Fuzz decoder (30s default, configurable via FUZZTIME) |
-| `init` | Execute template rewriter (requires MODULE env var) |
+| `fuzz` | Fuzz decoder (30s default, configurable via `FUZZTIME=2m`) |
+| `init` | Execute template rewriter (`MODULE=github.com/org/repo`) |
 | `lint` | Run golangci-lint |
-| `setup` | Configure git hooks from .githooks/ |
+| `setup` | Configure git hooks from `.githooks/` |
+| `smoke` | Minimal `initialize → tools/list` round-trip verification |
 | `test` | Unit tests with race detector |
 
 ---
 
-*Generated: 2026-04-11 | Scan level: exhaustive*
+*Generated: 2026-04-18 | Scan level: deep | Reflects v1.3.0*
