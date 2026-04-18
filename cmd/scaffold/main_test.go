@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
@@ -37,5 +38,44 @@ func Test_ValidateModulePath_With_VariousInputs_Should_EnforceHostOwnerRepo(t *t
 				assert.That(t, "error mentions canonical form", strings.Contains(err.Error(), "host/owner/repo"), true)
 			}
 		})
+	}
+}
+
+func Test_EmitWelcome_Should_WriteExactBanner(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	var stderr bytes.Buffer
+
+	// Act
+	emitWelcome(&stderr)
+
+	// Assert — golden-string match catches accidental wording drift.
+	expected := "Your MCP server is running.\n\n  Edit:   internal/tools/echo.go\n  Wire:   cmd/mcp/main.go\n  Verify: make smoke\n\nFull guide: README.md\n"
+	if stderr.String() != expected {
+		t.Fatalf("welcome banner mismatch.\n--- got ---\n%s\n--- want ---\n%s", stderr.String(), expected)
+	}
+}
+
+func Test_WelcomeBanner_Should_ContainExpectedSteps(t *testing.T) {
+	t.Parallel()
+
+	// Arrange / Act / Assert — banner content ships exactly the three
+	// imperative steps + README pointer (FR5c).
+	required := []string{
+		"Your MCP server is running.",
+		"Edit:",
+		"internal/tools/echo.go",
+		"Wire:",
+		"cmd/mcp/main.go",
+		"Verify:",
+		"make smoke",
+		"Full guide:",
+		"README.md",
+	}
+	for _, want := range required {
+		if !strings.Contains(welcomeBanner, want) {
+			t.Errorf("welcome banner missing %q", want)
+		}
 	}
 }

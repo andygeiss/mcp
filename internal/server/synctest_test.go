@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -169,6 +170,57 @@ func Test_Server_With_ConcurrentRequest_Should_RejectWithServerBusy(t *testing.T
 		}
 		if !found {
 			t.Fatal("expected response for id:3")
+		}
+	})
+}
+
+// Test_Server_With_CapabilityGate_Should_RejectSamplingWithoutAdvertisement covers
+// AI9 NFR-R3 scenario (capability-gate side-effect-freeness). When the client
+// did not advertise sampling, the handler's protocol.SendRequest must return
+// *protocol.CapabilityNotAdvertisedError synchronously and ZERO bytes hit the
+// wire (no outbound request is encoded).
+func Test_Server_With_CapabilityGate_Should_RejectSamplingWithoutAdvertisement(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		// Arrange — register a tool that tries to call sampling without the
+		// client advertising the capability. Capture the typed error on return.
+		var capErr *protocol.CapabilityNotAdvertisedError
+		var sendErr error
+		r := tools.NewRegistry()
+		if err := tools.Register(r, "needsSampling", "calls sampling", func(ctx context.Context, _ testInput) tools.Result {
+			_, e := protocol.SendRequest(ctx, "sampling/createMessage", nil)
+			sendErr = e
+			if errors.As(e, &capErr) {
+				return tools.TextResult("rejected as expected")
+			}
+			return tools.ErrorResult("unexpected outcome")
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		// Empty client capabilities — sampling NOT advertised.
+		input := handshake() +
+			`{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"needsSampling","arguments":{"message":"x"}}}` + "\n"
+
+		var stdout, stderr bytes.Buffer
+		srv := server.NewServer("mcp", "test", r, strings.NewReader(input), &stdout, &stderr,
+			server.WithHandlerTimeout(time.Hour))
+
+		// Act
+		err := srv.Run(t.Context())
+
+		// Assert
+		assert.That(t, "run error", err, nil)
+		if capErr == nil {
+			t.Fatalf("expected *CapabilityNotAdvertisedError, got: %v", sendErr)
+		}
+		assert.That(t, "capability", capErr.Capability, protocol.CapSampling)
+		assert.That(t, "method", capErr.Method, "sampling/createMessage")
+
+		// Wire-side: stdout MUST NOT contain "sampling/createMessage" — the
+		// gate is side-effect-free on absence (no outbound request emitted).
+		if bytes.Contains(stdout.Bytes(), []byte(`"sampling/createMessage"`)) {
+			t.Fatalf("AI9 violation: outbound emitted despite missing capability; stdout=%s", stdout.String())
 		}
 	})
 }

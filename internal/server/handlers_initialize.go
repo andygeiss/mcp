@@ -39,8 +39,9 @@ type serverInfo struct {
 // version negotiation and clientInfo logging. Unknown fields are ignored.
 // The struct is unmarshal-only, so json tags need no `omitempty`.
 type initializeParams struct {
-	ClientInfo      clientInfo `json:"clientInfo"`
-	ProtocolVersion string     `json:"protocolVersion"`
+	Capabilities    protocol.ClientCapabilities `json:"capabilities"`
+	ClientInfo      clientInfo                  `json:"clientInfo"`
+	ProtocolVersion string                      `json:"protocolVersion"`
 }
 
 // clientInfo mirrors the client-advertised identification block.
@@ -62,24 +63,29 @@ func (s *Server) handleInitialize(msg protocol.Request) protocol.Response {
 		"client_version", params.ClientInfo.Version,
 		"client_protocol_version", params.ProtocolVersion,
 	)
+	// Snapshot client capabilities for AI9 capability-gate enforcement during
+	// outbound (sampling/elicitation/roots). atomic.Pointer keeps reads
+	// lock-free from handler goroutines.
+	caps := params.Capabilities
+	s.clientCaps.Store(&caps)
 	s.state = stateInitializing
 
-	caps := initializeCapabilities{
+	srvCaps := initializeCapabilities{
 		Experimental: map[string]any{
 			"concurrency": map[string]any{
 				"maxInFlight": protocol.MaxConcurrentRequests,
 			},
 		},
 	}
-	caps.Logging = &loggingCapability{}
+	srvCaps.Logging = &loggingCapability{}
 	if s.prompts != nil {
-		caps.Prompts = &promptsCapability{}
+		srvCaps.Prompts = &promptsCapability{}
 	}
 	if s.resources != nil {
-		caps.Resources = &resourcesCapability{}
+		srvCaps.Resources = &resourcesCapability{}
 	}
 	if s.registry != nil {
-		caps.Tools = &toolsCapability{}
+		srvCaps.Tools = &toolsCapability{}
 	}
 
 	negotiated := protocol.MCPVersion
@@ -88,7 +94,7 @@ func (s *Server) handleInitialize(msg protocol.Request) protocol.Response {
 	}
 
 	result := initializeResult{
-		Capabilities:    caps,
+		Capabilities:    srvCaps,
 		Instructions:    s.instructions,
 		ProtocolVersion: negotiated,
 		ServerInfo:      serverInfo{Name: s.name, Version: s.version},

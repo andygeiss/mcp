@@ -1,0 +1,3 @@
+{"jsonrpc":"2.0","method":"initialize","id":1,"params":{"capabilities":{}}}
+{"jsonrpc":"2.0","method":"notifications/initialized"}
+{"jsonrpc":"2.0","id":7,"error":{"code":-32601,"message":"client rejected"}}
