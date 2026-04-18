@@ -14,9 +14,20 @@ Releases are managed via GoReleaser (`.goreleaser.yml`):
 
 - **Platforms**: darwin (amd64, arm64), linux (amd64, arm64)
 - **Archives**: tar.gz with LICENSE and README.md
-- **Signing**: cosign for checksum files
-- **SBOM**: Generated for each archive
+- **Signing**: cosign keyless signing via GitHub OIDC
+- **Provenance**: SLSA L3 via `slsa-framework/slsa-github-generator`
+- **SBOM**: Generated per archive (`*.sbom.json`)
 - **Trigger**: Git tag push
+
+Users verify a release archive with:
+
+```bash
+cosign verify-blob \
+  --bundle mcp_<version>_<os>_<arch>.tar.gz.sigstore.json \
+  --certificate-identity-regexp "^https://github.com/andygeiss/mcp/" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  mcp_<version>_<os>_<arch>.tar.gz
+```
 
 ## CI/CD Workflows
 
@@ -71,7 +82,9 @@ The server communicates over stdin/stdout. Example client configuration:
 
 | Variable | Purpose | Default |
 |---|---|---|
-| `MCP_TRACE` | Enable protocol trace logging (`1` to enable) | disabled |
+| `MCP_TRACE` | Enable protocol trace logging to stderr (`1` to enable) | disabled |
+
+Trace output includes full tool arguments — do not enable in production if handlers may receive credentials or PII.
 
 ### Version Flag
 
@@ -92,9 +105,11 @@ The server communicates over stdin/stdout. Example client configuration:
 - **govulncheck**: Checks for known Go vulnerabilities in CI
 - **CodeQL**: Static analysis for security issues
 - **OpenSSF Scorecard**: Repository security posture assessment
-- **cosign**: Binary signing for release artifacts
-- **SBOM**: Software bill of materials for supply chain transparency
+- **cosign**: Keyless signing of release archives (GitHub OIDC)
+- **SLSA L3 provenance**: Attached to every release via `slsa-framework/slsa-github-generator`
+- **SBOM**: Software bill of materials per archive
+- **OSS-Fuzz**: Continuous fuzzing of the JSON-RPC decoder
 
 ---
 
-*Generated: 2026-04-11 | Scan level: exhaustive*
+*Generated: 2026-04-18 | Scan level: deep | Reflects v1.3.0*
