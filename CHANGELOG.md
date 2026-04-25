@@ -6,6 +6,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ## [Unreleased]
 
+## [1.3.2] — 2026-04-25
+
+### Changed
+
+- `docs/adr/ADR-003-bidi-reader-split.md`: made self-contained. Removed citations to two `_bmad-output/`-prefixed paths (`g4-inbound-cancel`, `g8-server-test-breakage`) that are gitignored and dead from any clone. Inlined the load-bearing facts: G4 dispatch.go routing for inbound `notifications/cancelled` (the three-shape classifier rationale), and G8 pointer-return cascade scope (26 single + ~30 slice decls, one `runServer` anchor; zero typed-error or depguard migrations). Corrected two shipped-name drifts in the Invariants table: `protocol.ErrPendingFull` → `protocol.ErrPendingRequestsFull` and `protocol.ErrCapabilityNotSupported` → `*protocol.CapabilityNotAdvertisedError`. No code or behavior change.
+
+## [1.3.1] — 2026-04-18
+
+### Changed
+
+- `docs/`: comprehensive refresh for v1.3.0 bidi trio. `architecture.md` updated for the bidi reader classifier, Peer stability surface, typed errors (AI8), AI10 progress invariant, and refreshed error-code table (+ -32002). `source-tree-analysis.md` updated for the `cmd/scaffold` rename, the 11-file server split with per-file LOC, the new `protocol/{peer,capabilities,errors}.go` files, and accurate metrics (29 src / 42 test / 463 tests / 5 fuzz / 11 bench / 37 conformance / 10 integration). `project-overview.md` updated for the v1.0.0..v1.3.0 timeline, SLSA L3, and OSS-Fuzz. `development-guide.md` updated for the 5 fuzz targets, `Peer.SendRequest` handler pattern, and `make smoke` target. `deployment-guide.md` updated with a `cosign verify-blob` example and the SLSA L3 provenance surface. `index.md` ADR section + refreshed quick-reference numbers. `.gitignore` excludes `docs/.archive/` (workflow state).
+
 ## [1.3.0] — 2026-04-18
 
 ### Added
@@ -32,8 +44,6 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 - `(*Server).SendRequest` now returns `*protocol.Response` (was `protocol.Response`). The `Peer` interface signature mirrors. Internal `routeResponse` and `pending` map types updated to pointer-shape.
 - `internal/server/progress.go`: `(*Progress).Report` godoc gains explicit AI10 callout — handlers MUST NOT invoke `Report` while parked in `protocol.SendRequest` / outbound-awaiting; `protocol.ServerTimeout` (`-32001`) is the sole slow-client recovery mechanism.
 - `internal/server`: local `errors.New("server shutting down")` and the unexported `ErrPendingRequestsFull` sentinel are now `protocol.ErrServerShutdown` / `protocol.ErrPendingRequestsFull`. Compile-time assertion `var _ protocol.Peer = (*Server)(nil)` guards against signature drift.
-- `_bmad-output/planning-artifacts/prd.md`: four amendments (NFR-R3 6→9 scenarios, FR5a/b/c formalized with RFC-2119 text, AI7 server→client symmetry, NFR-M2 waiver for `//go:build ignore` files); `architecture.md` frontmatter `followUpActions` flipped pending → resolved on the four matching entries.
-
 ### Removed
 
 - `internal/server`: `SendRequestFromContext` (and its `cmd/scaffold` consumer pattern) — handlers now use `protocol.SendRequest(ctx, ...)` with a Peer attached via `protocol.ContextWithPeer`. Two test call sites migrated.
@@ -220,7 +230,9 @@ Pre-release development leading up to the first signed release. Highlights:
 - 90 % coverage threshold enforced in CI.
 - OpenSSF Scorecard, CodeQL, and govulncheck running in CI; GitHub Actions pinned to SHAs; Dependabot weekly for `gomod` and `github-actions`.
 
-[Unreleased]: https://github.com/andygeiss/mcp/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/andygeiss/mcp/compare/v1.3.2...HEAD
+[1.3.2]: https://github.com/andygeiss/mcp/compare/v1.3.1...v1.3.2
+[1.3.1]: https://github.com/andygeiss/mcp/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/andygeiss/mcp/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/andygeiss/mcp/compare/v1.1.3...v1.2.0
 [1.1.3]: https://github.com/andygeiss/mcp/compare/v1.1.2...v1.1.3

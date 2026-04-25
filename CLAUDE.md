@@ -1,6 +1,6 @@
-<!-- Last reviewed: 2026-04-05 -->
+<!-- Last reviewed: 2026-04-25 -->
 
-> **Last reviewed:** 2026-04-05
+> **Last reviewed:** 2026-04-25
 
 # CLAUDE.md
 
@@ -119,7 +119,7 @@ Tool handlers receive a `*Progress` via context. Use `server.ProgressFromContext
 
 ### Server-to-Client Requests
 
-Tool handlers can send requests to the client (e.g., sampling, elicitation) via `server.SendRequestFromContext(ctx, method, params)`. The server correlates responses using a pending-request map with atomic ID generation.
+Tool handlers can send requests to the client (e.g., sampling, elicitation, roots) via `protocol.SendRequest(ctx, method, params)`. The server attaches itself as a `protocol.Peer` in the handler context (via `protocol.ContextWithPeer` at dispatch) so handler packages reach the bidi path without importing `internal/server` (Invariant I1). The server correlates responses using a mutex-protected pending-request map with monotonic `atomic.Int64` ID generation. AI9 capability gate is the first statement in the path: outbound sampling/elicitation/roots requests return `*protocol.CapabilityNotAdvertisedError` with zero side effects when the client did not advertise the corresponding capability during `initialize`. See ADR-003 for the reader-split design and the `Peer` stability surface.
 
 ## Coding Conventions
 
