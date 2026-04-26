@@ -70,9 +70,6 @@ func Test_executeToolCall_With_ToolErrorMarshalFailure_Should_SetDataNil(t *test
 	// Arrange
 	s := newTestServer(t)
 	s.handlerTimeout = time.Second
-	// Register a tool whose handler returns an error with unmarshalable data.
-	// We inject a toolError directly through dispatchToolCall by returning
-	// context.Canceled (which triggers the cancelErr path).
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // already cancelled
 
@@ -86,7 +83,7 @@ func Test_executeToolCall_With_ToolErrorMarshalFailure_Should_SetDataNil(t *test
 	// Act — ctx already cancelled, dispatchToolCall returns cancel error
 	resp := s.executeToolCall(ctx, json.RawMessage(`1`), tool, toolCallParams{Name: "canceltool", Arguments: json.RawMessage(`{}`)})
 
-	// Assert — should get a timeout/cancelled error
+	// Assert
 	assert.That(t, "error code", resp.Error.Code, protocol.ServerTimeout)
 }
 
@@ -96,7 +93,7 @@ func Test_executeToolCall_With_ToolErrorMarshalFailure_Should_SetDataNil(t *test
 func Test_processInFlightResult_With_EncodeError_Should_ReturnError(t *testing.T) {
 	t.Parallel()
 
-	// Arrange — server with a broken stdout (writer that always errors)
+	// Arrange
 	s := newTestServer(t)
 	s.enc = json.NewEncoder(&brokenWriter{})
 	s.inFlightID = json.RawMessage(`1`)
@@ -129,7 +126,7 @@ func Test_cancelAndAwaitInFlight_With_NilCancel_Should_Return(t *testing.T) {
 	s := newTestServer(t)
 	s.cancelInFlight = nil
 
-	// Act — should not panic or block
+	// Act
 	s.cancelAndAwaitInFlight()
 }
 
@@ -174,7 +171,7 @@ func Test_handleDecodeError_With_EncodeFailure_Should_StillReturnFatalError(t *t
 	// Act — decode error that is NOT EOF/too-large (a generic parse error)
 	err := s.handleDecodeError(json.Unmarshal([]byte("invalid"), new(any)))
 
-	// Assert — still returns fatal decode error even though encode failed
+	// Assert — fatal decode error returned even though encode failed
 	if err == nil {
 		t.Fatal("expected fatal decode error")
 	}
@@ -593,7 +590,7 @@ func Test_handleMessageDuringInFlight_With_ServerBusy_Should_ReturnBusyError(t *
 	// Act
 	err := s.handleMessageDuringInFlight(msg)
 
-	// Assert — should succeed (encode the busy error response)
+	// Assert — server encodes the busy error response, no fatal error
 	assert.That(t, "no fatal error", err, nil)
 }
 
@@ -677,7 +674,7 @@ func Test_handleMessageDuringInFlight_With_InvalidRequest_Should_ReturnValidatio
 	// Act
 	err := s.handleMessageDuringInFlight(msg)
 
-	// Assert — should encode error response, no fatal error
+	// Assert — server encodes error response, no fatal error
 	assert.That(t, "no fatal error", err, nil)
 }
 
@@ -738,7 +735,7 @@ func Test_handleDecodeErrorDuringInFlight_With_ExceededSize_Should_ReturnError(t
 	// Act
 	err := s.handleDecodeErrorDuringInFlight(decodeResult{exceeded: true})
 
-	// Assert — should return a fatal error (decode error) but still send the handler response
+	// Assert — fatal decode error returned but handler response still sent
 	if err == nil {
 		t.Fatal("expected fatal decode error")
 	}
@@ -811,7 +808,7 @@ func Test_handleDecodeResultDuringInFlight_With_Message_Should_HandleBusy(t *tes
 	// Act — a request arrives while handler is in flight
 	err := s.handleDecodeResultDuringInFlight(context.Background(), decodeResult{msg: msg})
 
-	// Assert — should send busy response, no fatal error
+	// Assert — busy response sent, no fatal error
 	assert.That(t, "no fatal error", err, nil)
 }
 
@@ -820,28 +817,9 @@ func Test_handleDecodeResultDuringInFlight_With_Message_Should_HandleBusy(t *tes
 func Test_handlePromptsGet_With_HandlerError_Should_ReturnInternalError(t *testing.T) {
 	t.Parallel()
 
-	// Arrange
+	// Arrange — exercise the error path via handleResourcesRead, which uses
+	// the same handler-error pattern as handlePromptsGet.
 	s := newTestServer(t)
-	reg := prompts.NewRegistry()
-	_ = prompts.Register(reg, "fail", "fails",
-		func(_ context.Context, _ struct{}) prompts.Result {
-			return prompts.Result{}
-		},
-	)
-	s.prompts = reg
-
-	// Manually replace the handler to return an error
-	p, _ := reg.Lookup("fail")
-	p.Handler = func(_ context.Context, _ map[string]string) (prompts.Result, error) {
-		return prompts.Result{}, errors.New("prompt handler failed")
-	}
-	// Re-register won't work since we can't modify the registry entry.
-	// Instead, test through the server with a prompts registry that has a failing handler.
-
-	// Actually, we need to test the error path directly. The prompt handler returns an error.
-	// Since the handler is stored internally, we test via full server using a custom prompts registry.
-
-	// Let's just test handleResourcesRead with a handler error instead (more direct).
 	resReg := resources.NewRegistry()
 	_ = resources.Register(resReg, "err://test", "Err", "fails",
 		func(_ context.Context, _ string) (resources.Result, error) {

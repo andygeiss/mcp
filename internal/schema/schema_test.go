@@ -121,8 +121,6 @@ func Test_DeriveInputSchema_With_Pointer_Should_DereferenceType(t *testing.T) {
 	assert.That(t, "value type", s.Properties["value"].Type, schema.TypeString)
 }
 
-// --- shouldPromote coverage ---
-
 type taggedEmbedBase struct {
 	ID string `json:"id" description:"Identifier"`
 }
@@ -163,8 +161,6 @@ func Test_DeriveInputSchema_With_PointerEmbed_Should_PromoteFields(t *testing.T)
 	assert.That(t, "name type", s.Properties["name"].Type, schema.TypeString)
 }
 
-// --- deriveComposite coverage: non-string map keys ---
-
 type nonStringMapInput struct {
 	Data map[int]string `json:"data"`
 }
@@ -181,8 +177,6 @@ func Test_DeriveInputSchema_With_NonStringMapKey_Should_ReturnError(t *testing.T
 	}
 }
 
-// --- deriveComposite coverage: unsupported types ---
-
 type chanInput struct {
 	Ch chan string `json:"ch"`
 }
@@ -198,8 +192,6 @@ func Test_DeriveInputSchema_With_UnsupportedType_Should_ReturnError(t *testing.T
 		t.Fatal("expected error for unsupported chan type")
 	}
 }
-
-// --- collectField: untagged and ignored fields ---
 
 type untaggedFieldInput struct {
 	Tagged   string `json:"tagged"`
@@ -235,8 +227,6 @@ func Test_DeriveInputSchema_With_IgnoredField_Should_SkipIt(t *testing.T) {
 	assert.That(t, "kept type", s.Properties["kept"].Type, schema.TypeString)
 }
 
-// --- DeriveInputSchema with pointer type parameter ---
-
 func Test_DeriveInputSchema_With_PointerTypeParam_Should_Dereference(t *testing.T) {
 	t.Parallel()
 
@@ -248,8 +238,6 @@ func Test_DeriveInputSchema_With_PointerTypeParam_Should_Dereference(t *testing.
 	assert.That(t, "type", s.Type, schema.TypeObject)
 	assert.That(t, "property count", len(s.Properties), 4)
 }
-
-// --- deriveComposite: slice of unsupported type ---
 
 type sliceChanInput struct {
 	Items []chan int `json:"items"`
@@ -267,8 +255,6 @@ func Test_DeriveInputSchema_With_SliceOfUnsupportedType_Should_ReturnError(t *te
 	}
 }
 
-// --- deriveComposite: map with unsupported value type ---
-
 type mapChanInput struct {
 	Data map[string]chan int `json:"data"`
 }
@@ -284,8 +270,6 @@ func Test_DeriveInputSchema_With_MapOfUnsupportedValueType_Should_ReturnError(t 
 		t.Fatal("expected error for map with unsupported value type")
 	}
 }
-
-// --- deriveStructProperty: all-optional nested struct ---
 
 type allOptionalNested struct {
 	Inner struct {
@@ -306,8 +290,6 @@ func Test_DeriveInputSchema_With_AllOptionalNestedStruct_Should_OmitRequired(t *
 	assert.That(t, "inner type", inner.Type, schema.TypeObject)
 	assert.That(t, "inner required count", len(inner.Required), 0)
 }
-
-// --- shouldPromote: unexported anonymous embed ---
 
 type unexportedBase struct {
 	ID string `json:"id"`
@@ -330,8 +312,6 @@ func Test_DeriveInputSchema_With_UnexportedEmbed_Should_NotPromote(t *testing.T)
 	assert.That(t, "property count", len(s.Properties), 1)
 	assert.That(t, "name type", s.Properties["name"].Type, schema.TypeString)
 }
-
-// --- max depth exceeded ---
 
 type depth0 struct {
 	A struct {
@@ -371,8 +351,6 @@ func Test_DeriveInputSchema_With_ExcessiveDepth_Should_ReturnError(t *testing.T)
 	}
 }
 
-// --- unsigned int types ---
-
 type uintInput struct {
 	Val uint `json:"val"`
 }
@@ -387,8 +365,6 @@ func Test_DeriveInputSchema_With_UintType_Should_ReturnInteger(t *testing.T) {
 	assert.That(t, "error", err, nil)
 	assert.That(t, "val type", s.Properties["val"].Type, schema.TypeInteger)
 }
-
-// --- pointer-is-optional ---
 
 type pointerOptionalInput struct {
 	Required string  `json:"required"`
@@ -407,8 +383,6 @@ func Test_DeriveInputSchema_With_PointerField_Should_BeOptional(t *testing.T) {
 	assert.That(t, "optional unwrapped type", s.Properties["optional"].Type, schema.TypeString)
 	assert.That(t, "only non-pointer is required", s.Required, []string{"required"})
 }
-
-// --- interface{} / any support ---
 
 type anyInput struct {
 	Meta any `json:"meta"`

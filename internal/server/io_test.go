@@ -79,13 +79,13 @@ func Test_Server_With_StdoutClosedMidWrite_Should_NotHang(t *testing.T) {
 	var stderr bytes.Buffer
 	srv := server.NewServer("mcp", "test", testRegistry(), strings.NewReader(input), cw, &stderr)
 
-	// Act — must not hang; use timeout to guarantee
+	// Act — timeout guards against hang
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	err := srv.Run(ctx)
 
-	// Assert — server returns an error (encode failure), does not hang
+	// Assert — server returns an encode-failure error rather than hanging
 	if err == nil {
 		t.Fatal("expected error when stdout is closed")
 	}

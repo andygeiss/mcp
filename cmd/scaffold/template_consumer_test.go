@@ -112,7 +112,6 @@ func Test_Integration_With_TemplateConsumer_Should_PassAllQualityGates(t *testin
 	}
 }
 
-// runInDir executes a command in the given directory and fails the test on error.
 func runInDir(t *testing.T, dir string, name string, args ...string) {
 	t.Helper()
 	cmd := exec.Command(name, args...) //nolint:gosec // test helper: args from test code

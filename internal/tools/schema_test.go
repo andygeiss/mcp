@@ -301,8 +301,6 @@ func Test_DeriveSchema_With_BareCommaTag_Should_ExcludeField(t *testing.T) {
 	assert.That(t, "named present", hasNamed, true)
 }
 
-// Depth guard test types
-
 type depth1 struct {
 	F depth2 `json:"f"`
 }
@@ -472,8 +470,6 @@ func Test_DeriveSchema_With_MixedNestingExceedingDepth_Should_ReturnError(t *tes
 		t.Errorf("error message should contain \"exceeded max depth\", got: %s", err.Error())
 	}
 }
-
-// Embedding test types
 
 type EmbeddedBase struct {
 	Host string `json:"host"`
@@ -818,8 +814,6 @@ func Test_DeriveSchema_With_AllOmitemptyFields_Should_ProduceEmptyRequired(t *te
 	barProp := tool.InputSchema.Properties["bar"]
 	assert.That(t, "bar type", barProp.Type, "integer")
 }
-
-// pointer-type T tests
 
 type pointerTypeInput struct {
 	Label string `json:"label" description:"A label"`

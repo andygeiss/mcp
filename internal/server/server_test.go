@@ -81,7 +81,6 @@ func Test_Server_With_InitializeHandshake_Should_ReturnCapabilities(t *testing.T
 	assert.That(t, "id", string(resp.ID), "1")
 	assert.That(t, "jsonrpc", resp.JSONRPC, "2.0")
 
-	// Verify the result contains expected fields
 	var result struct {
 		Capabilities struct {
 			Experimental map[string]any `json:"experimental"`
@@ -99,7 +98,6 @@ func Test_Server_With_InitializeHandshake_Should_ReturnCapabilities(t *testing.T
 	assert.That(t, "server name", result.ServerInfo.Name, "mcp")
 	assert.That(t, "server version", result.ServerInfo.Version, "test")
 
-	// Verify experimental concurrency capability
 	concurrency, ok := result.Capabilities.Experimental["concurrency"].(map[string]any)
 	if !ok {
 		t.Fatal("expected experimental.concurrency map")
@@ -1399,7 +1397,6 @@ func Test_Server_With_ToolsListMultipleTools_Should_ReturnAlphabeticalOrder(t *t
 	assert.That(t, "second tool", result.Tools[1].Name, "mid")
 	assert.That(t, "third tool", result.Tools[2].Name, "zeta")
 
-	// Verify each tool has description and inputSchema.type
 	for _, tool := range result.Tools {
 		if tool.Description == "" {
 			t.Errorf("tool %q missing description", tool.Name)
@@ -2193,21 +2190,16 @@ func Test_Server_With_EmptyToolName_Should_ReturnInvalidParams(t *testing.T) {
 func Test_Server_With_HandlerReturningNonCodeError_Should_Return32603(t *testing.T) {
 	t.Parallel()
 
-	// Arrange — register a tool whose handler wrapper returns a raw error
-	// We use a tool that returns a CodeError via the handler mechanism
+	// Arrange — Register wraps the handler so non-CodeError paths aren't reachable
+	// from the public API. Exercise the CodeError path via missing required field.
 	r := tools.NewRegistry()
-	// The handler closure panics with an error to exercise the non-CodeError path in runToolHandler
-	// Actually, we can't easily trigger non-CodeError from the public API since
-	// the Register wrapper catches all handler errors. But a handler that returns
-	// a raw error at the toolHandler level would need internal access.
-	// Instead, test the CodeError path through dispatch:
 	if err := tools.Register(r, "test", "test", func(_ context.Context, _ testInput) tools.Result {
 		return tools.TextResult("ok")
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	// Send tools/call with null arguments (normalizes to {}, but missing required "message")
+	// arguments:null normalizes to {} but "message" is required, triggering -32602.
 	input := handshake() + `{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"test","arguments":null}}` + "\n"
 
 	// Act
@@ -2585,14 +2577,6 @@ func Test_Server_With_InFlightCodeError_Should_IncrementErrorCount(t *testing.T)
 	// Arrange — handler returns a *protocol.CodeError so resp.Error != nil
 	r := tools.NewRegistry()
 	if err := tools.Register(r, "errtool", "returns protocol error", func(_ context.Context, _ testInput) tools.Result {
-		// Return an error result — tools.ErrorResult produces Result.IsError=true
-		// but the protocol-level error requires returning a CodeError from the handler.
-		// We abuse the fact that the wrapped handler can return nil error and isError
-		// in inFlightResult comes from resp.Error != nil. To get resp.Error != nil we
-		// need the wrapped handler to return an error that becomes a *protocol.CodeError.
-		// tools.Register wraps a typed handler; validation errors produce CodeError.
-		// We instead rely on returning a CodeError by returning ErrorResult and
-		// checking that the server counts it via error log entries.
 		return tools.ErrorResult("something went wrong")
 	}); err != nil {
 		t.Fatal(err)
@@ -2645,25 +2629,16 @@ func Test_Server_With_InFlightCodeError_Should_IncrementErrorCount(t *testing.T)
 func Test_Server_With_InFlightProtocolError_Should_HitIsErrorPath(t *testing.T) {
 	t.Parallel()
 
-	// Arrange — register a tool whose handler returns a *protocol.CodeError directly.
-	// The tools.Register wrapper propagates errors.As(*protocol.CodeError) into a toolError,
-	// which executeToolCall turns into protocol.NewErrorResponseFromCodeError (resp.Error != nil).
+	// Arrange — Register's typed wrapper turns missing-required-field validation
+	// into a *protocol.CodeError, which executeToolCall surfaces as resp.Error != nil
+	// (so inFlightResult.isError = true).
 	r := tools.NewRegistry()
 	if err := tools.Register(r, "coderr", "returns protocol CodeError", func(_ context.Context, _ testInput) tools.Result {
-		// Panicking with a CodeError exercises the panic recovery → inFlightResult.isError=true path.
-		// Instead, return normally — tools.ErrorResult with IsError=true in Result.
-		// To reliably get resp.Error != nil we send invalid arguments so the
-		// unmarshal+validate step inside the wrapper returns a *protocol.CodeError.
-		// We achieve this by calling tools/call with missing required field.
-		// However Register captures the handler here; we need to exercise via bad args.
-		// So register with a required-field struct and call with empty arguments object.
 		return tools.TextResult("ok")
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	// Send tools/call with missing required "message" field → CodeError(-32602)
-	// → resp.Error != nil → inFlightResult.isError=true
 	pr, pw := io.Pipe()
 	var stdout, stderr bytes.Buffer
 	srv := server.NewServer("mcp", "test", r, pr, &stdout, &stderr)

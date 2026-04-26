@@ -22,7 +22,6 @@ type cancelledParams struct {
 func (s *Server) dispatch(ctx context.Context, msg protocol.Request) (protocol.Response, bool) {
 	isNotification := len(msg.ID) == 0
 
-	// Centralized request validation.
 	if vErr := protocol.Validate(msg); vErr != nil {
 		if isNotification {
 			return protocol.Response{}, false
@@ -30,7 +29,6 @@ func (s *Server) dispatch(ctx context.Context, msg protocol.Request) (protocol.R
 		return s.errorResponse(msg.ID, vErr), true
 	}
 
-	// Handle notifications.
 	if isNotification {
 		s.handleNotification(msg)
 		return protocol.Response{}, false
@@ -108,7 +106,6 @@ func (s *Server) handleNotification(msg protocol.Request) {
 		s.state = stateReady
 		s.logger.Info("server_ready")
 	}
-	// All unknown notifications are silently ignored.
 }
 
 // handleCancelledNotification cancels the in-flight tool handler if the

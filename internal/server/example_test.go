@@ -17,20 +17,17 @@ import (
 // code stdin/stdout/stderr are os.Stdin, os.Stdout, os.Stderr; in tests they
 // are bytes.Buffer for full control.
 func ExampleNewServer() {
-	// Build the tool registry.
 	r := tools.NewRegistry()
 	if err := tools.Register(r, "echo", "Echoes the input message", tools.Echo); err != nil {
 		fmt.Println("error:", err)
 		return
 	}
 
-	// Inject buffers instead of real file descriptors.
 	var stdout, stderr bytes.Buffer
 	stdin := bytes.NewBufferString("") // empty = immediate EOF
 
 	srv := server.NewServer("myserver", "1.0.0", r, stdin, &stdout, &stderr)
 
-	// Run processes messages until EOF (returns nil for clean shutdown).
 	err := srv.Run(context.Background())
 	fmt.Println("error:", err)
 	// Output:
