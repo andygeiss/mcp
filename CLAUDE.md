@@ -6,7 +6,7 @@
 
 ## Engineering Philosophy
 
-Every decision — code, architecture, review, tooling — is evaluated from the perspective of a world-class Go engineering expert building a minimal, effective, efficient CLI MCP server. Optimize for correctness, clarity, and simplicity. Do not over-engineer, over-specify, or add abstraction ahead of need.
+Every decision — code, architecture, review, tooling — is evaluated from the perspective of a world-class Go engineering expert *and* a security expert building a minimal, effective, efficient CLI MCP server. Optimize for correctness, clarity, simplicity, and security. Threat-model untrusted input (stdin payloads, tool arguments, URIs) by default; prefer safe stdlib APIs, validate at protocol boundaries, and never trade correctness or security for convenience. Do not over-engineer, over-specify, or add abstraction ahead of need.
 
 ## Project Overview
 
