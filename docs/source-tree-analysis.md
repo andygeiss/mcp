@@ -1,246 +1,182 @@
 # Source Tree Analysis
 
-## Directory Tree
-
-```
-mcp/
-├── .github/
-│   └── workflows/
-│       ├── ci.yml              # Main CI: build, test, lint, fuzz, bench, integration, vulncheck
-│       ├── codeql.yml          # GitHub CodeQL security analysis
-│       ├── fuzz.yml            # Nightly fuzz testing
-│       ├── release.yml         # Release pipeline with cosign signing and SBOM
-│       └── scorecard.yml       # OpenSSF Scorecard
-├── .githooks/
-│   └── pre-commit              # Git hook: runs tests and lint before commit
-├── cmd/
-│   ├── mcp/                    # Main binary entry point
-│   │   ├── main.go             # Wiring: flags, I/O injection, signal context, os.Exit
-│   │   ├── integration_test.go # Integration: full server lifecycle via stdin/stdout
-│   │   ├── main_test.go        # Entry point smoke tests
-│   │   ├── run_test.go         # `run()` function unit tests
-│   │   └── signal_test.go      # Integration: SIGINT/SIGTERM graceful shutdown (Unix only)
-│   └── scaffold/               # Template rewriter (self-deletes after use)
-│       ├── main.go             # Entry point: validates module path, calls rewriteProject
-│       ├── rewrite.go          # Rewrites go.mod, imports, binary dir, runs tidy, cleans up
-│       ├── integration_test.go # Integration: full template rewrite cycle
-│       ├── main_test.go        # Scaffold entry-point tests
-│       ├── rewrite_test.go     # Unit tests for rewrite logic
-│       └── template_consumer_test.go # Integration: end-to-end consumer test
-├── docs/                       # Generated project documentation
-│   └── adr/                    # Architecture Decision Records
-│       ├── ADR-001-stdio-ndjson-transport.md
-│       ├── ADR-002-internal-package-layout.md
-│       └── ADR-003-bidi-reader-split.md
-├── internal/
-│   ├── assert/
-│   │   ├── assert.go           # assert.That(t, desc, got, want) -- test helper
-│   │   └── assert_test.go
-│   ├── prompts/
-│   │   ├── registry.go         # Prompt registry, Register[T], argument derivation
-│   │   └── registry_test.go    # Unit tests for prompt registration and lookup
-│   ├── protocol/
-│   │   ├── capabilities.go     # Capability enum, ClientCapabilities struct, Has(name)
-│   │   ├── codec.go            # DecodeMessage: classify request/notification/response, normalize params, reject batches
-│   │   ├── constants.go        # Error codes, method names, MCP version, namespaces, MaxJSONDepth
-│   │   ├── errors.go           # CodeError, ErrServerShutdown, ErrPendingRequestsFull, CapabilityNotAdvertisedError, ClientRejectedError
-│   │   ├── message.go          # Request, Response, Notification, Error, NewResultResponse, NewErrorResponse
-│   │   ├── peer.go             # Peer interface, ContextWithPeer, SendRequest wrapper, MethodCapability
-│   │   ├── benchmark_test.go   # Encode/Decode microbenchmarks
-│   │   ├── capabilities_test.go
-│   │   ├── fuzz_test.go        # Fuzz_Decoder_With_ArbitraryInput
-│   │   ├── peer_test.go
-│   │   ├── protocol_test.go    # Golden tests for encode/decode/validate
-│   │   └── testdata/fuzz/      # Seed corpus
-│   ├── resources/
-│   │   ├── registry.go         # Resource/template registry, URI matching (RFC 6570 Level 1)
-│   │   ├── fuzz_test.go        # Fuzz_LookupTemplate_With_ArbitraryInputs
-│   │   └── registry_test.go
-│   ├── schema/
-│   │   ├── schema.go           # Reflection-based JSON Schema derivation engine
-│   │   ├── has_option_internal_test.go
-│   │   └── schema_test.go
-│   ├── server/
-│   │   ├── server.go           # Lifecycle, Run loop, Peer.SendRequest, pending map, A7 outbound cancel
-│   │   ├── dispatch.go         # Routing, handleNotification, errorResponse, sendNotification, encodeResponse
-│   │   ├── decode.go           # runInFlight, runIdle, decodeResult plumbing, handleDecodeError
-│   │   ├── inflight.go         # Async tool dispatch, executeToolCall, dispatchToolCall, panic recovery
-│   │   ├── handlers.go         # handleMethod dispatch, toolsList, capabilityGuidance
-│   │   ├── handlers_initialize.go # initialize: version negotiation, clientCaps snapshot
-│   │   ├── handlers_logging.go # logging/setLevel (RFC 5424 → slog mapping)
-│   │   ├── handlers_prompts.go # prompts/list, prompts/get with arg validation
-│   │   ├── handlers_resources.go # resources/list, resources/read, resources/templates/list
-│   │   ├── progress.go         # Progress notifier: Report(current, total), Log(level, logger, data)
-│   │   ├── counting_reader.go  # Per-message 4 MB size enforcement
-│   │   ├── architecture_test.go
-│   │   ├── benchmark_test.go
-│   │   ├── claudemd_test.go    # CLAUDE.md invariant guard tests
-│   │   ├── conformance_test.go # MCP conformance runner (37 .request.jsonl scenarios)
-│   │   ├── counting_reader_internal_test.go
-│   │   ├── error_sanitize_internal_test.go
-│   │   ├── example_test.go
-│   │   ├── execute_internal_test.go
-│   │   ├── fuzz_test.go        # Fuzz_Server_Pipeline
-│   │   ├── integration_test.go # Full server pipelines
-│   │   ├── io_test.go
-│   │   ├── server_test.go      # Unit tests for dispatch, state machine, timeouts, bidi
-│   │   ├── stdout_test.go      # Integration: stdout protocol-only enforcement
-│   │   ├── synctest_test.go    # Deterministic bidi scenarios under synctest.Bubble
-│   │   └── testdata/conformance/ # 37 MCP conformance scenario pairs
-│   └── tools/
-│       ├── _TOOL_TEMPLATE.go   # Copy-target for adding new tools (no working logic)
-│       ├── annotations.go      # Tool annotations (destructive, idempotent, readOnly, etc.)
-│       ├── echo.go             # Built-in echo tool -- "START HERE" anchor for scaffold users
-│       ├── registry.go         # Tool registry, Register[T], Lookup, Names, Tools
-│       ├── validate.go         # ValidatePath, ValidateInput, unmarshalAndValidate
-│       ├── annotations_test.go
-│       ├── benchmark_test.go   # Schema-derivation microbenchmarks
-│       ├── echo_test.go
-│       ├── example_test.go
-│       ├── fuzz_test.go        # Fuzz_ValidateInput, Fuzz_ValidatePath
-│       ├── registry_test.go
-│       ├── schema_test.go      # Schema derivation tests for all supported types
-│       ├── smoke_integration_test.go # `make smoke` backing test
-│       └── validate_test.go
-├── testdata/
-│   └── benchmarks/
-│       └── baseline.txt        # Benchmark baseline for regression detection
-├── .golangci.yml               # Linter rules, zero suppression policy
-├── .goreleaser.yml             # Release: darwin/linux, cosign signing, SBOM
-├── CLAUDE.md                   # AI agent instructions and engineering conventions
-├── CONTRIBUTING.md             # Prerequisites, dev setup, testing, PR process
-├── LICENSE                     # MIT
-├── Makefile                    # build, test, lint, fuzz, bench, coverage, init, setup, check, smoke
-├── README.md                   # Project overview, quickstart, architecture, protocol compliance
-├── SECURITY.md                 # Vulnerability reporting and response timeline
-├── VERSIONING.md               # SemVer + Peer stability policy
-└── go.mod                      # github.com/andygeiss/mcp, Go 1.26, zero dependencies
-```
-
-## Critical Directories
-
-| Directory | Role | Key Files |
-|---|---|---|
-| `cmd/mcp/` | Binary entry point | `main.go` (48 lines, wiring only) |
-| `cmd/scaffold/` | Template scaffold | `rewrite.go` (module rewriting, self-cleanup) |
-| `internal/protocol/` | JSON-RPC 2.0 + Peer surface | `message.go`, `codec.go`, `constants.go`, `peer.go`, `capabilities.go`, `errors.go` |
-| `internal/server/` | Core engine (11 source files) | `server.go`, `dispatch.go`, `decode.go`, `inflight.go`, `handlers_*.go`, `progress.go`, `counting_reader.go` |
-| `internal/tools/` | Tool system | `registry.go`, `echo.go`, `validate.go`, `annotations.go`, `_TOOL_TEMPLATE.go` |
-| `internal/resources/` | Resource system | `registry.go` (URI templates, RFC 6570) |
-| `internal/prompts/` | Prompt system | `registry.go` (argument derivation) |
-| `internal/schema/` | Schema engine | `schema.go` (shared reflection-based derivation) |
-
-## Server Package File Split (ADR-002)
-
-`internal/server/` uses file-level partitioning to keep each concern ≤300 LOC:
-
-| File | LOC | Responsibility |
-|---|---|---|
-| `server.go` | 396 | `Server` struct, lifecycle, `Run`, `Peer.SendRequest`, pending map, A7 cancel |
-| `inflight.go` | 290 | Async tool dispatch, `dispatchToolCall`, timeout + panic recovery |
-| `decode.go` | 256 | Read loop (`runInFlight`, `runIdle`), decode-error handling |
-| `dispatch.go` | 181 | Request routing, `handleNotification`, `errorResponse`, stdout serialization |
-| `handlers_prompts.go` | 122 | `prompts/list`, `prompts/get` |
-| `handlers_resources.go` | 112 | `resources/list`, `resources/read`, `resources/templates/list` |
-| `handlers_initialize.go` | 109 | `initialize` with version negotiation + clientCaps snapshot |
-| `handlers.go` | 93 | `handleMethod` switchboard, `toolsList`, capability guidance |
-| `progress.go` | 73 | `Progress` notifier — `Report`, `Log` |
-| `counting_reader.go` | 60 | Per-message 4 MB enforcement |
-| `handlers_logging.go` | 49 | `logging/setLevel` with RFC 5424 → slog mapping |
-
-## Per-Package Exports
-
-### cmd/mcp
-- `main()`, `run() error`
-- `version` string (set via ldflags)
-
-### cmd/scaffold
-- `main()`, `run() error`
-- `rewriteProject(dir, modulePath) error`
-
-### internal/protocol
-- **Types:** `Error`, `CodeError`, `Notification`, `Request`, `Response`, `IncomingMessage`, `Peer`, `Capability`, `ClientCapabilities`, `ElicitationCapability`, `RootsCapability`, `SamplingCapability`, `CapabilityNotAdvertisedError`, `ClientRejectedError`, `ErrorCode`
-- **Functions:** `Decode`, `DecodeMessage`, `Validate`, `Encode`, `NullID`, `NewResultResponse`, `NewErrorResponse`, `NewErrorResponseFromCodeError`, `ContextWithPeer`, `PeerFromContext`, `SendRequest`, `MethodCapability`
-- **Error constructors:** `ErrInternalError`, `ErrInvalidParams`, `ErrInvalidRequest`, `ErrMethodNotFound`, `ErrParseError`, `ErrResourceNotFound`, `ErrServerError`, `ErrServerTimeout`
-- **Sentinels:** `ErrBatchNotSupported`, `ErrJSONDepthExceeded`, `ErrNoPeerInContext`, `ErrPendingRequestsFull`, `ErrServerShutdown`
-- **Constants:** 8 error codes, 10 methods, 4 notifications, 6 namespace prefixes, `MaxConcurrentRequests`, `MaxJSONDepth`, `MCPVersion`, `Version`, 3 `Capability` values
-
-### internal/server
-- **Types:** `Server`, `Progress`, `Option`
-- **Functions:** `NewServer`, `Run`, `SendRequest` (satisfies `protocol.Peer`), `ProgressFromContext`
-- **Options:** `WithHandlerTimeout`, `WithInstructions`, `WithResources`, `WithPrompts`, `WithSafetyMargin`, `WithTrace`
-
-### internal/tools
-- **Types:** `Tool`, `Registry`, `Result`, `ContentBlock`, `Annotations`
-- **Functions:** `NewRegistry`, `Register[T]`, `Lookup`, `Names`, `Tools`
-- **Options:** `WithAnnotations`, `WithOutputSchema`, `WithTitle`
-- **Helpers:** `TextResult`, `ErrorResult`, `StructuredResult`
-- **Validation:** `ValidatePath`, `ValidateInput`
-
-### internal/resources
-- **Types:** `Resource`, `ResourceTemplate`, `Registry`, `Result`, `ContentBlock`
-- **Functions:** `NewRegistry`, `Register`, `RegisterTemplate`, `Lookup`, `LookupTemplate`, `Resources`, `Templates`
-- **Helpers:** `TextResult`, `BlobResult`, `WithMimeType`
-
-### internal/prompts
-- **Types:** `Prompt`, `Argument`, `Message`, `ContentBlock`, `Registry`, `Result`
-- **Functions:** `NewRegistry`, `Register[T]`, `Lookup`, `Prompts`
-- **Helpers:** `UserMessage`, `AssistantMessage`
-
-### internal/schema
-- **Types:** `InputSchema`, `OutputSchema`, `Property`
-- **Functions:** `DeriveInputSchema[T]`
-- **Constants:** `TypeString`, `TypeInteger`, `TypeNumber`, `TypeBoolean`, `TypeArray`, `TypeObject`
-
-### internal/assert
-- **Functions:** `That(t, description, got, expected)`
-
-## Test Inventory
-
-| Package | Test Files | Fuzz Targets | Benchmarks |
-|---|---|---|---|
-| cmd/mcp | 4 | — | — |
-| cmd/scaffold | 4 | — | — |
-| internal/assert | 1 | — | — |
-| internal/prompts | 1 | — | — |
-| internal/protocol | 5 | 1 | 6 |
-| internal/resources | 2 | 1 | — |
-| internal/schema | 2 | — | — |
-| internal/server | 15 | 1 | 3 |
-| internal/tools | 8 | 2 | 2 |
-| **Total** | **42** | **5** | **11** |
-
-- **Test functions:** 463 (`go test ./...`)
-- **Integration-tagged files:** 10 (require `-tags=integration`)
-- **Fuzz seed corpus:** `internal/protocol/testdata/fuzz/`
-
-## Conformance Test Suite
-
-`internal/server/conformance_test.go` runs a file-driven harness (`Test_Conformance_Runner`) over 37 request/response pairs in `internal/server/testdata/conformance/`. Coverage includes:
-
-- Initialization handshake and state machine
-- ID shapes (string, number, zero, large, null, negative, empty, invalid arrays/objects/booleans)
-- Method validation (unknown, rpc.* reserved, empty)
-- Notifications (cancelled-without-in-flight, initialized, unknown-silent-drop)
-- Params shapes (absent, null, array positional, extra fields)
-- Batch array rejection
-- JSON-RPC version missing/wrong
-- Bidi orphan-response scenarios for sampling, elicitation, roots (v1.3.0)
-- Ping across states
-
-## Project Metrics
-
-| Metric | Value |
-|---|---|
-| Source files (non-test) | 29 |
-| Test files | 42 |
-| Total Go files | 71 |
-| Non-test LOC | ~3,784 |
-| Test LOC | ~13,029 |
-| Packages | 9 |
-| Go version | 1.26 |
-| External dependencies | 0 |
+**Repository:** `github.com/andygeiss/mcp`
+**Type:** monolith (single Go module)
+**LOC:** ~3,770 production / ~12,930 test (16,703 total across `cmd/` + `internal/`)
+**Files:** 29 production `.go` + 42 test `.go`
 
 ---
 
-*Generated: 2026-04-18 | Scan level: deep | Reflects v1.3.0*
+## Top-level layout
+
+```
+mcp/
+├── cmd/                    # Binary entry points
+│   ├── mcp/                # Server binary (the thing you ship)
+│   └── scaffold/           # Template rewriter (deleted by `make init`)
+├── internal/               # All implementation (no exported API surface)
+│   ├── assert/             # Test assertion helpers (test-only)
+│   ├── prompts/            # Prompt registry, argument derivation
+│   ├── protocol/           # JSON-RPC 2.0 codec, types, constants, Peer
+│   ├── resources/          # Resource registry, URI templates
+│   ├── schema/             # Reflection-based JSON Schema derivation
+│   ├── server/             # Lifecycle, dispatch, bidi, notifications
+│   └── tools/              # Tool registry, handlers
+├── docs/                   # This documentation
+├── oss-fuzz/               # OSS-Fuzz build harness
+├── testdata/
+│   └── benchmarks/         # benchstat baseline.txt
+├── _bmad/                  # BMad agent workflow scaffolding
+├── _bmad-output/           # Gitignored BMad artifacts (planning, implementation)
+├── .github/
+│   └── workflows/          # CI: ci.yml, codeql.yml, fuzz.yml, release.yml, scorecard.yml
+├── .githooks/              # Git pre-commit hook scripts (enabled via `make setup`)
+├── .claude/                # Claude Code skills, hooks, settings
+├── CHANGELOG.md            # Keep a Changelog format
+├── CLAUDE.md               # AI agent engineering philosophy
+├── CONTRIBUTING.md         # Contributor guide
+├── LICENSE                 # MIT
+├── Makefile                # bench, build, check, coverage, fuzz, init, lint, setup, smoke, test
+├── README.md               # User-facing introduction
+├── SECURITY.md             # Security policy
+├── VERSIONING.md           # SemVer policy
+├── go.mod                  # Source of truth for Go version (1.26+)
+├── .golangci.yml           # Lint config — read-only (no //nolint to silence)
+├── .goreleaser.yml         # Release pipeline config
+└── .gitignore              # Excludes _bmad-output/, docs/.archive/, build artifacts
+```
+
+## `cmd/` — entry points
+
+### `cmd/mcp/main.go`
+
+The binary. Wiring only — flags, signal handling, registry construction, server lifecycle. No business logic.
+
+```
+- Parse `--version` (prints version to stderr, exit 0)
+- signal.NotifyContext on SIGINT/SIGTERM (Go 1.26 cancel cause)
+- tools.NewRegistry() + tools.Register("echo", ...)
+- server.NewServer(name, version, registry, os.Stdin, os.Stdout, os.Stderr,
+    server.WithTrace(os.Getenv("MCP_TRACE") == "1"))
+- srv.Run(ctx)
+- os.Exit(1) on error
+```
+
+**Constraint:** when scaffolded via `make init`, the binary directory stays at `cmd/mcp/` so every fork produces a binary named `mcp`. Disambiguate via `go build -o <name>` if multiple servers share `$GOBIN`.
+
+### `cmd/scaffold/`
+
+Template rewriter. Not part of normal builds.
+
+- `main.go` — CLI entry; refuses to run if working tree is dirty (`--force` to override).
+- `rewrite.go` — rewrites all imports, repoints badge URLs (shields.io, codecov, Actions) at the new repo, runs `go mod tidy`, removes `cmd/scaffold/`, resets git history with an initial commit on `main`.
+
+After `make init MODULE=github.com/yourorg/yourproject` succeeds, the welcome banner names the three steps: **Edit** (`internal/tools/echo.go`) → **Wire** (`cmd/mcp/main.go`) → **Verify** (`make smoke`).
+
+## `internal/protocol/` — foundation (zero internal deps)
+
+| File | Purpose |
+|---|---|
+| `codec.go` | `Decode` validates `jsonrpc=="2.0"`, balanced JSON depth ≤ 64, top-level type, batch rejection. `Encode` writes newline-delimited responses. |
+| `message.go` | `Request`, `Response`, `Error` types. `id` is `json.RawMessage` for verbatim echo. |
+| `constants.go` | `MCPVersion = "2025-11-25"`, `MaxConcurrentRequests = 1`, `MaxJSONDepth = 64`, error codes (`-32700`/`-32600`/`-32601`/`-32602`/`-32603`/`-32000`/`-32001`/`-32002`), method/notification/namespace name constants. |
+| `capabilities.go` | `ClientCapabilities` (with `*SamplingCapability`, `*ElicitationCapability`, `*RootsCapability`), `Capability` enum (`CapSampling`, `CapElicitation`, `CapRoots`), nil-safe `Has(Capability)`. |
+| `errors.go` | Sentinels: `ErrPendingRequestsFull`, `ErrServerShutdown`, `ErrNoPeerInContext`. Struct errors: `*CapabilityNotAdvertisedError` (Capability + Method), `*ClientRejectedError` (Code + Message + Data). |
+| `peer.go` | `Peer` interface (`SendRequest(ctx, method, params) (*Response, error)`); `ContextWithPeer`/`PeerFromContext`; package-level `SendRequest` returning `ErrNoPeerInContext` if no peer attached; `MethodCapability(method) (Capability, bool)` for AI9. **v1.x stability surface per ADR-003.** |
+
+## `internal/schema/` — reflection engine (zero internal deps)
+
+`schema.go` derives JSON Schema from Go struct types using reflection. Computed once per `reflect.Type` and cached. Used by both `tools` and `prompts` to auto-derive input schemas from struct tags (`json`, `description`).
+
+## `internal/tools/` — tool registry
+
+| File | Purpose |
+|---|---|
+| `registry.go` | `Registry`, `NewRegistry`, generic `Register[T]`, `Lookup`, deterministic `List` ordering. |
+| `validate.go` | Validates tool input against the derived schema before invoking the handler. |
+| `annotations.go` | Tool annotation metadata. |
+| `echo.go` | Reference handler: `// START HERE — your first tool` anchor, ~5 lines, copy-target shape. |
+| `_TOOL_TEMPLATE.go` | `//go:build ignore` — annotated copy-target with required + optional field patterns; the leading `_` and build tag belt-and-suspenders the exclusion. |
+
+Adding a new tool: define an input struct with `json` and `description` tags → write `func(ctx, T) Result` → call `tools.Register(registry, "name", "desc", handler)` in `cmd/mcp/main.go`.
+
+## `internal/resources/` — resource registry
+
+`registry.go` — `Register(uri, name, description, handler)` for static resources, `RegisterTemplate(template, ...)` for URI-template-backed resources. Pass to the server via `server.WithResources(registry)`. The `resources` capability is auto-advertised when configured.
+
+## `internal/prompts/` — prompt registry
+
+`registry.go` — `Register[T]` with reflection-derived argument schemas. Pass via `server.WithPrompts(registry)`. The `prompts` capability is auto-advertised when configured.
+
+## `internal/server/` — lifecycle, dispatch, bidi (11 files)
+
+| File | Purpose |
+|---|---|
+| `server.go` | `Server` type, three-state lifecycle, compile-time `Peer` assertion, `pendingEntry`, `outboundIDCounter atomic.Int64`, `clientCaps atomic.Pointer[ClientCapabilities]`, `maxPendingRequests = 1024`, `defaultHandlerTimeout = 30s`. |
+| `dispatch.go` | Method routing, state-machine gating (`-32000` pre-init), `protocol.ContextWithPeer(callCtx, s)` injection at handler entry, A7 server→client cancel emission. |
+| `decode.go` | Persistent `json.Decoder` on stdin behind a counting reader. |
+| `counting_reader.go` | Per-message byte counting; **resets per message** (NOT cumulative `io.LimitReader`). |
+| `inflight.go` | In-flight tracking, handler timeout, cancellation. |
+| `progress.go` | `*Progress` accessed via context (`ProgressFromContext`); `Report`/`Log` are nil-safe; AI10 invariant — handlers must not invoke `Report` while parked in `protocol.SendRequest`. |
+| `handlers.go` | Common handler infrastructure. |
+| `handlers_initialize.go` | `initialize` handshake; snapshots client capabilities into `clientCaps`. |
+| `handlers_logging.go` | `logging/setLevel` adjusts the `slog.LevelVar` for stderr. |
+| `handlers_prompts.go` | `prompts/list`, `prompts/get`. |
+| `handlers_resources.go` | `resources/list`, `resources/read`, `resources/templates/list`. |
+
+**Invariants enforced by `.golangci.yml`:**
+- **I1** — `internal/tools/**` and `internal/prompts/**` cannot import `internal/server` (`depguard.no-server-in-handlers`).
+- **I4** — `os.Stdout` writes and `fmt.Fprint(os.Stdout, …)` patterns are banned in tool/prompt packages (`forbidigo`).
+
+## `internal/assert/` — test-only
+
+`assert.go` — single primitive: `assert.That(t, "description", got, expected)`. Stdlib only. **The project's only assertion library** — no testify, no gomega.
+
+## Fuzz targets
+
+5 fuzz targets across the codebase:
+
+| Target | Package | Surface |
+|---|---|---|
+| `Fuzz_Decoder_With_ArbitraryInput` | `internal/protocol/` | JSON-RPC decoder; primary OSS-Fuzz target |
+| `Fuzz_Server_Pipeline` | `internal/server/` | Full server pipeline |
+| `Fuzz_LookupTemplate_With_ArbitraryInputs` | `internal/resources/` | URI template matching |
+| `Fuzz_ValidateInput_With_ArbitraryInput` | `internal/tools/` | Tool input validation |
+| `Fuzz_ValidatePath_With_ArbitraryInput` | `internal/tools/` | Path validation |
+
+`make fuzz` runs `Fuzz_Decoder_With_ArbitraryInput` for 30s (`FUZZTIME=5m` to extend). OSS-Fuzz runs the corpus continuously upstream. Failing inputs become permanent regression seeds in `internal/protocol/testdata/fuzz/Fuzz_Decoder_With_ArbitraryInput/`.
+
+## CI workflows (`.github/workflows/`)
+
+| Workflow | Purpose |
+|---|---|
+| `ci.yml` | Build, test (race + integration), lint matrix across macOS/Linux/Windows |
+| `codeql.yml` | GitHub Advanced Security CodeQL analysis |
+| `fuzz.yml` | OSS-Fuzz corpus integration |
+| `release.yml` | goreleaser pipeline — cosign signing, SBOM, SLSA L3 provenance |
+| `scorecard.yml` | OpenSSF Scorecard scoring |
+
+## Dependency direction (enforced)
+
+```
+cmd/mcp/  ──────►  server/  ──┬──►  protocol/      (foundation, zero deps)
+                              ├──►  tools/         (handler packages)
+                              ├──►  resources/     (handler packages)
+                              ├──►  prompts/       (handler packages)
+                              └──►  schema/        (used by tools + prompts)
+
+tools/, resources/, prompts/  ──►  protocol/, schema/  (NEVER server)
+```
+
+Handler packages reach the bidi path via `protocol.SendRequest(ctx, ...)` and `protocol.ContextWithPeer` — **without** importing `internal/server` (Invariant I1).
+
+## Critical files for an AI agent to read first
+
+1. **`CLAUDE.md`** — engineering philosophy, build/test commands, conventions, guardrails.
+2. **`_bmad-output/project-context.md`** — load-bearing rules sheet (gitignored; supplements CLAUDE.md).
+3. **`go.mod`** — source of truth for Go version.
+4. **`internal/protocol/constants.go`** — protocol version, error codes, method names.
+5. **`cmd/mcp/main.go`** — wiring template; how a server is constructed.
+6. **`internal/tools/echo.go`** — reference tool (`// START HERE`).
+7. **`Makefile`** — canonical build/test/fuzz/smoke commands.
+8. **`docs/architecture.md`** — system design (this folder).
