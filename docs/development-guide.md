@@ -1,207 +1,273 @@
 # Development Guide
 
+How to build, test, fuzz, and contribute to `github.com/andygeiss/mcp`.
+
+---
+
 ## Prerequisites
 
-- Go 1.26+
-- golangci-lint v2
-- git
+- **Go 1.26+** — `go.mod` is the source of truth for the exact minimum.
+- **golangci-lint** — must pass with **zero issues**. `.golangci.yml` is read-only; do not weaken to silence findings.
+- **No external dependencies** — the project is stdlib-only. CI tooling (golangci-lint, goreleaser, GitHub Actions, Codecov) is exempt infrastructure, not a project dependency.
+- *(Optional)* **bc** for `make coverage` (used to compare against the 90% threshold).
+- *(Optional)* **benchstat** for `make bench`.
 
-## Setup
+## Initial setup
 
 ```bash
 git clone https://github.com/andygeiss/mcp.git
 cd mcp
-make setup   # configures git hooks from .githooks/
+make setup        # configures local pre-commit hooks (.githooks)
+make check        # build + test + lint — your "everything green" smoke test
 ```
 
-## Build
+## Make targets
 
-```bash
-make build
-# or manually:
-go build -ldflags "-X main.version=$(git describe --tags --always --dirty)" ./cmd/mcp/
+The Makefile is the canonical entry point for development tasks.
+
+| Target | What it does |
+|---|---|
+| `make setup` | Configure `git config core.hooksPath .githooks` (run once after clone). |
+| `make build` | `go build -trimpath -ldflags "-X main.version=$(git describe --tags --always --dirty)" ./cmd/mcp/`. Reproducible — flags match the release binary. |
+| `make test` | `go test -race ./...`. Race detector is **mandatory** — never run plain `go test`. |
+| `make lint` | `golangci-lint run ./...`. Must pass with zero issues. |
+| `make check` | `build + test + lint`. The full quality gate. Run this before opening a PR. |
+| `make coverage` | Runs tests with coverage and **enforces the 90% threshold**. Fails if total drops below. |
+| `make fuzz` | Fuzzes `Fuzz_Decoder_With_ArbitraryInput` for 30s. `make fuzz FUZZTIME=5m` to extend. |
+| `make bench` | Runs benchmarks (count=6) and compares against `testdata/benchmarks/baseline.txt` via benchstat. |
+| `make smoke` | End-to-end smoke test: pipes `initialize` + `notifications/initialized` + `tools/list` through the binary, checks the response. Prints `"Your server works. It exposes N tool(s)."` on success or two diagnostic hints + captured stderr on failure. |
+| `make init MODULE=...` | Scaffold rewriter — rewrites the module path, repoints badges, runs `go mod tidy`, removes `cmd/scaffold/`, resets git history. **Refuses to run on a dirty tree** — commit/stash first or pass `--force`. |
+
+## Direct `go` commands (canonical incantations)
+
+For verifying a change locally, the Makefile is preferred. If you need to invoke `go` directly, **cite verbatim** — paraphrasing breaks the `-ldflags`:
+
+```
+go build ./...                                                                          # build all packages
+go build -ldflags "-X main.version=$(git describe --tags --always --dirty)" ./cmd/mcp/  # build with version
+go test -race ./...                                                                     # unit tests; race detector mandatory
+go test -race ./... -tags=integration                                                   # include integration tests
+go test -fuzz Fuzz_Decoder_With_ArbitraryInput ./internal/protocol -fuzztime=30s        # fuzz the decoder
+golangci-lint run ./...                                                                 # lint; must pass with zero issues
 ```
 
-## Testing
+## Test conventions
 
-### Unit Tests
+The project enforces a strict test discipline. Reviewers will reject PRs that violate these.
 
-```bash
-make test
-# or:
-go test -race ./...
-```
+- **Naming:** `Test_<Unit>_With_<Condition>_Should_<Outcome>`. Fuzz targets: `Fuzz_<Unit>_<Aspect>`.
+- **Structure:** `// Arrange` / `// Act` / `// Assert` blocks.
+- **`t.Parallel()` is mandatory** on every test — and implies **local fixtures**: no package-level state, no shared servers across subtests, no global registries.
+- **Black-box default:** `package foo_test`. White-box (`package foo`) is reserved for testing unexported internals with no observable surface.
+- **Assertions:** `assert.That(t, "description", got, expected)` from `internal/assert`. **No third-party assertion library** (testify, gomega, etc.) — same stdlib-only posture as production code.
+- **I/O in tests:** inject `bytes.Buffer` via the constructor's `io.Reader`/`io.Writer` parameters. The test *is* the client — no separate harness.
+- **No mocks for `internal/protocol`, `internal/tools`, `internal/resources`, `internal/prompts`.** Fakes over mocks; the canonical fake is `bytes.Buffer` + a real codec.
+- **Goldens** in `testdata/`, byte-for-byte JSON. A newline difference is a regression. **A golden change is a wire-format change** — treat it as a SemVer signal.
+- **Integration tests** are gated by `//go:build integration` at the top of the file.
 
-Race detector is mandatory for all test runs.
+### Decision rule — which test layer?
 
-### Integration Tests
+| Bug type | Test layer |
+|---|---|
+| Handler logic, schema derivation, registry semantics | Unit (`package foo_test`) |
+| Dispatch path, state machine, EOF/cancel/bidi correlation | Integration (`//go:build integration`) |
+| A client would notice as a wire break | Golden (byte-for-byte JSON) |
+| Adversarial input on a parser surface | Fuzz (`Fuzz_*` targets) |
 
-```bash
-go test -race ./... -tags=integration
-```
+If you can't name which box catches a regression, you've duplicated coverage in two and have a gap in another.
 
-Integration tests cover:
-- Full server lifecycle via stdin/stdout buffers
-- SIGINT/SIGTERM graceful shutdown (Unix only)
-- Template rewriter end-to-end cycle (`cmd/scaffold`)
-- Stdout protocol-only enforcement
-- MCP conformance suite (37 file-driven scenarios in `internal/server/testdata/conformance/`)
-- Bidirectional transport: `Peer.SendRequest`, outbound cancellation (A7), shutdown races (`synctest_test.go`)
-- Smoke test (`internal/tools/smoke_integration_test.go`) backing `make smoke`
+### Required test categories for new code
 
-### Fuzz Testing
+- **New tool, resource, or prompt:** unit test (handler in isolation) + integration test (through the full server).
+- **New server-to-client request type (bidi):** the **triad** — correlation (concurrent in-flight, no ID collision, no deadlock), cancellation (handler abort propagates), capability-gate (returns `*protocol.CapabilityNotAdvertisedError` with **zero side effects**: pending-map untouched, no bytes written).
+- **New parser surface:** add a fuzz target (`Fuzz_<Unit>_With_ArbitraryInput`) and run `-fuzztime=30s` minimum locally before opening the PR.
+- **New error code or state transition:** golden test for the wire shape.
 
-```bash
-make fuzz                                                                      # default: 30s on Fuzz_Decoder_With_ArbitraryInput
-go test -fuzz Fuzz_Decoder_With_ArbitraryInput ./internal/protocol -fuzztime=30s # specific target
-```
+## Adding a new tool
 
-Five fuzz targets:
-1. `Fuzz_Decoder_With_ArbitraryInput` (`internal/protocol`) -- protocol decoder resilience
-2. `Fuzz_Server_Pipeline` (`internal/server`) -- end-to-end server fuzz
-3. `Fuzz_ValidateInput_With_ArbitraryInput` (`internal/tools`) -- input validation
-4. `Fuzz_ValidatePath_With_ArbitraryInput` (`internal/tools`) -- path validation
-5. `Fuzz_LookupTemplate_With_ArbitraryInputs` (`internal/resources`) -- URI template matcher
+1. **Define the input struct** in `internal/tools/yourtool.go`:
+   ```go
+   type GreetInput struct {
+       Name string `json:"name" description:"Name to greet"`
+   }
+   ```
+2. **Write the handler:**
+   ```go
+   func Greet(_ context.Context, input GreetInput) Result {
+       return TextResult("Hello, " + input.Name + "!")
+   }
+   ```
+3. **Register** in `cmd/mcp/main.go`:
+   ```go
+   if err := tools.Register(registry, "greet", "Greets someone by name", tools.Greet); err != nil {
+       return fmt.Errorf("register greet: %w", err)
+   }
+   ```
+4. **Write tests** — unit test for the handler, integration test through the server.
+5. **Verify:** `make smoke` prints `"Your server works. It exposes N tool(s)."` (count includes your new tool).
 
-Nightly CI runs all targets for 5 minutes each.
+The input schema (`{"type":"object","properties":{...},"required":[...]}`) is **auto-derived** by `internal/schema/schema.go` from struct tags — never hand-roll JSON Schema.
 
-### Benchmarks
+**Constraints on `T` for `tools.Register[T]`:** `T` must be a struct (or pointer to struct). `int`, `map`, slice-of-primitive at the top level error out.
 
-```bash
-make bench
-```
+## Adding a new resource or prompt
 
-Compares against `testdata/benchmarks/baseline.txt` using benchstat. 20% regression threshold.
+- **Resource:** `resources.Register(registry, uri, name, description, handler)` for static, or `resources.RegisterTemplate(...)` for URI-template-backed. Pass via `server.WithResources(registry)`. The `resources` capability is auto-advertised.
+- **Prompt:** `prompts.Register[T](registry, "name", "description", handler)`. Pass via `server.WithPrompts(registry)`. The `prompts` capability is auto-advertised. Same struct-only constraint as tools.
 
-### Coverage
+## Reaching the client from a tool handler (bidi)
 
-```bash
-make coverage
-```
-
-Enforces 90% minimum coverage. CI fails if coverage drops below threshold.
-
-### Lint
-
-```bash
-golangci-lint run ./...
-```
-
-golangci-lint v2 configured in `.golangci.yml`. Zero suppression policy -- fix the code, never add `//nolint` or modify `.golangci.yml` to silence findings.
-
-### Full Check
-
-```bash
-make check   # build + test + lint
-```
-
-## Adding a Tool
-
-1. Define an input struct with `json` and `description` tags in `internal/tools/`
-2. Implement `func(ctx context.Context, input T) Result`
-3. Register via `tools.Register[T](registry, name, description, handler)` in `cmd/mcp/main.go`
-4. Write unit tests for the handler
-5. Add integration test through the full server (`//go:build integration`)
-
-Schema is auto-derived from struct tags. No manual schema definition.
-
-```go
-type GreetInput struct {
-    Name string `json:"name" description:"Name to greet"`
-}
-
-func Greet(_ context.Context, input GreetInput) Result {
-    return TextResult("Hello, " + input.Name + "!")
-}
-```
-
-## Adding a Resource
-
-1. Use `resources.Register(registry, uri, name, description, handler)` for static resources
-2. Use `resources.RegisterTemplate(registry, uriTemplate, name, description, handler)` for URI templates
-3. Pass registry to server via `server.WithResources(registry)`
-
-## Adding a Prompt
-
-1. Define argument struct with `json` and `description` tags
-2. Implement `func(ctx context.Context, input T) Result`
-3. Register via `prompts.Register[T](registry, name, description, handler)`
-4. Pass registry to server via `server.WithPrompts(registry)`
-
-## Progress and Logging from Handlers
-
-```go
-func MyTool(ctx context.Context, input MyInput) tools.Result {
-    p := server.ProgressFromContext(ctx)
-    p.Report(0, 100)                      // requires client _meta.progressToken
-    p.Log("info", "my_tool", "started")   // notifications/message
-    // ... work ...
-    p.Report(100, 100)
-    return tools.TextResult("done")
-}
-```
-
-AI10 invariant: do not interleave `Report` calls with an outbound `protocol.SendRequest` that is awaiting a reply.
-
-## Server-to-Client Requests (v1.3.0)
-
-Tool and prompt handlers can initiate JSON-RPC requests back to the client for sampling, elicitation, and roots:
+Handlers can issue requests to the client (sampling, elicitation, roots, or any future method) without importing `internal/server`:
 
 ```go
 import "github.com/andygeiss/mcp/internal/protocol"
 
-func MyTool(ctx context.Context, input MyInput) tools.Result {
-    resp, err := protocol.SendRequest(ctx, "sampling/createMessage", map[string]any{
-        "messages": []map[string]any{{"role": "user", "content": "..."}},
-    })
-    if err != nil {
-        // errors.Is(err, protocol.ErrServerShutdown)
-        // errors.Is(err, protocol.ErrPendingRequestsFull)
-        // errors.Is(err, protocol.ErrNoPeerInContext)
-        // errors.AsType[*protocol.CapabilityNotAdvertisedError](err)
-        return tools.ErrorResult(err.Error())
+func MyHandler(ctx context.Context, input MyInput) Result {
+    resp, err := protocol.SendRequest(ctx, "sampling/createMessage", params)
+    if errors.Is(err, protocol.ErrNoPeerInContext) {
+        // Running outside the server (e.g., direct unit test). Handle accordingly.
     }
-    // inspect resp.Result or resp.Error
-    return tools.TextResult("ok")
+    var capErr *protocol.CapabilityNotAdvertisedError
+    if errors.As(err, &capErr) {
+        // Client did not advertise this capability. Zero side effects occurred.
+    }
+    // ... use resp
 }
 ```
 
-Gated methods: `sampling/createMessage`, `elicitation/create`, `roots/list`. The server synchronously rejects with `*protocol.CapabilityNotAdvertisedError` if the client did not advertise the required capability during `initialize`.
+The server attaches itself as a `protocol.Peer` to the handler's context (`protocol.ContextWithPeer`) at dispatch. The **AI9 capability gate** is the first statement on the outbound path — outbound `sampling/`, `elicitation/`, `roots/` calls return `*CapabilityNotAdvertisedError` with **zero side effects** when the client did not advertise the corresponding capability during `initialize`.
 
-## Test Conventions
+## Progress reporting from tool handlers
 
-- **Naming**: `Test_<Unit>_With_<Condition>_Should_<Outcome>`
-- **Structure**: `// Arrange` / `// Act` / `// Assert`
-- **Parallel**: Every test calls `t.Parallel()`
-- **Package**: Black-box (`package foo_test`) by default
-- **Assertions**: `assert.That(t, "description", got, expected)`
-- **I/O**: Inject `bytes.Buffer`. Write JSON-RPC requests + EOF, run server, read responses
+```go
+import "github.com/andygeiss/mcp/internal/server"
 
-## Code Conventions
+func LongRunning(ctx context.Context, input MyInput) Result {
+    p := server.ProgressFromContext(ctx)  // nil-safe
+    for i := 0; i < total; i++ {
+        // ... do work
+        p.Report(i+1, total)              // no-op without _meta.progressToken
+    }
+    p.Log(slog.LevelInfo, "done", nil)    // server→client logging notification
+    return TextResult("done")
+}
+```
 
-- Constants in `protocol/constants.go`. Use `const`, never `var`
-- Declarations alphabetically where practical
-- `NewTypeName` constructor first after type, then methods alphabetically
-- JSON tags: `json:"fieldName"` matching MCP spec camelCase, `omitempty` for optional
-- Error handling: `fmt.Errorf("operation: %w", err)`
-- Imports: stdlib first, blank line, then internal packages
-- Logging: `slog.LevelInfo` default, `snake_case` keys
+`Report` and `Log` are nil-safe and no-op without a client-supplied `_meta.progressToken` on the originating request. **AI10 invariant:** handlers must not invoke `Report` while parked in `protocol.SendRequest` / outbound-awaiting; the slow-client recovery path is `-32001` (`ServerTimeout`).
 
-## Makefile Targets
+## Fuzzing
 
-| Target | Description |
+```bash
+make fuzz                 # 30s default
+make fuzz FUZZTIME=5m     # custom duration
+```
+
+The project ships 5 fuzz targets:
+- `Fuzz_Decoder_With_ArbitraryInput` — `internal/protocol/` (primary, OSS-Fuzz target)
+- `Fuzz_Server_Pipeline` — `internal/server/`
+- `Fuzz_LookupTemplate_With_ArbitraryInputs` — `internal/resources/`
+- `Fuzz_ValidateInput_With_ArbitraryInput` — `internal/tools/`
+- `Fuzz_ValidatePath_With_ArbitraryInput` — `internal/tools/`
+
+OSS-Fuzz runs the corpus continuously upstream — local `-fuzztime=30s` is a smoke check, not a gate.
+
+**Fuzz failures become permanent regression seeds** under `internal/protocol/testdata/fuzz/<TargetName>/`. Version-controlled, never `.gitignore`d. Skipping the seed-commit step makes OSS-Fuzz start cold and pushes cost upstream.
+
+OSS-Fuzz harness lives in `oss-fuzz/`. To test the harness locally with Docker:
+
+```bash
+docker build -f oss-fuzz/Dockerfile -t mcp-fuzz-test .
+```
+
+## Coverage
+
+`make coverage` enforces a **90% threshold**. The Makefile target reads the `total:` line from `go tool cover -func=` and fails if total drops below. CI also tracks coverage via Codecov; **do not regress without a stated reason**.
+
+```bash
+make coverage    # run tests, generate coverage.out, enforce ≥90%
+go tool cover -html=coverage.out  # open in browser to see annotated source
+```
+
+## Lint
+
+```bash
+make lint        # golangci-lint run ./...
+```
+
+Must pass with **zero issues**. `.golangci.yml` is treated as **read-only**:
+- **No `//nolint`** to silence findings — fix the code instead.
+- **`depguard.no-server-in-handlers`** denies `internal/server` imports from `internal/tools/**` and `internal/prompts/**` (Invariant I1).
+- **`forbidigo`** bans `os.Stdout` writes and `fmt.Fprint(os.Stdout, ...)` in handler packages (Invariant I4).
+
+## Commit conventions
+
+Commit messages follow Conventional Commits: `type(scope): summary`.
+
+- **Live `type` vocabulary:** `feat`, `fix`, `chore`, `docs`, `refactor`.
+- **Scope grammar is semantic, not the package path.** Scope is one of:
+  - a version (`feat(v1.3.0)`)
+  - a subsystem (`feat(init)`, `docs(adr-003)`)
+  - an artifact name (`docs(CLAUDE.md)`, `chore(deps)`)
+- **Do not write** `feat(internal/server)` — wrong by this repo's convention.
+- **Body explains why**, not what. The diff shows what.
+- **One concern per commit.** Bug-fix commits don't carry refactors; refactor commits don't carry behavior changes.
+- **Tests and the code they cover live and die together** in one commit.
+
+For AI-co-authored commits, the trailer is **literal**:
+```
+Co-Authored-By: Claude <noreply@anthropic.com>
+```
+Capitalization matters (`Co-Authored-By`, not `co-authored-by`). Pass commit messages via HEREDOC — inline `-m` mangles newlines and breaks the trailer.
+
+## Pull requests
+
+1. **Branch from `main`.**
+2. **Run the local quality gate** (`make check`) before opening the PR.
+3. **`gh pr create`** is the canonical PR path. PR title matches the commit subject (`type(scope): summary`).
+4. **Body describes what + why + test plan** (test plan is mandatory for non-trivial changes).
+5. **All five CI workflows must pass** before merge: `ci`, `codeql`, `fuzz`, `release`, `scorecard`.
+6. **Local-CI parity:** CI is authoritative. A local-pass / CI-fail divergence is a *finding* worth investigating, not a "just rerun it" situation.
+7. **Never push directly to `main`.** Every change lands via PR — including the maintainer's own (10-for-10 in the git log).
+8. **Never force-push shared branches.**
+9. **Never skip hooks** (`--no-verify`, `--no-gpg-sign`).
+
+## Dependabot
+
+Dependabot PRs are **not human-style PRs** — auto-merge on CI green. No architecture critique, no design review. Treat them as supply-chain hygiene, not feature work.
+
+## Scaffold-survival check
+
+This repo is **two products**: an MCP server and a template via `make init MODULE=...`. When changing files in `cmd/mcp/`, `internal/`, or anything templated, **verify the change survives `make init`**:
+
+```bash
+make init MODULE=github.com/test/scaffold-check  # in a scratch clone
+make check                                        # in the rewritten tree
+```
+
+Breaking the template is silent until a downstream user files an issue.
+
+## Environment variables
+
+| Variable | Effect |
 |---|---|
-| `bench` | Run benchmarks, compare with baseline (20% threshold) |
-| `build` | Compile binary with `-trimpath` and version ldflags |
-| `check` | Full pipeline: build + test + lint |
-| `coverage` | Run with race detector, enforce 90% threshold |
-| `fuzz` | Fuzz decoder (30s default, configurable via `FUZZTIME=2m`) |
-| `init` | Execute template rewriter (`MODULE=github.com/org/repo`) |
-| `lint` | Run golangci-lint |
-| `setup` | Configure git hooks from `.githooks/` |
-| `smoke` | Minimal `initialize → tools/list` round-trip verification |
-| `test` | Unit tests with race detector |
+| `MCP_TRACE=1` | Logs every request and response to stderr via `slog`. Useful for debugging. **Do not enable in production** — trace output includes full tool arguments which may contain credentials or PII. |
 
----
+## What we won't accept
 
-*Generated: 2026-04-18 | Scan level: deep | Reflects v1.3.0*
+- External `go.mod` dependencies (stdlib only)
+- HTTP/WebSocket transport
+- Non-protocol data on stdout
+- `//nolint` directives without fixing the underlying issue
+- `.golangci.yml` modifications to suppress findings
+- Tests that hide failures (deleted/relaxed assertions)
+- `TODO`/`FIXME`/`XXX`/`HACK` in committed code (file an issue or fix it now)
+- Multi-paragraph docstrings; comments answering WHAT instead of WHY
+
+## See also
+
+- [Architecture](./architecture.md) — system design
+- [Source Tree Analysis](./source-tree-analysis.md) — package map
+- [Deployment Guide](./deployment-guide.md) — releases, signing
+- [CONTRIBUTING.md](../CONTRIBUTING.md) — short-form contributor onboarding
+- [CLAUDE.md](../CLAUDE.md) — engineering philosophy for AI agents
+- [`_bmad-output/project-context.md`](../_bmad-output/project-context.md) — the load-bearing operational rule sheet for AI agents (gitignored)

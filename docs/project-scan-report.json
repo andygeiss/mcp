@@ -1,1 +1,80 @@
-{"workflow_version":"1.2.0","timestamps":{"started":"2026-04-18T12:00:00Z","last_updated":"2026-04-18T12:45:00Z","completed":"2026-04-18T12:45:00Z"},"mode":"full_rescan","scan_level":"deep","project_root":"/Users/andygeiss/Documents/github.com/andygeiss/mcp","project_knowledge":"/Users/andygeiss/Documents/github.com/andygeiss/mcp/docs","completed_steps":[{"step":"step_1","status":"completed","timestamp":"2026-04-18T12:05:00Z","summary":"Classified as monolith CLI, Go 1.26, MCP server, 1 part; reused cached project_type_id=cli"},{"step":"step_2","status":"completed","timestamp":"2026-04-18T12:07:00Z","summary":"Inventoried existing docs (index, overview, architecture, source-tree, dev-guide, deploy-guide, 3 ADRs, SPEC_UPGRADE, README, CLAUDE.md, VERSIONING)"},{"step":"step_3","status":"completed","timestamp":"2026-04-18T12:09:00Z","summary":"Tech stack unchanged: Go 1.26, stdlib only, encoding/json v1, slog, golangci-lint v2, 5 CI workflows"},{"step":"step_4","status":"completed","timestamp":"2026-04-18T12:20:00Z","summary":"Deep scan: read server split (11 files, 1741 LOC), protocol/peer.go, capabilities.go, errors.go; verified v1.3.0 bidi trio surface"},{"step":"step_5","status":"completed","timestamp":"2026-04-18T12:25:00Z","summary":"Source tree refreshed: 29 source + 42 test files across 9 packages; server/ file-partitioned per ADR-002"},{"step":"step_6","status":"completed","timestamp":"2026-04-18T12:28:00Z","summary":"Dev/deployment info verified from Makefile, CONTRIBUTING.md, .github/workflows; added Peer/SendRequest guidance, smoke target, SLSA L3 provenance"},{"step":"step_8","status":"completed","timestamp":"2026-04-18T12:35:00Z","summary":"Architecture doc rewritten for v1.3.0: Peer interface, bidi reader classifier (3-shape), capability gate (AI9), A7 outbound cancel symmetry, typed errors (AI8), AI10 progress-invariant"},{"step":"step_9","status":"completed","timestamp":"2026-04-18T12:40:00Z","summary":"Supporting docs refreshed: project-overview metrics, development-guide fuzz list (5 targets) + outbound section, deployment-guide SLSA/cosign details"},{"step":"step_10","status":"completed","timestamp":"2026-04-18T12:42:00Z","summary":"Index regenerated with v1.3.0 header, ADR section, updated quick-reference numbers"},{"step":"step_11","status":"completed","timestamp":"2026-04-18T12:44:00Z","summary":"Validation: no (To be generated) markers; all docs dated 2026-04-18; metric consistency checked (29/42/463/5/11/37/10)"},{"step":"step_12","status":"completed","timestamp":"2026-04-18T12:45:00Z","summary":"Workflow complete, state file written"}],"current_step":"completed","findings":{"project_classification":"Monolith CLI, Go 1.26, MCP server, bidirectional stdin/stdout JSON-RPC 2.0","existing_docs_count":11,"technology_stack":"Go 1.26, stdlib only, encoding/json, log/slog, golangci-lint v2, GitHub Actions, GoReleaser, cosign + SLSA L3, OSS-Fuzz","source_files_scanned":"29 source + 42 test files across 9 packages","v1_3_0_deltas":"Peer interface (protocol/peer.go), ClientCapabilities snapshot (capabilities.go), typed errors (errors.go), server.go split into 11 files per ADR-002, inbound/outbound cancel symmetry (A7), AI9 capability gate, AI10 progress invariant, 5th fuzz target (Fuzz_LookupTemplate_With_ArbitraryInputs), 37 conformance scenarios (+3 bidi orphan-response)"},"project_types":[{"part_id":"mcp","project_type_id":"cli","display_name":"CLI - MCP Server"}],"project_parts":[{"part_id":"mcp","root_path":"/Users/andygeiss/Documents/github.com/andygeiss/mcp","project_type_id":"cli","repository_type":"monolith"}],"outputs_generated":["project-scan-report.json","index.md","project-overview.md","architecture.md","source-tree-analysis.md","development-guide.md","deployment-guide.md"],"resume_instructions":"Workflow complete"}
+{
+  "workflow_version": "1.2.0",
+  "timestamps": {
+    "started": "2026-04-26T10:00:00Z",
+    "last_updated": "2026-04-26T10:30:00Z",
+    "completed": "2026-04-26T10:30:00Z"
+  },
+  "mode": "initial_scan",
+  "scan_level": "deep",
+  "project_root": "/Users/andygeiss/Documents/github.com/andygeiss/mcp",
+  "project_knowledge": "/Users/andygeiss/Documents/github.com/andygeiss/mcp/docs",
+  "repository_type": "monolith",
+  "project_parts": [
+    {
+      "part_id": "mcp",
+      "root_path": "/Users/andygeiss/Documents/github.com/andygeiss/mcp",
+      "project_type_id": "cli",
+      "display_name": "MCP Server (CLI)"
+    }
+  ],
+  "completed_steps": [
+    {"step": "step_1", "status": "completed", "timestamp": "2026-04-26T10:05:00Z", "summary": "Classified as monolith, single part, project_type_id=cli"},
+    {"step": "step_2", "status": "completed", "timestamp": "2026-04-26T10:08:00Z", "summary": "Found 6 root-level docs (README, CLAUDE, CHANGELOG, CONTRIBUTING, SECURITY, VERSIONING). docs/ empty (11 unstaged deletions present)"},
+    {"step": "step_3", "status": "completed", "timestamp": "2026-04-26T10:10:00Z", "summary": "Tech stack: Go 1.26 stdlib-only, MCP 2025-11-25 over JSON-RPC 2.0 NDJSON, encoding/json v1"},
+    {"step": "step_4", "status": "completed", "timestamp": "2026-04-26T10:12:00Z", "summary": "CLI project type — no API/data/UI scans required. Identified 5 fuzz targets, 4 cmd entry points, 8 internal packages, 5 GitHub Actions workflows"},
+    {"step": "step_5", "status": "completed", "timestamp": "2026-04-26T10:15:00Z", "summary": "Source tree documented: ~3770 production LOC across 29 files, ~12930 test LOC across 42 files"},
+    {"step": "step_6", "status": "completed", "timestamp": "2026-04-26T10:18:00Z", "summary": "Dev (Makefile: setup/build/test/lint/check/coverage/fuzz/bench/smoke/init) and deployment (goreleaser+cosign+SLSA L3+SBOM) extracted"},
+    {"step": "step_7", "status": "skipped", "timestamp": "2026-04-26T10:18:00Z", "summary": "Single-part project — no integration architecture needed"},
+    {"step": "step_8", "status": "completed", "timestamp": "2026-04-26T10:22:00Z", "summary": "architecture.md written"},
+    {"step": "step_9", "status": "completed", "timestamp": "2026-04-26T10:28:00Z", "summary": "project-overview.md, source-tree-analysis.md, development-guide.md, deployment-guide.md written"},
+    {"step": "step_10", "status": "completed", "timestamp": "2026-04-26T10:30:00Z", "summary": "Master index.md written with quick reference, links, getting-started"},
+    {"step": "step_11", "status": "completed", "timestamp": "2026-04-26T10:30:00Z", "summary": "Validation: 5 generated docs + state file. ADRs and SPEC_UPGRADE.md noted as recoverable via git restore (out of scope for fresh generation)"},
+    {"step": "step_12", "status": "completed", "timestamp": "2026-04-26T10:30:00Z", "summary": "Workflow complete"}
+  ],
+  "current_step": "completed",
+  "findings": {
+    "project_classification": "Single Go module — CLI binary (cmd/mcp/) serving MCP over stdio (JSON-RPC 2.0). Stdlib-only. Also acts as a scaffold (make init MODULE=...) for downstream MCP servers.",
+    "technology_stack": {
+      "language": "Go 1.26+",
+      "module": "github.com/andygeiss/mcp",
+      "protocol": "MCP 2025-11-25 over JSON-RPC 2.0 (NDJSON on stdin/stdout)",
+      "deps": "stdlib only (zero external go.mod deps)",
+      "lint": "golangci-lint (zero issues required)",
+      "release": "goreleaser + cosign keyless + SBOM + SLSA L3"
+    },
+    "metrics": {
+      "production_loc": 3770,
+      "test_loc": 12930,
+      "production_files": 29,
+      "test_files": 42,
+      "fuzz_targets": 5,
+      "ci_workflows": 5,
+      "internal_packages": 8
+    },
+    "existing_docs_at_root": ["README.md", "CLAUDE.md", "CHANGELOG.md", "CONTRIBUTING.md", "SECURITY.md", "VERSIONING.md"],
+    "deleted_in_working_tree": [
+      "docs/SPEC_UPGRADE.md",
+      "docs/adr/ADR-001-stdio-ndjson-transport.md",
+      "docs/adr/ADR-002-internal-package-layout.md",
+      "docs/adr/ADR-003-bidi-reader-split.md",
+      "docs/architecture.md (regenerated)",
+      "docs/deployment-guide.md (regenerated)",
+      "docs/development-guide.md (regenerated)",
+      "docs/index.md (regenerated)",
+      "docs/project-overview.md (regenerated)",
+      "docs/project-scan-report.json (regenerated)",
+      "docs/source-tree-analysis.md (regenerated)"
+    ]
+  },
+  "outputs_generated": [
+    "docs/project-scan-report.json",
+    "docs/project-overview.md",
+    "docs/architecture.md",
+    "docs/source-tree-analysis.md",
+    "docs/development-guide.md",
+    "docs/deployment-guide.md",
+    "docs/index.md"
+  ],
+  "resume_instructions": "Workflow complete. To regenerate, archive this state file and rerun /bmad-document-project."
+}
