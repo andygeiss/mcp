@@ -106,8 +106,6 @@ func Test_Integration_With_FullInit_Should_ProduceWorkingProject(t *testing.T) {
 	assert.That(t, "clean tree", gitOutput(t, projectDir, "status", "--porcelain"), "")
 }
 
-// gitOutput runs `git <args>` in dir and returns stdout with surrounding
-// whitespace stripped. Fails the test on error.
 func gitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...) //nolint:gosec // test helper: args from test code
@@ -119,7 +117,6 @@ func gitOutput(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// copyDir copies a directory recursively, skipping .git and _bmad-output.
 func copyDir(src, dst string) error {
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -131,7 +128,6 @@ func copyDir(src, dst string) error {
 			return err
 		}
 
-		// Skip directories that should not be copied.
 		if info.IsDir() {
 			base := filepath.Base(rel)
 			if base == ".git" || base == "_bmad-output" || base == "_bmad" || base == ".claude" {
@@ -140,7 +136,6 @@ func copyDir(src, dst string) error {
 			return os.MkdirAll(filepath.Join(dst, rel), info.Mode())
 		}
 
-		// Skip binary files and large files.
 		if strings.HasSuffix(path, ".exe") || strings.HasSuffix(path, ".test") {
 			return nil
 		}

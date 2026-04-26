@@ -44,13 +44,11 @@ func Test_Conformance_Runner(t *testing.T) {
 func runConformanceTest(t *testing.T, reqFile string) {
 	t.Helper()
 
-	// Read request file
 	reqData, err := os.ReadFile(filepath.Clean(reqFile))
 	if err != nil {
 		t.Fatalf("read request file: %v", err)
 	}
 
-	// Check for expected response file
 	respFile := strings.Replace(reqFile, ".request.jsonl", ".response.jsonl", 1)
 	var expectedResponses []json.RawMessage
 	if respData, err := os.ReadFile(filepath.Clean(respFile)); err == nil {
@@ -61,7 +59,6 @@ func runConformanceTest(t *testing.T, reqFile string) {
 		}
 	}
 
-	// Create server with a test tool
 	r := tools.NewRegistry()
 	if err := tools.Register(r, "test", "test tool", func(_ context.Context, input testInput) tools.Result {
 		return tools.TextResult(input.Message)
@@ -72,10 +69,8 @@ func runConformanceTest(t *testing.T, reqFile string) {
 	var stdout, stderr bytes.Buffer
 	srv := server.NewServer("mcp", "test", r, bytes.NewReader(reqData), &stdout, &stderr)
 
-	// Run server
 	_ = srv.Run(context.Background())
 
-	// Parse responses
 	var responses []protocol.Response
 	dec := json.NewDecoder(&stdout)
 	for dec.More() {
@@ -109,21 +104,18 @@ func runConformanceTest(t *testing.T, reqFile string) {
 
 	assert.That(t, "response count", len(responses), expectedCount)
 
-	// Verify all responses have jsonrpc 2.0
 	for i, resp := range responses {
 		if resp.JSONRPC != protocol.Version {
 			t.Errorf("response %d: expected jsonrpc 2.0, got %q", i, resp.JSONRPC)
 		}
 	}
 
-	// If expected responses file exists, do byte-exact comparison
 	if len(expectedResponses) > 0 {
 		if len(expectedResponses) != len(responses) {
 			t.Fatalf("expected %d responses in %s, got %d", len(expectedResponses), respFile, len(responses))
 		}
 		for i, expected := range expectedResponses {
 			actual, _ := json.Marshal(responses[i])
-			// Compact both for comparison
 			var compactExpected, compactActual bytes.Buffer
 			_ = json.Compact(&compactExpected, expected)
 			_ = json.Compact(&compactActual, actual)

@@ -65,12 +65,10 @@ func rewriteProject(dir, modulePath string, force bool) error {
 	return nil
 }
 
-// readFile reads a file at the given path, sanitizing it first.
 func readFile(path string) ([]byte, error) {
 	return os.ReadFile(filepath.Clean(path))
 }
 
-// writeFile writes data to the given path, sanitizing it first.
 func writeFile(path string, data []byte) error {
 	f, err := os.OpenFile(filepath.Clean(path), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
@@ -84,7 +82,6 @@ func writeFile(path string, data []byte) error {
 	return closeErr
 }
 
-// rewriteGoMod replaces the module path in go.mod.
 func rewriteGoMod(dir, modulePath string) error {
 	path := filepath.Join(dir, "go.mod")
 	data, err := readFile(path)
@@ -95,7 +92,6 @@ func rewriteGoMod(dir, modulePath string) error {
 	return writeFile(path, replaced)
 }
 
-// rewriteGoFiles walks all .go files and replaces template import paths.
 func rewriteGoFiles(dir, modulePath string) error {
 	return filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -131,7 +127,6 @@ func rewriteImportsInFile(path, modulePath string) error {
 	return writeFile(path, replaced)
 }
 
-// rewriteTextFiles walks all non-.go text files and rewrites template references.
 func rewriteTextFiles(dir, modulePath string) error {
 	return filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -236,7 +231,6 @@ func resetGitHistory(dir string) error {
 	return nil
 }
 
-// runGoModTidy executes go mod tidy in the project directory.
 func runGoModTidy(dir string) error {
 	cmd := exec.Command("go", "mod", "tidy")
 	cmd.Dir = dir
@@ -245,7 +239,6 @@ func runGoModTidy(dir string) error {
 	return cmd.Run()
 }
 
-// removeBuildArtifacts removes any compiled binaries from the project root.
 func removeBuildArtifacts(dir string) error {
 	for _, name := range []string{templateBinaryName, "scaffold"} {
 		path := filepath.Join(dir, name)
@@ -258,7 +251,6 @@ func removeBuildArtifacts(dir string) error {
 	return nil
 }
 
-// isTextFile returns true if the file is likely a text file based on extension.
 func isTextFile(path string) bool {
 	ext := filepath.Ext(path)
 	switch ext {
@@ -268,7 +260,6 @@ func isTextFile(path string) bool {
 	return false
 }
 
-// verifyZeroFingerprint checks that no template references remain.
 func verifyZeroFingerprint(dir string) error {
 	var remaining []string
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
@@ -300,7 +291,6 @@ func verifyZeroFingerprint(dir string) error {
 	return nil
 }
 
-// selfCleanup removes the cmd/scaffold/ directory after successful init.
 func selfCleanup(dir string) error {
 	scaffoldDir := filepath.Join(dir, "cmd", "scaffold")
 	if _, err := os.Stat(scaffoldDir); os.IsNotExist(err) {
@@ -323,7 +313,6 @@ func removeTemplateOnlyContent(dir string) error {
 	return nil
 }
 
-// shouldSkip returns true for directories that should not be processed.
 func shouldSkip(root, path string, info os.FileInfo) bool {
 	if !info.IsDir() {
 		return false
