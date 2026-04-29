@@ -3819,7 +3819,9 @@ func Test_Server_With_PromptsGetUnknownArg_Should_ReturnInvalidParams(t *testing
 func Test_Server_With_InitializeNoRegistries_Should_OmitOptionalCapabilities(t *testing.T) {
 	t.Parallel()
 
-	// Arrange — server with empty tool registry, no prompts, no resources
+	// Arrange — server with empty tool registry, no prompts, no resources.
+	// R2 (capability honesty): empty registries must NOT advertise their
+	// capability. Logging is the lone always-on capability.
 	input := initRequest
 
 	// Act
@@ -3845,7 +3847,7 @@ func Test_Server_With_InitializeNoRegistries_Should_OmitOptionalCapabilities(t *
 	assert.That(t, "logging present", result.Capabilities.Logging != nil, true)
 	assert.That(t, "prompts absent", result.Capabilities.Prompts == nil, true)
 	assert.That(t, "resources absent", result.Capabilities.Resources == nil, true)
-	assert.That(t, "tools present", result.Capabilities.Tools != nil, true)
+	assert.That(t, "tools absent (empty registry)", result.Capabilities.Tools == nil, true)
 }
 
 func Test_Server_With_ResourcesReadTemplateHandlerError_Should_ReturnInternalError(t *testing.T) {
