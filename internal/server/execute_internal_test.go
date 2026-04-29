@@ -286,14 +286,30 @@ func Test_handleInitialize_With_UnsupportedProtocolVersion_Should_ReturnServerVe
 }
 
 // Test_handleInitialize_With_AllRegistries_Should_AdvertiseAllCapabilities covers
-// handleInitialize with prompts, resources, and tools registries all set.
+// handleInitialize with prompts, resources, and tools registries all populated.
+// R2 (capability honesty): a non-empty registry must advertise; an empty
+// registry must NOT advertise.
 func Test_handleInitialize_With_AllRegistries_Should_AdvertiseAllCapabilities(t *testing.T) {
 	t.Parallel()
 
-	// Arrange
+	// Arrange — populate every registry with one entry so all four
+	// capabilities should advertise.
 	s := newTestServer(t)
+	if err := tools.Register(s.registry, "echo", "echo", tools.Echo); err != nil {
+		t.Fatal(err)
+	}
 	s.prompts = prompts.NewRegistry()
+	if err := prompts.Register(s.prompts, "p", "p", func(_ context.Context, _ struct{}) prompts.Result {
+		return prompts.Result{}
+	}); err != nil {
+		t.Fatal(err)
+	}
 	s.resources = resources.NewRegistry()
+	if err := resources.Register(s.resources, "file:///r", "r", "r", func(_ context.Context, _ string) (resources.Result, error) {
+		return resources.Result{}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	msg := protocol.Request{
 		JSONRPC: "2.0",
@@ -321,6 +337,45 @@ func Test_handleInitialize_With_AllRegistries_Should_AdvertiseAllCapabilities(t 
 	assert.That(t, "prompts", result.Capabilities.Prompts != nil, true)
 	assert.That(t, "resources", result.Capabilities.Resources != nil, true)
 	assert.That(t, "tools", result.Capabilities.Tools != nil, true)
+}
+
+// Test_handleInitialize_With_EmptyRegistries_Should_OmitOptionalCapabilities
+// pins the R2 boundary at the unit level: registries that exist but contain
+// no entries must not advertise their capability.
+func Test_handleInitialize_With_EmptyRegistries_Should_OmitOptionalCapabilities(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — registries are present but empty.
+	s := newTestServer(t)
+	s.prompts = prompts.NewRegistry()
+	s.resources = resources.NewRegistry()
+
+	msg := protocol.Request{
+		JSONRPC: "2.0",
+		ID:      json.RawMessage(`1`),
+		Method:  "initialize",
+		Params:  json.RawMessage(`{"capabilities":{}}`),
+	}
+
+	// Act
+	resp := s.handleInitialize(msg)
+
+	// Assert — only logging is advertised; tools/prompts/resources stay quiet.
+	assert.That(t, "no error", resp.Error == nil, true)
+
+	var result struct {
+		Capabilities struct {
+			Logging   *json.RawMessage `json:"logging"`
+			Prompts   *json.RawMessage `json:"prompts"`
+			Resources *json.RawMessage `json:"resources"`
+			Tools     *json.RawMessage `json:"tools"`
+		} `json:"capabilities"`
+	}
+	_ = json.Unmarshal(resp.Result, &result)
+	assert.That(t, "logging present", result.Capabilities.Logging != nil, true)
+	assert.That(t, "prompts absent", result.Capabilities.Prompts == nil, true)
+	assert.That(t, "resources absent", result.Capabilities.Resources == nil, true)
+	assert.That(t, "tools absent", result.Capabilities.Tools == nil, true)
 }
 
 // Test_handleLoggingSetLevel_With_ValidLevel_Should_Succeed covers
