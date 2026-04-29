@@ -91,12 +91,28 @@ func (s *Server) dispatchByState(ctx context.Context, msg protocol.Request) prot
 // lines with the request that produced them without manual plumbing.
 func (s *Server) errorResponse(ctx context.Context, id json.RawMessage, err error) protocol.Response {
 	s.errorCount.Add(1)
+	id = sanitizeErrorID(id)
 	pe, ok := errors.AsType[*protocol.CodeError](err)
 	if !ok {
 		loggerFromContext(ctx, s.logger).Error("internal_error", "error", err)
 		return protocol.NewErrorResponse(id, protocol.InternalError, "internal error")
 	}
 	return protocol.NewErrorResponseFromCodeError(id, pe)
+}
+
+// sanitizeErrorID returns id unchanged when it is structurally valid (null,
+// number, or quoted string); otherwise it returns null. The leading-byte
+// check matches protocol.Validate so a request that fails id-validation
+// never has its malformed id echoed back on the wire.
+func sanitizeErrorID(id json.RawMessage) json.RawMessage {
+	if len(id) == 0 {
+		return id
+	}
+	switch id[0] {
+	case 'n', '"', '-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+		return id
+	}
+	return protocol.NullID()
 }
 
 // handleNotification processes notification messages (no response sent).

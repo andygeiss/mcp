@@ -29,7 +29,7 @@ internal/protocol/    Foundation. Zero dependencies on other internal packages.
                       depth (MaxJSONDepth=64), top-level type, batch rejection.
   message.go          Request, Response, Error types.
   constants.go        MCP version (2025-11-25), error codes, method names,
-                      MaxConcurrentRequests=1, MaxJSONDepth=64.
+                      MaxJSONDepth=64.
   capabilities.go     ClientCapabilities + the Capability enum used for AI9.
   errors.go           Typed errors: ErrPendingRequestsFull, ErrServerShutdown,
                       ErrNoPeerInContext, *CapabilityNotAdvertisedError,

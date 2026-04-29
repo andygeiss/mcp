@@ -98,13 +98,10 @@ func Test_Server_With_InitializeHandshake_Should_ReturnCapabilities(t *testing.T
 	assert.That(t, "server name", result.ServerInfo.Name, "mcp")
 	assert.That(t, "server version", result.ServerInfo.Version, "test")
 
-	concurrency, ok := result.Capabilities.Experimental["concurrency"].(map[string]any)
-	if !ok {
-		t.Fatal("expected experimental.concurrency map")
-	}
-	maxInFlight, ok := concurrency["maxInFlight"].(float64)
-	if !ok || int(maxInFlight) != 1 {
-		t.Errorf("expected maxInFlight=1, got %v", concurrency["maxInFlight"])
+	// Sequential dispatch is non-negotiable, not advertised: the
+	// experimental.concurrency phantom knob has been removed (E1).
+	if result.Capabilities.Experimental != nil {
+		t.Errorf("expected no experimental capability, got %v", result.Capabilities.Experimental)
 	}
 }
 

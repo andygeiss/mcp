@@ -79,7 +79,7 @@ After `make init MODULE=github.com/yourorg/yourproject` succeeds, the welcome ba
 |---|---|
 | `codec.go` | `Decode` validates `jsonrpc=="2.0"`, balanced JSON depth ≤ 64, top-level type, batch rejection. `Encode` writes newline-delimited responses. |
 | `message.go` | `Request`, `Response`, `Error` types. `id` is `json.RawMessage` for verbatim echo. |
-| `constants.go` | `MCPVersion = "2025-11-25"`, `MaxConcurrentRequests = 1`, `MaxJSONDepth = 64`, error codes (`-32700`/`-32600`/`-32601`/`-32602`/`-32603`/`-32000`/`-32001`/`-32002`), method/notification/namespace name constants. |
+| `constants.go` | `MCPVersion = "2025-11-25"`, `MaxJSONDepth = 64`, error codes (`-32700`/`-32600`/`-32601`/`-32602`/`-32603`/`-32000`/`-32001`/`-32002`), method/notification/namespace name constants. |
 | `capabilities.go` | `ClientCapabilities` (with `*SamplingCapability`, `*ElicitationCapability`, `*RootsCapability`), `Capability` enum (`CapSampling`, `CapElicitation`, `CapRoots`), nil-safe `Has(Capability)`. |
 | `errors.go` | Sentinels: `ErrPendingRequestsFull`, `ErrServerShutdown`, `ErrNoPeerInContext`. Struct errors: `*CapabilityNotAdvertisedError` (Capability + Method), `*ClientRejectedError` (Code + Message + Data). |
 | `peer.go` | `Peer` interface (`SendRequest(ctx, method, params) (*Response, error)`); `ContextWithPeer`/`PeerFromContext`; package-level `SendRequest` returning `ErrNoPeerInContext` if no peer attached; `MethodCapability(method) (Capability, bool)` for AI9. **v1.x stability surface per ADR-003.** |

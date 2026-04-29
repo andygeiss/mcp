@@ -16,11 +16,10 @@ type initializeResult struct {
 }
 
 type initializeCapabilities struct {
-	Experimental map[string]any       `json:"experimental,omitempty"`
-	Logging      *loggingCapability   `json:"logging,omitempty"`
-	Prompts      *promptsCapability   `json:"prompts,omitempty"`
-	Resources    *resourcesCapability `json:"resources,omitempty"`
-	Tools        *toolsCapability     `json:"tools,omitempty"`
+	Logging   *loggingCapability   `json:"logging,omitempty"`
+	Prompts   *promptsCapability   `json:"prompts,omitempty"`
+	Resources *resourcesCapability `json:"resources,omitempty"`
+	Tools     *toolsCapability     `json:"tools,omitempty"`
 }
 
 type loggingCapability struct{}
@@ -72,13 +71,8 @@ func (s *Server) handleInitialize(ctx context.Context, msg protocol.Request) pro
 	s.state = stateInitializing
 
 	srvCaps := initializeCapabilities{
-		Experimental: map[string]any{
-			"concurrency": map[string]any{
-				"maxInFlight": protocol.MaxConcurrentRequests,
-			},
-		},
+		Logging: &loggingCapability{},
 	}
-	srvCaps.Logging = &loggingCapability{}
 	if s.prompts != nil {
 		srvCaps.Prompts = &promptsCapability{}
 	}
