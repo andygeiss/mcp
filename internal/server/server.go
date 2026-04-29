@@ -175,9 +175,9 @@ func NewServer(name, version string, registry *tools.Registry, stdin io.Reader, 
 // Run starts the dispatch loop. It decodes messages from stdin and dispatches
 // them to the appropriate handler. Tool calls are dispatched asynchronously so
 // the decode loop can continue reading messages for cancellation and ping
-// support while a handler is in flight. The server advertises maxInFlight: 1,
-// so only one tool handler runs at a time; additional requests while a handler
-// is in flight are rejected with -32600.
+// support while a handler is in flight. Dispatch is sequential — one tool
+// handler at a time; additional requests while a handler is in flight are
+// rejected with -32600.
 //
 // Run returns nil for clean shutdown (EOF or context cancellation) or an error
 // for fatal decode conditions (after sending a -32700 response).
