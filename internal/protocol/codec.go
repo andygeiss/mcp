@@ -17,6 +17,29 @@ var ErrBatchNotSupported = errors.New("batch requests not supported")
 // nests more than MaxJSONDepth levels deep.
 var ErrJSONDepthExceeded = fmt.Errorf("json nesting exceeds max depth %d", MaxJSONDepth)
 
+// errUnbalanced signals malformed close-bracket structure encountered during
+// the byte-scan (e.g. a top-level `]`). Surfaced as a generic parse error to
+// the wire — the JSON unmarshaler would catch the same input, but the byte-scan
+// must reject it without underflowing its depth counter.
+var errUnbalanced = errors.New("unbalanced json close bracket")
+
+// StructuralLimitError signals that a decoded JSON-RPC payload exceeds one of
+// the structural caps enforced by checkLimits (key-count or string-length).
+// The fields carry the limit name, the observed value, and the configured
+// maximum so the server can render the wire message and (in a future PR)
+// serialize them into the `error.data` object.
+type StructuralLimitError struct {
+	Limit  string
+	Actual int
+	Max    int
+}
+
+// Error implements the error interface and produces the exact wire message
+// surfaced to clients when a structural limit is breached.
+func (e *StructuralLimitError) Error() string {
+	return fmt.Sprintf("payload exceeds %s: %d > %d", e.Limit, e.Actual, e.Max)
+}
+
 // IncomingMessage is a union type for messages arriving on stdin. It
 // distinguishes client requests/notifications (which have a Method field)
 // from client responses to server-initiated requests (which have Result or
@@ -55,7 +78,7 @@ func DecodeMessage(dec *json.Decoder) (IncomingMessage, error) {
 		return IncomingMessage{}, ErrBatchNotSupported
 	}
 
-	if err := checkDepth(raw, MaxJSONDepth); err != nil {
+	if err := checkLimits(raw); err != nil {
 		return IncomingMessage{}, fmt.Errorf("decode message: %w", err)
 	}
 
@@ -193,30 +216,106 @@ func NullID() json.RawMessage {
 	return json.RawMessage("null")
 }
 
-// checkDepth scans raw JSON bytes and returns an error if nesting exceeds
-// limit. It tracks string state to ignore brackets inside string literals.
-func checkDepth(raw json.RawMessage, limit int) error {
-	depth, inString, escaped := 0, false, false
+// limitScanner is the single-pass byte-scan state that enforces depth, key,
+// and string-length caps. Per-depth arrays are statically sized to
+// MaxJSONDepth+1; the depth-overflow guard runs before any index write so
+// malformed input can never panic, and `depth--` is guarded by `depth > 0`.
+type limitScanner struct {
+	depth          int
+	escaped        bool
+	inString       bool
+	keyCount       [MaxJSONDepth + 1]int
+	parentIsObject [MaxJSONDepth + 1]bool
+	strBytes       int
+}
+
+// step advances the scanner one byte and returns a non-nil error on a
+// structural-limit breach, depth overflow, or unbalanced close-bracket.
+func (s *limitScanner) step(b byte) error {
+	if s.escaped {
+		s.escaped = false
+		return s.countStringByte()
+	}
+	if s.inString {
+		return s.stepInString(b)
+	}
+	switch b {
+	case '"':
+		s.inString = true
+		s.strBytes = 0
+	case '{':
+		return s.push(true)
+	case '[':
+		return s.push(false)
+	case '}', ']':
+		return s.pop()
+	case ':':
+		// 0 <= s.depth < len(s.parentIsObject) is invariant: push() returns
+		// before exceeding the bound and pop() never goes negative.
+		if s.parentIsObject[s.depth] {
+			return s.bumpKey()
+		}
+	}
+	return nil
+}
+
+func (s *limitScanner) stepInString(b byte) error {
+	switch b {
+	case '\\':
+		s.escaped = true
+		return s.countStringByte()
+	case '"':
+		s.inString = false
+		s.strBytes = 0
+		return nil
+	}
+	return s.countStringByte()
+}
+
+func (s *limitScanner) countStringByte() error {
+	s.strBytes++
+	if s.strBytes > MaxJSONStringLen {
+		return &StructuralLimitError{Limit: "maxStringLength", Actual: s.strBytes, Max: MaxJSONStringLen}
+	}
+	return nil
+}
+
+func (s *limitScanner) push(isObject bool) error {
+	next := s.depth + 1
+	if next >= len(s.parentIsObject) {
+		return ErrJSONDepthExceeded
+	}
+	s.depth = next
+	s.parentIsObject[next] = isObject
+	s.keyCount[next] = 0
+	return nil
+}
+
+func (s *limitScanner) pop() error {
+	if s.depth == 0 {
+		return errUnbalanced
+	}
+	s.depth--
+	return nil
+}
+
+func (s *limitScanner) bumpKey() error {
+	s.keyCount[s.depth]++
+	if s.keyCount[s.depth] > MaxJSONKeysPerObject {
+		return &StructuralLimitError{Limit: "maxKeysPerObject", Actual: s.keyCount[s.depth], Max: MaxJSONKeysPerObject}
+	}
+	return nil
+}
+
+// checkLimits scans raw JSON bytes once and enforces all structural caps:
+// nesting depth (MaxJSONDepth), per-object key count (MaxJSONKeysPerObject),
+// and per-string raw byte length (MaxJSONStringLen). Brackets and colons
+// inside string literals are ignored via the inString state.
+func checkLimits(raw json.RawMessage) error {
+	var s limitScanner
 	for _, b := range raw {
-		switch {
-		case escaped:
-			escaped = false
-		case inString:
-			switch b {
-			case '\\':
-				escaped = true
-			case '"':
-				inString = false
-			}
-		case b == '"':
-			inString = true
-		case b == '{' || b == '[':
-			depth++
-			if depth > limit {
-				return ErrJSONDepthExceeded
-			}
-		case b == '}' || b == ']':
-			depth--
+		if err := s.step(b); err != nil {
+			return err
 		}
 	}
 	return nil

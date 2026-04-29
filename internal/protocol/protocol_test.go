@@ -908,3 +908,336 @@ type failWriter struct{}
 func (f *failWriter) Write(_ []byte) (int, error) {
 	return 0, errors.New("write error")
 }
+
+// --- M1a structural-limit tests (key-count, string-length, no-panic) ---
+
+// noPanic decodes input and fails the test on any panic, regardless of
+// whether decode itself returned an error. Every malformed-input test must
+// route through this wrapper to prove the byte-scan never panics.
+func noPanic(t *testing.T, input string) error {
+	t.Helper()
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("decode panicked on input %q: %v", input, r)
+		}
+	}()
+	dec := json.NewDecoder(strings.NewReader(input))
+	_, err := protocol.DecodeMessage(dec)
+	return err
+}
+
+func Test_Decode_With_TooManyKeys_Should_ReturnError(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — params object with MaxJSONKeysPerObject + 1 keys.
+	var sb strings.Builder
+	sb.WriteString(`{"jsonrpc":"2.0","method":"x","id":1,"params":{`)
+	for i := range protocol.MaxJSONKeysPerObject + 1 {
+		if i > 0 {
+			sb.WriteByte(',')
+		}
+		fmt.Fprintf(&sb, `"k%d":%d`, i, i)
+	}
+	sb.WriteString("}}\n")
+
+	// Act
+	err := noPanic(t, sb.String())
+
+	// Assert
+	if err == nil {
+		t.Fatal("expected structural-limit error")
+	}
+	var sle *protocol.StructuralLimitError
+	if !errors.As(err, &sle) {
+		t.Fatalf("expected *StructuralLimitError, got %T: %v", err, err)
+	}
+	assert.That(t, "limit", sle.Limit, "maxKeysPerObject")
+	assert.That(t, "max", sle.Max, protocol.MaxJSONKeysPerObject)
+	if sle.Actual <= protocol.MaxJSONKeysPerObject {
+		t.Fatalf("expected actual > max, got actual=%d max=%d", sle.Actual, sle.Max)
+	}
+	want := fmt.Sprintf("payload exceeds maxKeysPerObject: %d > %d", sle.Actual, sle.Max)
+	assert.That(t, "wire message", sle.Error(), want)
+}
+
+func Test_Decode_With_OversizedString_Should_ReturnError(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — single string value just over MaxJSONStringLen raw bytes.
+	value := strings.Repeat("a", protocol.MaxJSONStringLen+1)
+	input := `{"jsonrpc":"2.0","method":"x","id":1,"params":{"data":"` + value + `"}}` + "\n"
+
+	// Act
+	err := noPanic(t, input)
+
+	// Assert
+	if err == nil {
+		t.Fatal("expected structural-limit error")
+	}
+	var sle *protocol.StructuralLimitError
+	if !errors.As(err, &sle) {
+		t.Fatalf("expected *StructuralLimitError, got %T: %v", err, err)
+	}
+	assert.That(t, "limit", sle.Limit, "maxStringLength")
+	assert.That(t, "max", sle.Max, protocol.MaxJSONStringLen)
+	if sle.Actual <= protocol.MaxJSONStringLen {
+		t.Fatalf("expected actual > max, got actual=%d max=%d", sle.Actual, sle.Max)
+	}
+}
+
+func Test_Decode_With_OversizedKeyName_Should_ReturnError(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — key name itself exceeds MaxJSONStringLen.
+	key := strings.Repeat("k", protocol.MaxJSONStringLen+1)
+	input := `{"jsonrpc":"2.0","method":"x","id":1,"params":{"` + key + `":1}}` + "\n"
+
+	// Act
+	err := noPanic(t, input)
+
+	// Assert
+	if err == nil {
+		t.Fatal("expected structural-limit error")
+	}
+	var sle *protocol.StructuralLimitError
+	if !errors.As(err, &sle) {
+		t.Fatalf("expected *StructuralLimitError, got %T: %v", err, err)
+	}
+	assert.That(t, "limit", sle.Limit, "maxStringLength")
+}
+
+func Test_Decode_With_SiblingObjects_Should_ResetKeyCount(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — first object inside an array has the limit, second has limit+1.
+	// The per-object key counter must reset on each `{`.
+	var sb strings.Builder
+	sb.WriteString(`{"jsonrpc":"2.0","method":"x","id":1,"params":{"items":[{`)
+	for i := range 5 {
+		if i > 0 {
+			sb.WriteByte(',')
+		}
+		fmt.Fprintf(&sb, `"a%d":%d`, i, i)
+	}
+	sb.WriteString(`},{`)
+	for i := range protocol.MaxJSONKeysPerObject + 1 {
+		if i > 0 {
+			sb.WriteByte(',')
+		}
+		fmt.Fprintf(&sb, `"b%d":%d`, i, i)
+	}
+	sb.WriteString("}]}}\n")
+
+	// Act
+	err := noPanic(t, sb.String())
+
+	// Assert
+	if err == nil {
+		t.Fatal("expected structural-limit error from second sibling")
+	}
+	var sle *protocol.StructuralLimitError
+	if !errors.As(err, &sle) {
+		t.Fatalf("expected *StructuralLimitError, got %T: %v", err, err)
+	}
+	assert.That(t, "limit", sle.Limit, "maxKeysPerObject")
+}
+
+func Test_Decode_With_NestedObjectsUnderLimit_Should_Succeed(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — outer object with 5 keys, each holding a nested object with 5 keys.
+	input := `{"jsonrpc":"2.0","method":"x","id":1,"params":{"a":{"x":1,"y":2,"z":3,"w":4,"v":5},"b":{"x":1,"y":2,"z":3,"w":4,"v":5},"c":{"x":1,"y":2,"z":3,"w":4,"v":5},"d":{"x":1,"y":2,"z":3,"w":4,"v":5},"e":{"x":1,"y":2,"z":3,"w":4,"v":5}}}` + "\n"
+
+	// Act
+	err := noPanic(t, input)
+
+	// Assert
+	assert.That(t, "error", err, nil)
+}
+
+func Test_Decode_With_BracketsInString_Should_NotMiscount(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — string values contain `:`, `{`, `}`, `[`, `]`. These bytes
+	// inside string literals must not affect key-count or depth tracking.
+	input := `{"jsonrpc":"2.0","method":"x","id":1,"params":{"a":"x:y","b":"}","c":"{","d":"[","e":"]","f":":::::"}}` + "\n"
+
+	// Act
+	err := noPanic(t, input)
+
+	// Assert
+	assert.That(t, "error", err, nil)
+}
+
+func Test_Decode_With_UnbalancedCloseBracket_Should_ReturnErrorNotPanic(t *testing.T) {
+	t.Parallel()
+
+	for _, input := range []string{
+		`]` + "\n",
+		`]]]]` + "\n",
+		`}` + "\n",
+		`}}}}` + "\n",
+	} {
+		err := noPanic(t, input)
+		if err == nil {
+			t.Fatalf("expected error for unbalanced input %q", input)
+		}
+	}
+}
+
+func Test_Decode_With_MixedDelimiters_Should_ReturnErrorNotPanic(t *testing.T) {
+	t.Parallel()
+
+	for _, input := range []string{
+		`[}` + "\n",
+		`{]` + "\n",
+		`{[}` + "\n",
+		`[{]}` + "\n",
+	} {
+		err := noPanic(t, input)
+		if err == nil {
+			t.Fatalf("expected error for mixed delimiter input %q", input)
+		}
+	}
+}
+
+func Test_Decode_With_DepthAtBoundary_Should_RejectAtMaxPlusOne(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — wrap MaxJSONDepth + 1 nested arrays inside a valid envelope so
+	// the batch-detection path does not fire. The envelope adds three opening
+	// brackets ({, params{, a:[) which alone stay under the limit; the deep
+	// chain of `[` triggers the depth guard before any slice index write.
+	var sb strings.Builder
+	sb.WriteString(`{"jsonrpc":"2.0","method":"x","params":{"a":`)
+	for range protocol.MaxJSONDepth + 1 {
+		sb.WriteByte('[')
+	}
+	for range protocol.MaxJSONDepth + 1 {
+		sb.WriteByte(']')
+	}
+	sb.WriteString("}}\n")
+
+	// Act
+	err := noPanic(t, sb.String())
+
+	// Assert
+	if err == nil {
+		t.Fatal("expected depth error at MaxJSONDepth+1")
+	}
+	if !errors.Is(err, protocol.ErrJSONDepthExceeded) {
+		t.Fatalf("expected ErrJSONDepthExceeded, got %v", err)
+	}
+}
+
+func Test_Decode_With_EscapedBracketInString_Should_NotDecrementDepth(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — escaped quotes and brackets inside a string. The escape state
+	// must consume the next byte without affecting depth or key counts.
+	input := `{"jsonrpc":"2.0","method":"x","id":1,"params":{"a":"\"]","b":"\"}","c":"\\"}}` + "\n"
+
+	// Act
+	err := noPanic(t, input)
+
+	// Assert
+	assert.That(t, "error", err, nil)
+}
+
+func Test_Decode_With_KeysAtLimit_Should_Succeed(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — exactly MaxJSONKeysPerObject keys (boundary case).
+	var sb strings.Builder
+	sb.WriteString(`{"jsonrpc":"2.0","method":"x","id":1,"params":{`)
+	for i := range protocol.MaxJSONKeysPerObject {
+		if i > 0 {
+			sb.WriteByte(',')
+		}
+		fmt.Fprintf(&sb, `"k%d":%d`, i, i)
+	}
+	sb.WriteString("}}\n")
+
+	// Act
+	err := noPanic(t, sb.String())
+
+	// Assert
+	assert.That(t, "error", err, nil)
+}
+
+func Test_Decode_With_StringAtLimit_Should_Succeed(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — string of exactly MaxJSONStringLen raw bytes (boundary case).
+	value := strings.Repeat("a", protocol.MaxJSONStringLen)
+	input := `{"jsonrpc":"2.0","method":"x","id":1,"params":{"data":"` + value + `"}}` + "\n"
+
+	// Act
+	err := noPanic(t, input)
+
+	// Assert
+	assert.That(t, "error", err, nil)
+}
+
+func Test_StructuralLimitError_Should_FormatExactWireMessage(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	sle := &protocol.StructuralLimitError{
+		Limit:  "maxKeysPerObject",
+		Actual: 10_001,
+		Max:    10_000,
+	}
+
+	// Assert
+	assert.That(t, "error message", sle.Error(), "payload exceeds maxKeysPerObject: 10001 > 10000")
+}
+
+func Test_StructuralLimitError_With_ErrorsAs_Should_Match(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	wrapped := fmt.Errorf("decode message: %w", &protocol.StructuralLimitError{
+		Limit:  "maxStringLength",
+		Actual: 1_048_577,
+		Max:    1_048_576,
+	})
+
+	// Act
+	var sle *protocol.StructuralLimitError
+	ok := errors.As(wrapped, &sle)
+
+	// Assert
+	assert.That(t, "found", ok, true)
+	assert.That(t, "limit", sle.Limit, "maxStringLength")
+	assert.That(t, "actual", sle.Actual, 1_048_577)
+	assert.That(t, "max", sle.Max, 1_048_576)
+}
+
+// Regression: backslash bytes inside strings must count toward MaxJSONStringLen
+// so an escape-heavy payload cannot bypass the cap. Pre-fix, `\\` counted as 1
+// byte instead of 2, letting a 2 MiB string of `\\` slip past a 1 MiB cap.
+func Test_Decode_With_EscapeHeavyString_Should_CountBackslashBytes(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — string content of N pairs of `\\`. Raw byte count between the
+	// quotes is 2N. Choose N so 2N > MaxJSONStringLen but N <= MaxJSONStringLen,
+	// proving the cap trips on raw bytes (post-fix) and would have passed if
+	// only logical characters were counted (pre-fix bug).
+	pairs := protocol.MaxJSONStringLen/2 + 1
+	value := strings.Repeat(`\\`, pairs)
+	input := `{"jsonrpc":"2.0","method":"x","id":1,"params":{"data":"` + value + `"}}` + "\n"
+
+	// Act
+	err := noPanic(t, input)
+
+	// Assert
+	if err == nil {
+		t.Fatal("expected structural-limit error for escape-heavy string")
+	}
+	var sle *protocol.StructuralLimitError
+	if !errors.As(err, &sle) {
+		t.Fatalf("expected *StructuralLimitError, got %T: %v", err, err)
+	}
+	assert.That(t, "limit", sle.Limit, "maxStringLength")
+}
