@@ -89,10 +89,7 @@ func (s *Server) handleInitialize(ctx context.Context, msg protocol.Request) pro
 		srvCaps.Tools = &toolsCapability{}
 	}
 
-	negotiated := protocol.MCPVersion
-	if params.ProtocolVersion == protocol.MCPVersion {
-		negotiated = params.ProtocolVersion
-	}
+	negotiated := protocol.NegotiateVersion(params.ProtocolVersion)
 
 	result := initializeResult{
 		Capabilities:    srvCaps,
