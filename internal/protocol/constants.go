@@ -34,10 +34,6 @@ const (
 	ErrCodeServerTimeout    ErrorCode = -32001
 )
 
-// MaxConcurrentRequests is a protocol-level constraint advertising sequential
-// dispatch to clients. Not configurable — the server processes one request at a time.
-const MaxConcurrentRequests = 1
-
 // MaxJSONDepth caps nesting depth of any decoded JSON-RPC message. The stdlib
 // json decoder has no native depth limit, so the codec scans the raw bytes for
 // balanced `{` / `[` before handing them to Unmarshal. 64 comfortably covers
