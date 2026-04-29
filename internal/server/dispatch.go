@@ -41,11 +41,8 @@ func (s *Server) dispatch(ctx context.Context, msg protocol.Request) (protocol.R
 
 	// ping always works in any state.
 	if msg.Method == protocol.MethodPing {
-		resp, err := protocol.NewResultResponse(msg.ID, json.RawMessage("{}"))
-		if err != nil {
-			return s.errorResponse(ctx, msg.ID, protocol.ErrInternalError("failed to marshal ping result")), true
-		}
-		return resp, true
+		return s.marshalResult(ctx, msg.ID, json.RawMessage("{}"),
+			"marshal_ping_result", "failed to marshal ping result"), true
 	}
 
 	// rpc.* is reserved by JSON-RPC 2.0 §4.3 — reject in any state with
@@ -113,6 +110,21 @@ func sanitizeErrorID(id json.RawMessage) json.RawMessage {
 		return id
 	}
 	return protocol.NullID()
+}
+
+// marshalResult builds a JSON-RPC success response for the given value, or an
+// internal-error response if the value cannot be marshaled. Consolidates the
+// "marshal result or fall back to -32603" pattern shared by every handler so
+// the defensive failure path lives in one place. operation identifies which
+// handler hit the failure (attached as a slog attribute, since sloglint
+// requires a static msg); failMsg is the wire message returned to the client.
+func (s *Server) marshalResult(ctx context.Context, id json.RawMessage, result any, operation, failMsg string) protocol.Response {
+	resp, err := protocol.NewResultResponse(id, result)
+	if err != nil {
+		loggerFromContext(ctx, s.logger).Error("marshal_result_failed", "operation", operation, "error", err)
+		return s.errorResponse(ctx, id, protocol.ErrInternalError(failMsg))
+	}
+	return resp
 }
 
 // handleNotification processes notification messages (no response sent).

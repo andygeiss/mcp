@@ -57,9 +57,6 @@ func (s *Server) handleLoggingSetLevel(ctx context.Context, msg protocol.Request
 	s.logLevel.Set(slogLevel)
 	loggerFromContext(ctx, s.logger).Info("log_level_changed", "level", params.Level)
 
-	resp, err := protocol.NewResultResponse(msg.ID, json.RawMessage("{}"))
-	if err != nil {
-		return s.errorResponse(ctx, msg.ID, protocol.ErrInternalError("failed to marshal logging/setLevel result"))
-	}
-	return resp
+	return s.marshalResult(ctx, msg.ID, json.RawMessage("{}"),
+		"marshal_logging_set_level", "failed to marshal logging/setLevel result")
 }

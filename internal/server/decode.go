@@ -219,11 +219,8 @@ func (s *Server) handleMessageDuringInFlight(ctx context.Context, msg protocol.R
 	}
 
 	if msg.Method == protocol.MethodPing {
-		resp, err := protocol.NewResultResponse(msg.ID, json.RawMessage("{}"))
-		if err != nil {
-			return s.encodeResponse(s.errorResponse(ctx, msg.ID, protocol.ErrInternalError("failed to marshal ping result")))
-		}
-		return s.encodeResponse(resp)
+		return s.encodeResponse(s.marshalResult(ctx, msg.ID, json.RawMessage("{}"),
+			"marshal_ping_result", "failed to marshal ping result"))
 	}
 
 	return s.encodeResponse(s.errorResponse(ctx, msg.ID, protocol.ErrServerError("server busy: request in flight (maxInFlight is 1)")))

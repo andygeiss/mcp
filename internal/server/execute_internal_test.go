@@ -358,7 +358,7 @@ func Test_handleInitialize_With_EmptyRegistries_Should_OmitOptionalCapabilities(
 	}
 
 	// Act
-	resp := s.handleInitialize(msg)
+	resp := s.handleInitialize(context.Background(), msg)
 
 	// Assert — only logging is advertised; tools/prompts/resources stay quiet.
 	assert.That(t, "no error", resp.Error == nil, true)
@@ -1330,4 +1330,102 @@ func (s *Server) pendingCount() int {
 	s.pendingMu.Lock()
 	defer s.pendingMu.Unlock()
 	return len(s.pending)
+}
+
+// Test_marshalResult_With_UnmarshalableValue_Should_ReturnInternalError covers
+// the marshal-failure fallback in marshalResult — the shared helper used by
+// every handler to build a JSON-RPC success response. A channel value cannot
+// be marshaled, so the helper must log the failure and return a -32603
+// internal-error response with the configured wire message.
+func Test_marshalResult_With_UnmarshalableValue_Should_ReturnInternalError(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	var stderr bytes.Buffer
+	s := newTestServer(t)
+	s.logger = slog.New(slog.NewJSONHandler(&stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	// Act — channels are not marshalable, forcing the fallback path.
+	resp := s.marshalResult(context.Background(), json.RawMessage(`1`), make(chan int),
+		"marshal_test_event", "failed to marshal test result")
+
+	// Assert
+	if resp.Error == nil {
+		t.Fatal("expected non-nil error response")
+	}
+	assert.That(t, "error code", resp.Error.Code, protocol.InternalError)
+	assert.That(t, "error message", resp.Error.Message, "failed to marshal test result")
+	if !bytes.Contains(stderr.Bytes(), []byte("marshal_result_failed")) {
+		t.Fatalf("expected marshal_result_failed log on stderr, got: %s", stderr.String())
+	}
+	if !bytes.Contains(stderr.Bytes(), []byte(`"operation":"marshal_test_event"`)) {
+		t.Fatalf("expected operation attribute on stderr, got: %s", stderr.String())
+	}
+}
+
+// Test_marshalResult_With_MarshalableValue_Should_ReturnSuccessResponse covers
+// the success path of marshalResult — a marshalable value yields a JSON-RPC
+// success response with the marshaled bytes as Result.
+func Test_marshalResult_With_MarshalableValue_Should_ReturnSuccessResponse(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	s := newTestServer(t)
+
+	// Act
+	resp := s.marshalResult(context.Background(), json.RawMessage(`1`),
+		map[string]string{"hello": "world"},
+		"marshal_unused", "unused")
+
+	// Assert
+	assert.That(t, "no error", resp.Error == nil, true)
+	assert.That(t, "result body", string(resp.Result), `{"hello":"world"}`)
+}
+
+// intPromptInput is a typed prompt input whose required Count field cannot
+// hold a non-numeric string — used to drive the prompt-handler-error path
+// without timing out the handler.
+type intPromptInput struct {
+	Count int `json:"count" description:"a count"`
+}
+
+// Test_handlePromptsGet_With_HandlerArgUnmarshalError_Should_ReturnInvalidParams
+// covers handlers_prompts.go: when the wrapped prompt handler returns a
+// CodeError because the typed unmarshal of arguments fails (string into int),
+// handlePromptsGet must propagate the error code via errorResponse rather than
+// reaching the success-marshal path. ctx.Err() is nil on this branch, so the
+// timeout fast-path is bypassed.
+func Test_handlePromptsGet_With_HandlerArgUnmarshalError_Should_ReturnInvalidParams(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — register a prompt whose required argument is typed as int.
+	// The wrapped handler in internal/prompts marshals the args map and
+	// unmarshals into the typed struct; passing "abc" for an int field forces
+	// a CodeError.
+	s := newTestServer(t)
+	reg := prompts.NewRegistry()
+	if err := prompts.Register(reg, "counter", "needs a number",
+		func(_ context.Context, _ intPromptInput) prompts.Result {
+			return prompts.Result{Description: "unreachable"}
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
+	s.prompts = reg
+
+	msg := protocol.Request{
+		JSONRPC: "2.0",
+		ID:      json.RawMessage(`1`),
+		Method:  "prompts/get",
+		Params:  json.RawMessage(`{"name":"counter","arguments":{"count":"abc"}}`),
+	}
+
+	// Act
+	resp := s.handlePromptsGet(context.Background(), msg)
+
+	// Assert
+	if resp.Error == nil {
+		t.Fatal("expected non-nil error response")
+	}
+	assert.That(t, "error code", resp.Error.Code, protocol.InvalidParams)
 }

@@ -99,10 +99,6 @@ func (s *Server) handleInitialize(ctx context.Context, msg protocol.Request) pro
 		ServerInfo:      serverInfo{Name: s.name, Version: s.version},
 	}
 
-	resp, err := protocol.NewResultResponse(msg.ID, result)
-	if err != nil {
-		loggerFromContext(ctx, s.logger).Error("marshal_initialize", "error", err)
-		return s.errorResponse(ctx, msg.ID, protocol.ErrInternalError("failed to marshal initialize result"))
-	}
-	return resp
+	return s.marshalResult(ctx, msg.ID, result,
+		"marshal_initialize", "failed to marshal initialize result")
 }

@@ -41,13 +41,9 @@ func (s *Server) handlePromptsMethod(ctx context.Context, msg protocol.Request) 
 
 // handlePromptsList returns all registered prompts.
 func (s *Server) handlePromptsList(ctx context.Context, msg protocol.Request) protocol.Response {
-	result := promptsListResult{Prompts: s.prompts.Prompts()}
-	resp, err := protocol.NewResultResponse(msg.ID, result)
-	if err != nil {
-		loggerFromContext(ctx, s.logger).Error("marshal_prompts_list", "error", err)
-		return s.errorResponse(ctx, msg.ID, protocol.ErrInternalError("failed to marshal prompts list"))
-	}
-	return resp
+	return s.marshalResult(ctx, msg.ID,
+		promptsListResult{Prompts: s.prompts.Prompts()},
+		"marshal_prompts_list", "failed to marshal prompts list")
 }
 
 // validatePromptArgs checks that required arguments are present and no
@@ -110,13 +106,7 @@ func (s *Server) handlePromptsGet(ctx context.Context, msg protocol.Request) pro
 		return s.errorResponse(ctx, msg.ID, err)
 	}
 
-	resp, rErr := protocol.NewResultResponse(msg.ID, promptsGetResult{
-		Description: result.Description,
-		Messages:    result.Messages,
-	})
-	if rErr != nil {
-		loggerFromContext(ctx, s.logger).Error("marshal_prompt_get", "error", rErr)
-		return s.errorResponse(ctx, msg.ID, protocol.ErrInternalError("failed to marshal prompt get result"))
-	}
-	return resp
+	return s.marshalResult(ctx, msg.ID,
+		promptsGetResult{Description: result.Description, Messages: result.Messages},
+		"marshal_prompt_get", "failed to marshal prompt get result")
 }

@@ -83,11 +83,7 @@ func (s *Server) supportedCapabilities() []string {
 
 // handleToolsList returns all registered tools.
 func (s *Server) handleToolsList(ctx context.Context, msg protocol.Request) protocol.Response {
-	result := toolsListResult{Tools: s.registry.Tools()}
-	resp, err := protocol.NewResultResponse(msg.ID, result)
-	if err != nil {
-		loggerFromContext(ctx, s.logger).Error("marshal_tools_list", "error", err)
-		return s.errorResponse(ctx, msg.ID, protocol.ErrInternalError("failed to marshal tools list"))
-	}
-	return resp
+	return s.marshalResult(ctx, msg.ID,
+		toolsListResult{Tools: s.registry.Tools()},
+		"marshal_tools_list", "failed to marshal tools list")
 }

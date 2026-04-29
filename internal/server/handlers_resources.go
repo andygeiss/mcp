@@ -48,24 +48,16 @@ func (s *Server) handleResourcesMethod(ctx context.Context, msg protocol.Request
 
 // handleResourcesList returns all registered static resources.
 func (s *Server) handleResourcesList(ctx context.Context, msg protocol.Request) protocol.Response {
-	result := resourcesListResult{Resources: s.resources.Resources()}
-	resp, err := protocol.NewResultResponse(msg.ID, result)
-	if err != nil {
-		loggerFromContext(ctx, s.logger).Error("marshal_resources_list", "error", err)
-		return s.errorResponse(ctx, msg.ID, protocol.ErrInternalError("failed to marshal resources list"))
-	}
-	return resp
+	return s.marshalResult(ctx, msg.ID,
+		resourcesListResult{Resources: s.resources.Resources()},
+		"marshal_resources_list", "failed to marshal resources list")
 }
 
 // handleResourcesTemplatesList returns all registered resource templates.
 func (s *Server) handleResourcesTemplatesList(ctx context.Context, msg protocol.Request) protocol.Response {
-	result := resourcesTemplatesListResult{ResourceTemplates: s.resources.Templates()}
-	resp, err := protocol.NewResultResponse(msg.ID, result)
-	if err != nil {
-		loggerFromContext(ctx, s.logger).Error("marshal_resources_templates_list", "error", err)
-		return s.errorResponse(ctx, msg.ID, protocol.ErrInternalError("failed to marshal resource templates list"))
-	}
-	return resp
+	return s.marshalResult(ctx, msg.ID,
+		resourcesTemplatesListResult{ResourceTemplates: s.resources.Templates()},
+		"marshal_resources_templates_list", "failed to marshal resource templates list")
 }
 
 // handleResourcesRead reads a specific resource by URI.
@@ -103,10 +95,7 @@ func (s *Server) handleResourcesRead(ctx context.Context, msg protocol.Request) 
 		return s.errorResponse(ctx, msg.ID, err)
 	}
 
-	resp, rErr := protocol.NewResultResponse(msg.ID, resourcesReadResult{Contents: result.Contents})
-	if rErr != nil {
-		loggerFromContext(ctx, s.logger).Error("marshal_resource_read", "error", rErr)
-		return s.errorResponse(ctx, msg.ID, protocol.ErrInternalError("failed to marshal resource read result"))
-	}
-	return resp
+	return s.marshalResult(ctx, msg.ID,
+		resourcesReadResult{Contents: result.Contents},
+		"marshal_resource_read", "failed to marshal resource read result")
 }
