@@ -1,0 +1,12 @@
+{
+  "properties": {
+    "message": {
+      "description": "The message to echo back",
+      "type": "string"
+    }
+  },
+  "required": [
+    "message"
+  ],
+  "type": "object"
+}
