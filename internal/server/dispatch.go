@@ -80,15 +80,33 @@ func (s *Server) dispatchByState(ctx context.Context, msg protocol.Request) prot
 
 // errorResponse builds a JSON-RPC error response from any error. If the error
 // is a *protocol.CodeError, its code and message are used directly.
-// Otherwise, the error falls back to -32603 (internal error).
+// Otherwise, the error falls back to -32603 (internal error). The id is
+// normalized to null when structurally invalid, per JSON-RPC 2.0 §5
+// ("If there was an error in detecting the id [...] it MUST be Null.").
 func (s *Server) errorResponse(id json.RawMessage, err error) protocol.Response {
 	s.errorCount.Add(1)
+	id = sanitizeErrorID(id)
 	pe, ok := errors.AsType[*protocol.CodeError](err)
 	if !ok {
 		s.logger.Error("internal_error", "error", err)
 		return protocol.NewErrorResponse(id, protocol.InternalError, "internal error")
 	}
 	return protocol.NewErrorResponseFromCodeError(id, pe)
+}
+
+// sanitizeErrorID returns id unchanged when it is structurally valid (null,
+// number, or quoted string); otherwise it returns null. The leading-byte
+// check matches protocol.Validate so a request that fails id-validation
+// never has its malformed id echoed back on the wire.
+func sanitizeErrorID(id json.RawMessage) json.RawMessage {
+	if len(id) == 0 {
+		return id
+	}
+	switch id[0] {
+	case 'n', '"', '-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+		return id
+	}
+	return protocol.NullID()
 }
 
 // handleNotification processes notification messages (no response sent).
