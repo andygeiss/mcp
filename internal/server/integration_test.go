@@ -404,3 +404,40 @@ func parseResponses(t *testing.T, buf *bytes.Buffer) []protocol.Response {
 	}
 	return responses
 }
+
+// alwaysFailWriter returns an error on every Write — used to drive the
+// encoder-error branch in handleDecodeError when the structural-limit
+// response cannot be flushed to stdout.
+type alwaysFailWriter struct{}
+
+func (alwaysFailWriter) Write(_ []byte) (int, error) {
+	return 0, io.ErrShortWrite
+}
+
+func Test_Server_With_StructuralLimit_AndFailingStdout_Should_LogEncodeError(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — drive an oversized-string request through a server whose
+	// stdout always errors. The structural-limit branch in handleDecodeError
+	// must log the encode failure on stderr (the only observable signal,
+	// since stdout is broken). No initialize is needed: structural-limit
+	// rejection runs before state-machine gating.
+	bigValue := strings.Repeat("a", protocol.MaxJSONStringLen+1)
+	input := `{"jsonrpc":"2.0","method":"x","id":1,"params":{"data":"` + bigValue + `"}}` + "\n"
+
+	var stderr bytes.Buffer
+	srv := server.NewServer("mcp", "test", testRegistry(), strings.NewReader(input), alwaysFailWriter{}, &stderr)
+
+	// Act — server should exit cleanly when the input ends, even with a
+	// failing stdout, because the structural-limit branch is non-fatal and
+	// the encode failure is logged rather than propagated.
+	_ = srv.Run(context.Background())
+
+	// Assert — encode_error key appears in the slog JSON output on stderr.
+	if !strings.Contains(stderr.String(), `"encode_error"`) {
+		t.Fatalf("expected encode_error log on stderr, got: %s", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), `"decode_structural_limit"`) {
+		t.Fatalf("expected decode_structural_limit log on stderr, got: %s", stderr.String())
+	}
+}
