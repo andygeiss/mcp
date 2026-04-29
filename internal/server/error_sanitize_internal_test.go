@@ -34,3 +34,40 @@ func Test_errorResponse_With_NonCodeError_Should_SanitizeMessage(t *testing.T) {
 		t.Error("expected internal error details to be logged to stderr")
 	}
 }
+
+func Test_sanitizeErrorID_Should_NormalizeMalformedIDs(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — table of (input, expected output) pairs covering valid types
+	// (null, number, negative number, string) and structurally invalid types
+	// (boolean, array, object). Per JSON-RPC 2.0 §5, invalid ids must surface
+	// as null on the wire.
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"empty (notification)", "", ""},
+		{"null", "null", "null"},
+		{"positive int", "42", "42"},
+		{"negative int", "-7", "-7"},
+		{"zero", "0", "0"},
+		{"string", `"abc"`, `"abc"`},
+		{"boolean true", "true", "null"},
+		{"boolean false", "false", "null"},
+		{"array", "[1,2]", "null"},
+		{"object", `{"a":1}`, "null"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Act
+			got := sanitizeErrorID(json.RawMessage(tc.in))
+
+			// Assert
+			assert.That(t, "sanitized id", string(got), tc.want)
+		})
+	}
+}
