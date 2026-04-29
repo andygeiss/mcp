@@ -271,8 +271,8 @@ func Test_Integration_With_SlowHandler_Should_TimeoutAndContinue(t *testing.T) {
 func Test_Integration_With_OversizedMessage_Should_Reject(t *testing.T) {
 	t.Parallel()
 
-	// Arrange — 5MB message exceeds 4MB limit
-	bigValue := strings.Repeat("a", 5*1024*1024)
+	// Arrange — 17 MiB message exceeds 16 MiB envelope cap
+	bigValue := strings.Repeat("a", 17*1024*1024)
 	input := `{"jsonrpc":"2.0","method":"ping","id":1,"params":{"data":"` + bigValue + `"}}` + "\n"
 
 	var stdout, stderr bytes.Buffer

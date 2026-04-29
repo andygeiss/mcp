@@ -260,7 +260,7 @@ func (s *Server) handleDecodeError(err error) error {
 	var wire string
 	switch {
 	case isTooLarge:
-		wire = "message exceeds 4MB size limit"
+		wire = "message exceeds 16MB size limit"
 	case errors.Is(err, protocol.ErrBatchNotSupported):
 		wire = protocol.ErrBatchNotSupported.Error()
 	case errors.Is(err, protocol.ErrJSONDepthExceeded):

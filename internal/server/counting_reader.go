@@ -5,19 +5,22 @@ import (
 	"io"
 )
 
-// maxMessageSize is the per-message safety limit (4 MB). The countingReader
-// is reset before each dec.Decode call, but the json.Decoder
+// maxMessageSize is the per-message safety limit (16 MiB). Sized to preserve
+// a 1:4 ratio with MaxJSONStringLen (4 MiB) so a single max-size string plus
+// envelope, metadata, and a second medium field fits under the cap. The
+// countingReader is reset before each dec.Decode call, but the json.Decoder
 // reads ahead into an internal buffer (typically 4–64 KB in the stdlib). The
-// counting reader sees these buffered reads, not individual message boundaries,
-// so the effective enforcement point is between 4 MB and 4 MB + one buffer
-// fill. This imprecision is acceptable for a safety limit whose goal is
-// preventing abuse, not byte-exact enforcement.
+// counting reader sees these buffered reads, not individual message
+// boundaries, so the effective enforcement point is between 16 MiB and
+// 16 MiB + one buffer fill. This imprecision is acceptable for a safety
+// limit whose goal is preventing abuse, not byte-exact enforcement.
+// See docs/adr/ADR-004-decode-limits.md.
 const (
-	maxMessageSize = 4 * 1024 * 1024 // 4 MB
-	maxResultSize  = 1 * 1024 * 1024 // 1 MB
+	maxMessageSize = 16 * 1024 * 1024 // 16 MiB
+	maxResultSize  = 1 * 1024 * 1024  // 1 MiB
 )
 
-var errMessageTooLarge = errors.New("message exceeds 4MB size limit")
+var errMessageTooLarge = errors.New("message exceeds 16MB size limit")
 
 // countingReader wraps an io.Reader and tracks bytes read since the last reset.
 type countingReader struct {

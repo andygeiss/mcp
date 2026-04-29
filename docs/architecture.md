@@ -87,7 +87,7 @@ internal/server/      The lifecycle, dispatch, and bidi transport layer.
 
 ## Transport
 
-- **stdin:** persistent `json.NewDecoder` for the process lifetime. **No `bufio.Scanner`** (its 64 KB token cap silently truncates). Per-message size capped at 4 MB via a counting reader that **resets per message** — `io.LimitReader` is cumulative and would silently strangle long-lived connections.
+- **stdin:** persistent `json.NewDecoder` for the process lifetime. **No `bufio.Scanner`** (its 64 KB token cap silently truncates). Per-message size capped at 16 MiB via a counting reader that **resets per message** — `io.LimitReader` is cumulative and would silently strangle long-lived connections. See [ADR-004](./adr/ADR-004-decode-limits.md).
 - **stdout:** every byte must be a valid JSON-RPC message. A stray `fmt.Println` corrupts the wire and the client disconnects silently. Enforced by `forbidigo` lint rules in `.golangci.yml` (Invariant I4).
 - **stderr:** `log/slog` with `slog.JSONHandler` exclusively. No plain `log.Print`.
 - **EOF semantics:** `io.EOF` / `io.ErrUnexpectedEOF` → clean shutdown (exit 0). All other decode errors → fatal (exit 1).
@@ -142,8 +142,10 @@ This means adding a tool is: define an input struct → write `func(ctx, T) Resu
 
 ## Resilience
 
-- **Per-message cap:** 4 MB (counting reader).
+- **Per-message cap:** 16 MiB (counting reader). See [ADR-004](./adr/ADR-004-decode-limits.md).
 - **JSON depth cap:** 64 (`MaxJSONDepth`) — prevents stack-exhaustion attacks; codec scans for balanced `{` / `[` before `Unmarshal`.
+- **Per-object key cap:** 10 000 (`MaxJSONKeysPerObject`) — prevents map-allocation amplification.
+- **Per-string raw-byte cap:** 4 MiB (`MaxJSONStringLen`) — non-fatal `-32001` on breach so the connection survives.
 - **Handler timeout:** 30 seconds (`defaultHandlerTimeout`); on expiry the handler is cancelled and the client receives `-32001` (`ServerTimeout`).
 - **Pending map cap:** 1024 (`maxPendingRequests`); excess returns `protocol.ErrPendingRequestsFull`.
 - **Panic recovery:** handlers run inside a recovery wrapper; panics become `-32603` (`InternalError`).

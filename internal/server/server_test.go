@@ -444,8 +444,8 @@ func Test_Server_With_ReservedRpcMethod_Should_Return32601(t *testing.T) {
 func Test_Server_With_OversizedMessage_Should_Return32700(t *testing.T) {
 	t.Parallel()
 
-	// Arrange — 5MB message exceeds 4MB limit
-	bigValue := strings.Repeat("a", 5*1024*1024)
+	// Arrange — 17 MiB message exceeds 16 MiB envelope cap
+	bigValue := strings.Repeat("a", 17*1024*1024)
 	input := `{"jsonrpc":"2.0","method":"ping","id":1,"params":{"data":"` + bigValue + `"}}` + "\n"
 
 	// Act
@@ -2231,8 +2231,10 @@ func Test_Server_With_NotificationInvalidJsonrpc_Should_SilentlyIgnore(t *testin
 func Test_Server_With_SizeExceededDuringIdle_Should_Return32700(t *testing.T) {
 	t.Parallel()
 
-	// Arrange — complete handshake first, then oversized message
-	bigValue := strings.Repeat("a", 5*1024*1024)
+	// Arrange — complete handshake first, then 17 MiB message exceeds the
+	// 16 MiB envelope cap (4 MiB string cap is non-fatal -32001; envelope
+	// breach is fatal -32700).
+	bigValue := strings.Repeat("a", 17*1024*1024)
 	input := handshake() + `{"jsonrpc":"2.0","method":"ping","id":2,"params":{"data":"` + bigValue + `"}}` + "\n"
 
 	// Act
@@ -2733,9 +2735,9 @@ func Test_Server_With_SizeExceededDuringInFlight_Should_HandleGracefully(t *test
 	// Wait for handler to actually start
 	<-handlerReady
 
-	// Send oversized message (>4MB) while handler is in flight.
+	// Send oversized message (>16 MiB) while handler is in flight.
 	// Write in a goroutine because the pipe blocks until the server reads it.
-	bigValue := strings.Repeat("a", 5*1024*1024)
+	bigValue := strings.Repeat("a", 17*1024*1024)
 	go func() {
 		_, _ = fmt.Fprintf(pw, `{"jsonrpc":"2.0","method":"ping","id":3,"params":{"data":"%s"}}`, bigValue)
 		_, _ = io.WriteString(pw, "\n")
