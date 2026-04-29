@@ -120,7 +120,10 @@ func (s *Server) handleDecodeResultDuringInFlight(ctx context.Context, dr decode
 	default:
 	}
 
-	if err := s.handleMessageDuringInFlight(dr.msg); err != nil {
+	// Inject per-request logger so any errorResponse pulled in this branch
+	// auto-injects request_id (M3).
+	ctx = withRequestLogger(ctx, s.logger, dr.msg.ID)
+	if err := s.handleMessageDuringInFlight(ctx, dr.msg); err != nil {
 		s.cancelAndAwaitInFlight()
 		return err
 	}
@@ -179,7 +182,7 @@ func (s *Server) handleDecodeResultIdle(ctx context.Context, dr decodeResult) er
 	// Intercept tools/call for async dispatch when ready.
 	if dr.msg.Method == protocol.MethodToolsCall && s.state == stateReady && len(dr.msg.ID) > 0 {
 		if vErr := protocol.Validate(dr.msg); vErr != nil {
-			return s.encodeResponse(s.errorResponse(dr.msg.ID, vErr))
+			return s.encodeResponse(s.errorResponse(ctx, dr.msg.ID, vErr))
 		}
 		errResp, started := s.startToolCallAsync(ctx, dr.msg)
 		if !started {
@@ -199,15 +202,15 @@ func (s *Server) handleDecodeResultIdle(ctx context.Context, dr decodeResult) er
 // handleMessageDuringInFlight processes messages that arrive while a tool
 // handler is executing. Ping is answered immediately; notifications (including
 // cancellation) are handled normally; all other requests are rejected with
-// -32600 because dispatch is sequential.
-func (s *Server) handleMessageDuringInFlight(msg protocol.Request) error {
+// -32600 since maxInFlight is 1.
+func (s *Server) handleMessageDuringInFlight(ctx context.Context, msg protocol.Request) error {
 	isNotification := len(msg.ID) == 0
 
 	if vErr := protocol.Validate(msg); vErr != nil {
 		if isNotification {
 			return nil
 		}
-		return s.encodeResponse(s.errorResponse(msg.ID, vErr))
+		return s.encodeResponse(s.errorResponse(ctx, msg.ID, vErr))
 	}
 
 	if isNotification {
@@ -216,14 +219,11 @@ func (s *Server) handleMessageDuringInFlight(msg protocol.Request) error {
 	}
 
 	if msg.Method == protocol.MethodPing {
-		resp, err := protocol.NewResultResponse(msg.ID, json.RawMessage("{}"))
-		if err != nil {
-			return s.encodeResponse(s.errorResponse(msg.ID, protocol.ErrInternalError("failed to marshal ping result")))
-		}
-		return s.encodeResponse(resp)
+		return s.encodeResponse(s.marshalResult(ctx, msg.ID, json.RawMessage("{}"),
+			"marshal_ping_result", "failed to marshal ping result"))
 	}
 
-	return s.encodeResponse(s.errorResponse(msg.ID, protocol.ErrServerError("server busy: request in flight (sequential dispatch)")))
+	return s.encodeResponse(s.errorResponse(ctx, msg.ID, protocol.ErrServerError("server busy: request in flight (maxInFlight is 1)")))
 }
 
 // handleDecodeError processes errors from the decoder, returning nil for clean

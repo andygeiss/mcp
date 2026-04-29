@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
+	"runtime"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -184,7 +186,9 @@ func NewServer(name, version string, registry *tools.Registry, stdin io.Reader, 
 func (s *Server) Run(ctx context.Context) error {
 	startTime := time.Now()
 	s.logger.Info("server_started",
+		"go_version", runtime.Version(),
 		"name", s.name,
+		"pid", os.Getpid(),
 		"protocol_version", protocol.MCPVersion,
 		"tools", s.registry.Names(),
 		"version", s.version,
