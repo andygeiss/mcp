@@ -200,7 +200,7 @@ func Test_handleToolsList_With_ValidRegistry_Should_ReturnTools(t *testing.T) {
 	}
 
 	// Act
-	resp := s.handleToolsList(msg)
+	resp := s.handleToolsList(context.Background(), msg)
 
 	// Assert
 	assert.That(t, "no error", resp.Error == nil, true)
@@ -225,7 +225,7 @@ func Test_handleInitialize_With_ValidRequest_Should_ReturnCapabilities(t *testin
 	}
 
 	// Act
-	resp := s.handleInitialize(msg)
+	resp := s.handleInitialize(context.Background(), msg)
 
 	// Assert
 	assert.That(t, "no error", resp.Error == nil, true)
@@ -249,7 +249,7 @@ func Test_handleInitialize_With_SupportedProtocolVersion_Should_EchoClientVersio
 	}
 
 	// Act
-	resp := s.handleInitialize(msg)
+	resp := s.handleInitialize(context.Background(), msg)
 
 	// Assert
 	var result struct {
@@ -275,7 +275,7 @@ func Test_handleInitialize_With_UnsupportedProtocolVersion_Should_ReturnServerVe
 	}
 
 	// Act
-	resp := s.handleInitialize(msg)
+	resp := s.handleInitialize(context.Background(), msg)
 
 	// Assert
 	var result struct {
@@ -303,7 +303,7 @@ func Test_handleInitialize_With_AllRegistries_Should_AdvertiseAllCapabilities(t 
 	}
 
 	// Act
-	resp := s.handleInitialize(msg)
+	resp := s.handleInitialize(context.Background(), msg)
 
 	// Assert
 	assert.That(t, "no error", resp.Error == nil, true)
@@ -339,7 +339,7 @@ func Test_handleLoggingSetLevel_With_ValidLevel_Should_Succeed(t *testing.T) {
 	}
 
 	// Act
-	resp := s.handleLoggingSetLevel(msg)
+	resp := s.handleLoggingSetLevel(context.Background(), msg)
 
 	// Assert
 	assert.That(t, "no error", resp.Error == nil, true)
@@ -588,7 +588,7 @@ func Test_handleMessageDuringInFlight_With_ServerBusy_Should_ReturnBusyError(t *
 	}
 
 	// Act
-	err := s.handleMessageDuringInFlight(msg)
+	err := s.handleMessageDuringInFlight(context.Background(), msg)
 
 	// Assert — server encodes the busy error response, no fatal error
 	assert.That(t, "no fatal error", err, nil)
@@ -610,7 +610,7 @@ func Test_handleMessageDuringInFlight_With_PingDuringInFlight_Should_RespondWith
 	}
 
 	// Act
-	err := s.handleMessageDuringInFlight(msg)
+	err := s.handleMessageDuringInFlight(context.Background(), msg)
 
 	// Assert
 	assert.That(t, "no error", err, nil)
@@ -631,7 +631,7 @@ func Test_handleMessageDuringInFlight_With_NotificationDuringInFlight_Should_Han
 	}
 
 	// Act
-	err := s.handleMessageDuringInFlight(msg)
+	err := s.handleMessageDuringInFlight(context.Background(), msg)
 
 	// Assert
 	assert.That(t, "no error", err, nil)
@@ -651,7 +651,7 @@ func Test_handleMessageDuringInFlight_With_InvalidNotification_Should_IgnoreSile
 	}
 
 	// Act
-	err := s.handleMessageDuringInFlight(msg)
+	err := s.handleMessageDuringInFlight(context.Background(), msg)
 
 	// Assert
 	assert.That(t, "no error", err, nil)
@@ -672,7 +672,7 @@ func Test_handleMessageDuringInFlight_With_InvalidRequest_Should_ReturnValidatio
 	}
 
 	// Act
-	err := s.handleMessageDuringInFlight(msg)
+	err := s.handleMessageDuringInFlight(context.Background(), msg)
 
 	// Assert — server encodes error response, no fatal error
 	assert.That(t, "no fatal error", err, nil)
@@ -896,7 +896,7 @@ func Test_handleResourcesList_With_Registry_Should_ReturnResources(t *testing.T)
 	}
 
 	// Act
-	resp := s.handleResourcesList(msg)
+	resp := s.handleResourcesList(context.Background(), msg)
 
 	// Assert
 	assert.That(t, "no error", resp.Error == nil, true)
@@ -925,7 +925,7 @@ func Test_handlePromptsList_With_Registry_Should_ReturnPrompts(t *testing.T) {
 	}
 
 	// Act
-	resp := s.handlePromptsList(msg)
+	resp := s.handlePromptsList(context.Background(), msg)
 
 	// Assert
 	assert.That(t, "no error", resp.Error == nil, true)
@@ -1195,7 +1195,7 @@ func Test_handleMessageDuringInFlight_With_BrokenWriter_Should_ReturnError(t *te
 	}
 
 	// Act — encoding the busy error response will fail, triggering cancelAndAwaitInFlight
-	err := s.handleMessageDuringInFlight(msg)
+	err := s.handleMessageDuringInFlight(context.Background(), msg)
 
 	// Assert — should return encode error
 	if err == nil {

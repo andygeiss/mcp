@@ -31,21 +31,21 @@ type promptsGetResult struct {
 func (s *Server) handlePromptsMethod(ctx context.Context, msg protocol.Request) protocol.Response {
 	switch msg.Method {
 	case protocol.MethodPromptsList:
-		return s.handlePromptsList(msg)
+		return s.handlePromptsList(ctx, msg)
 	case protocol.MethodPromptsGet:
 		return s.handlePromptsGet(ctx, msg)
 	default:
-		return s.errorResponse(msg.ID, protocol.ErrMethodNotFound("unknown method: "+msg.Method))
+		return s.errorResponse(ctx, msg.ID, protocol.ErrMethodNotFound("unknown method: "+msg.Method))
 	}
 }
 
 // handlePromptsList returns all registered prompts.
-func (s *Server) handlePromptsList(msg protocol.Request) protocol.Response {
+func (s *Server) handlePromptsList(ctx context.Context, msg protocol.Request) protocol.Response {
 	result := promptsListResult{Prompts: s.prompts.Prompts()}
 	resp, err := protocol.NewResultResponse(msg.ID, result)
 	if err != nil {
-		s.logger.Error("marshal_prompts_list", "error", err)
-		return s.errorResponse(msg.ID, protocol.ErrInternalError("failed to marshal prompts list"))
+		loggerFromContext(ctx, s.logger).Error("marshal_prompts_list", "error", err)
+		return s.errorResponse(ctx, msg.ID, protocol.ErrInternalError("failed to marshal prompts list"))
 	}
 	return resp
 }
@@ -74,15 +74,15 @@ func validatePromptArgs(prompt prompts.Prompt, args map[string]string) error {
 func (s *Server) handlePromptsGet(ctx context.Context, msg protocol.Request) protocol.Response {
 	var params promptsGetParams
 	if err := json.Unmarshal(msg.Params, &params); err != nil {
-		return s.errorResponse(msg.ID, protocol.ErrInvalidParams(fmt.Sprintf("invalid prompts/get params: %v", err)))
+		return s.errorResponse(ctx, msg.ID, protocol.ErrInvalidParams(fmt.Sprintf("invalid prompts/get params: %v", err)))
 	}
 	if params.Name == "" {
-		return s.errorResponse(msg.ID, protocol.ErrInvalidParams("name is required"))
+		return s.errorResponse(ctx, msg.ID, protocol.ErrInvalidParams("name is required"))
 	}
 
 	prompt, ok := s.prompts.Lookup(params.Name)
 	if !ok {
-		return s.errorResponse(msg.ID, protocol.ErrInvalidParams("unknown prompt: "+params.Name))
+		return s.errorResponse(ctx, msg.ID, protocol.ErrInvalidParams("unknown prompt: "+params.Name))
 	}
 
 	args := params.Arguments
@@ -91,7 +91,7 @@ func (s *Server) handlePromptsGet(ctx context.Context, msg protocol.Request) pro
 	}
 
 	if err := validatePromptArgs(prompt, args); err != nil {
-		return s.errorResponse(msg.ID, err)
+		return s.errorResponse(ctx, msg.ID, err)
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, s.handlerTimeout)
@@ -101,13 +101,13 @@ func (s *Server) handlePromptsGet(ctx context.Context, msg protocol.Request) pro
 	// Timeout/cancellation maps to ServerTimeout regardless of the handler's
 	// return value — consistent with tools/call and MCP §Error Codes.
 	if ctx.Err() != nil {
-		return s.errorResponse(msg.ID, &protocol.CodeError{
+		return s.errorResponse(ctx, msg.ID, &protocol.CodeError{
 			Code:    protocol.ServerTimeout,
 			Message: fmt.Sprintf("prompt %q execution timed out", params.Name),
 		})
 	}
 	if err != nil {
-		return s.errorResponse(msg.ID, err)
+		return s.errorResponse(ctx, msg.ID, err)
 	}
 
 	resp, rErr := protocol.NewResultResponse(msg.ID, promptsGetResult{
@@ -115,8 +115,8 @@ func (s *Server) handlePromptsGet(ctx context.Context, msg protocol.Request) pro
 		Messages:    result.Messages,
 	})
 	if rErr != nil {
-		s.logger.Error("marshal_prompt_get", "error", rErr)
-		return s.errorResponse(msg.ID, protocol.ErrInternalError("failed to marshal prompt get result"))
+		loggerFromContext(ctx, s.logger).Error("marshal_prompt_get", "error", rErr)
+		return s.errorResponse(ctx, msg.ID, protocol.ErrInternalError("failed to marshal prompt get result"))
 	}
 	return resp
 }

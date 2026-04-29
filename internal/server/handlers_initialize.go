@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 
 	"github.com/andygeiss/mcp/internal/protocol"
@@ -54,11 +55,11 @@ type clientInfo struct {
 // server supports the client's protocolVersion it echoes that version back;
 // otherwise it responds with its own supported version and the client decides
 // whether to proceed.
-func (s *Server) handleInitialize(msg protocol.Request) protocol.Response {
+func (s *Server) handleInitialize(ctx context.Context, msg protocol.Request) protocol.Response {
 	var params initializeParams
 	_ = json.Unmarshal(msg.Params, &params)
 
-	s.logger.Info("server_initializing",
+	loggerFromContext(ctx, s.logger).Info("server_initializing",
 		"client_name", params.ClientInfo.Name,
 		"client_version", params.ClientInfo.Version,
 		"client_protocol_version", params.ProtocolVersion,
@@ -102,8 +103,8 @@ func (s *Server) handleInitialize(msg protocol.Request) protocol.Response {
 
 	resp, err := protocol.NewResultResponse(msg.ID, result)
 	if err != nil {
-		s.logger.Error("marshal_initialize", "error", err)
-		return s.errorResponse(msg.ID, protocol.ErrInternalError("failed to marshal initialize result"))
+		loggerFromContext(ctx, s.logger).Error("marshal_initialize", "error", err)
+		return s.errorResponse(ctx, msg.ID, protocol.ErrInternalError("failed to marshal initialize result"))
 	}
 	return resp
 }

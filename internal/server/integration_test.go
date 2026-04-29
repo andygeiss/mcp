@@ -390,6 +390,99 @@ func Test_Server_With_TooManyKeys_Should_RejectNonFatallyAndContinue(t *testing.
 	assert.That(t, "ping result", string(responses[2].Result), "{}")
 }
 
+// Test_Server_With_UnknownTool_Should_CarryStructuredErrorData verifies M2:
+// the -32602 unknown-tool response carries structured error.data with the
+// rejected field name, the value the client sent, and the list of valid
+// alternatives. Operators read this without source diving.
+func Test_Server_With_UnknownTool_Should_CarryStructuredErrorData(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — initialize, then call a non-existent tool.
+	input := handshake() +
+		`{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"missing","arguments":{}}}` + "\n"
+
+	var stdout, stderr bytes.Buffer
+	srv := server.NewServer("mcp", "test", testRegistry(), strings.NewReader(input), &stdout, &stderr)
+
+	// Act
+	_ = srv.Run(context.Background())
+
+	// Assert
+	responses := parseResponses(t, &stdout)
+	assert.That(t, "response count", len(responses), 2)
+	assert.That(t, "error code", responses[1].Error.Code, protocol.InvalidParams)
+
+	if len(responses[1].Error.Data) == 0 {
+		t.Fatalf("expected error.data on wire, got: %+v", responses[1].Error)
+	}
+	var data struct {
+		Expected []string `json:"expected"`
+		Field    string   `json:"field"`
+		Got      string   `json:"got"`
+	}
+	if err := json.Unmarshal(responses[1].Error.Data, &data); err != nil {
+		t.Fatalf("error.data is not valid JSON: %v (%s)", err, responses[1].Error.Data)
+	}
+	assert.That(t, "field", data.Field, "name")
+	assert.That(t, "got", data.Got, "missing")
+	if len(data.Expected) == 0 {
+		t.Errorf("expected non-empty expected list, got %v", data.Expected)
+	}
+}
+
+// Test_Server_With_Initialize_Should_LogRequestIDOnStderr verifies M3:
+// per-request slog.Logger auto-injection. The `server_initializing` log line
+// emitted by handleInitialize must carry `request_id` attribute matching the
+// id of the initialize request, without manual plumbing.
+func Test_Server_With_Initialize_Should_LogRequestIDOnStderr(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — initialize request with a distinctive id so we can spot the
+	// echo in stderr unambiguously.
+	input := `{"jsonrpc":"2.0","method":"initialize","id":7777,"params":{"capabilities":{},"clientInfo":{"name":"test","version":"v0"}}}` + "\n"
+
+	var stdout, stderr bytes.Buffer
+	srv := server.NewServer("mcp", "test", testRegistry(), strings.NewReader(input), &stdout, &stderr)
+
+	// Act
+	_ = srv.Run(context.Background())
+
+	// Assert — the server_initializing log line carries request_id=7777.
+	logs := stderr.String()
+	if !strings.Contains(logs, `"server_initializing"`) {
+		t.Fatalf("expected server_initializing log, got: %s", logs)
+	}
+	if !strings.Contains(logs, `"request_id":"7777"`) {
+		t.Fatalf("expected request_id=7777 in server_initializing log, got: %s", logs)
+	}
+}
+
+// Test_Server_Started_Should_LogPidAndGoVersion verifies Q41: stderr startup
+// banner includes pid and go_version so an operator's first command gives
+// them everything needed to confirm the server is alive.
+func Test_Server_Started_Should_LogPidAndGoVersion(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	var stdout, stderr bytes.Buffer
+	srv := server.NewServer("mcp", "test", testRegistry(), strings.NewReader(""), &stdout, &stderr)
+
+	// Act
+	_ = srv.Run(context.Background())
+
+	// Assert
+	logs := stderr.String()
+	if !strings.Contains(logs, `"server_started"`) {
+		t.Fatalf("expected server_started log, got: %s", logs)
+	}
+	if !strings.Contains(logs, `"pid":`) {
+		t.Fatalf("expected pid in startup banner, got: %s", logs)
+	}
+	if !strings.Contains(logs, `"go_version":`) {
+		t.Fatalf("expected go_version in startup banner, got: %s", logs)
+	}
+}
+
 // parseResponses reads all JSON-RPC responses from the buffer.
 func parseResponses(t *testing.T, buf *bytes.Buffer) []protocol.Response {
 	t.Helper()
