@@ -44,6 +44,24 @@ const MaxConcurrentRequests = 1
 // legal MCP payloads while preventing stack-exhaustion attacks.
 const MaxJSONDepth = 64
 
+// MaxJSONKeysPerObject caps the number of keys allowed in any single JSON
+// object within a decoded message. Counted per-object scope (each `{` resets
+// the counter for that nesting level). Prevents amplification via legal-shape
+// payloads with millions of keys.
+//
+// TODO(M1b): value tuning + ADR-004 will revisit this limit alongside the
+// envelope cap raise.
+const MaxJSONKeysPerObject = 10_000
+
+// MaxJSONStringLen caps the raw byte length of any single JSON string literal
+// (including object keys and string values). Counted in raw bytes between the
+// surrounding quotes — a conservative over-estimate of decoded length, since
+// `\uXXXX` is 6 raw bytes that decode to at most 4 UTF-8 bytes.
+//
+// TODO(M1b): 1 MiB is conservative; M1b raises to 4 MiB once ADR-004 documents
+// the value-tuning rationale.
+const MaxJSONStringLen = 1 << 20
+
 // MCPVersion is the MCP protocol version advertised during initialize.
 const MCPVersion = "2025-11-25"
 

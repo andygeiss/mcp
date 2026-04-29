@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"io"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -315,6 +316,78 @@ func Test_Integration_With_UnknownTool_Should_Return32602(t *testing.T) {
 	if !strings.Contains(responses[1].Error.Message, "nonexistent") {
 		t.Errorf("expected tool name in error, got: %s", responses[1].Error.Message)
 	}
+}
+
+func Test_Server_With_OversizedString_Should_RejectNonFatallyAndContinue(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — handshake, then a request whose params hold a string longer
+	// than MaxJSONStringLen, then a valid ping. The connection must survive
+	// the structural-limit rejection so the ping response arrives.
+	bigValue := strings.Repeat("a", protocol.MaxJSONStringLen+1)
+	input := handshake() +
+		`{"jsonrpc":"2.0","method":"ping","id":2,"params":{"data":"` + bigValue + `"}}` + "\n" +
+		`{"jsonrpc":"2.0","method":"ping","id":3,"params":{}}` + "\n"
+
+	var stdout, stderr bytes.Buffer
+	srv := server.NewServer("mcp", "test", testRegistry(), strings.NewReader(input), &stdout, &stderr)
+
+	// Act
+	err := srv.Run(context.Background())
+
+	// Assert — connection survives, ping after the rejection succeeds.
+	assert.That(t, "run error", err, nil)
+
+	responses := parseResponses(t, &stdout)
+	assert.That(t, "response count", len(responses), 3) // init + structural error + ping
+	assert.That(t, "init id", string(responses[0].ID), "1")
+	assert.That(t, "structural error id", string(responses[1].ID), "null")
+	assert.That(t, "structural error code", responses[1].Error.Code, protocol.ServerTimeout)
+	if !strings.Contains(responses[1].Error.Message, "maxStringLength") {
+		t.Errorf("expected maxStringLength in error, got: %s", responses[1].Error.Message)
+	}
+	assert.That(t, "ping id", string(responses[2].ID), "3")
+	assert.That(t, "ping result", string(responses[2].Result), "{}")
+}
+
+func Test_Server_With_TooManyKeys_Should_RejectNonFatallyAndContinue(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — handshake, then params object with MaxJSONKeysPerObject + 1 keys,
+	// then a valid ping that proves the connection survived.
+	var sb strings.Builder
+	sb.WriteString(handshake())
+	sb.WriteString(`{"jsonrpc":"2.0","method":"ping","id":2,"params":{`)
+	for i := range protocol.MaxJSONKeysPerObject + 1 {
+		if i > 0 {
+			sb.WriteByte(',')
+		}
+		sb.WriteString(`"k`)
+		sb.WriteString(strconv.Itoa(i))
+		sb.WriteString(`":1`)
+	}
+	sb.WriteString("}}\n")
+	sb.WriteString(`{"jsonrpc":"2.0","method":"ping","id":3,"params":{}}` + "\n")
+
+	var stdout, stderr bytes.Buffer
+	srv := server.NewServer("mcp", "test", testRegistry(), strings.NewReader(sb.String()), &stdout, &stderr)
+
+	// Act
+	err := srv.Run(context.Background())
+
+	// Assert — connection survives, ping after the rejection succeeds.
+	assert.That(t, "run error", err, nil)
+
+	responses := parseResponses(t, &stdout)
+	assert.That(t, "response count", len(responses), 3) // init + structural error + ping
+	assert.That(t, "init id", string(responses[0].ID), "1")
+	assert.That(t, "structural error id", string(responses[1].ID), "null")
+	assert.That(t, "structural error code", responses[1].Error.Code, protocol.ServerTimeout)
+	if !strings.Contains(responses[1].Error.Message, "maxKeysPerObject") {
+		t.Errorf("expected maxKeysPerObject in error, got: %s", responses[1].Error.Message)
+	}
+	assert.That(t, "ping id", string(responses[2].ID), "3")
+	assert.That(t, "ping result", string(responses[2].Result), "{}")
 }
 
 // parseResponses reads all JSON-RPC responses from the buffer.

@@ -61,6 +61,21 @@ func Fuzz_Decoder_With_ArbitraryInput(f *testing.F) {
 	// Scientific notation ID — must be rejected
 	f.Add(`{"jsonrpc":"2.0","method":"ping","id":1e308,"params":{}}`)
 
+	// M1a structural-limit seeds — exercise key-count, string-length, and the
+	// depth-underflow guard. Each must error without panic.
+	f.Add(`{"jsonrpc":"2.0","method":"x","params":{"a":1,"a":1,"a":1,"a":1,"a":1,"a":1,"a":1,"a":1,"a":1,"a":1,"a":1}}`)
+	f.Add(`{"jsonrpc":"2.0","method":"x","params":{"d":"` + strings.Repeat("a", 4096) + `"}}`)
+	f.Add(`]`)
+	f.Add(`]]]]`)
+	f.Add(`{}}`)
+	f.Add(`[}`)
+	f.Add(`{]`)
+	f.Add(`{"a":"\""]`)
+	f.Add(`{"a":"]]]"}`)
+	// Depth boundary — wrap nested arrays inside a valid envelope so the
+	// depth guard is exercised independently of batch detection.
+	f.Add(`{"jsonrpc":"2.0","method":"x","params":{"a":` + strings.Repeat("[", 65) + strings.Repeat("]", 65) + `}}`)
+
 	f.Fuzz(func(_ *testing.T, input string) {
 		dec := json.NewDecoder(strings.NewReader(input))
 		// Must not panic — errors are acceptable

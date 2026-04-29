@@ -44,10 +44,10 @@ func (s *Server) runInFlight(ctx context.Context, decodeCh chan decodeResult, st
 			return nil
 		}
 		err := s.handleDecodeResultDuringInFlight(ctx, dr)
-		if err != nil || dr.err != nil || dr.exceeded {
-			if err != nil {
-				return err
-			}
+		if err != nil {
+			return err
+		}
+		if (dr.err != nil && !isNonFatalDecodeError(dr.err)) || dr.exceeded {
 			return errShutdown
 		}
 		startDecode()
@@ -70,10 +70,10 @@ func (s *Server) runIdle(ctx context.Context, decodeCh chan decodeResult, startD
 			return nil
 		}
 		err := s.handleDecodeResultIdle(ctx, dr)
-		if err != nil || dr.err != nil || dr.exceeded {
-			if err != nil {
-				return err
-			}
+		if err != nil {
+			return err
+		}
+		if (dr.err != nil && !isNonFatalDecodeError(dr.err)) || dr.exceeded {
 			return errShutdown
 		}
 		startDecode()
@@ -82,6 +82,15 @@ func (s *Server) runIdle(ctx context.Context, decodeCh chan decodeResult, startD
 	case <-ctx.Done():
 		return errShutdown
 	}
+}
+
+// isNonFatalDecodeError reports whether err is a decode-time failure that the
+// dispatch loop should swallow rather than treat as connection-fatal. Today
+// that is limited to *protocol.StructuralLimitError (M1a key-count and
+// string-length caps).
+func isNonFatalDecodeError(err error) bool {
+	var sle *protocol.StructuralLimitError
+	return errors.As(err, &sle)
 }
 
 // handleDecodeResultDuringInFlight processes a decode result that arrived while
@@ -231,6 +240,22 @@ func (s *Server) handleDecodeError(err error) error {
 	}
 
 	s.errorCount.Add(1)
+
+	// M1a: structural-limit breaches (key-count / string-length) are
+	// non-fatal — emit a -32001 response (ServerTimeout reused per AC) and
+	// let the loop continue.
+	var sle *protocol.StructuralLimitError
+	if errors.As(err, &sle) {
+		s.logger.Warn("decode_structural_limit", "limit", sle.Limit, "actual", sle.Actual, "max", sle.Max)
+		resp := protocol.NewErrorResponse(protocol.NullID(), protocol.ServerTimeout, sle.Error())
+		s.stdoutMu.Lock()
+		encErr := protocol.Encode(s.enc, resp)
+		s.stdoutMu.Unlock()
+		if encErr != nil {
+			s.logger.Error("encode_error", "error", encErr)
+		}
+		return nil
+	}
 
 	var wire string
 	switch {
