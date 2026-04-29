@@ -22,11 +22,16 @@ type cancelledParams struct {
 func (s *Server) dispatch(ctx context.Context, msg protocol.Request) (protocol.Response, bool) {
 	isNotification := len(msg.ID) == 0
 
+	// Inject a per-request slog.Logger seeded with request_id so anything
+	// downstream (errorResponse, handlers, etc.) that pulls a logger from
+	// ctx gets the attribute for free.
+	ctx = withRequestLogger(ctx, s.logger, msg.ID)
+
 	if vErr := protocol.Validate(msg); vErr != nil {
 		if isNotification {
 			return protocol.Response{}, false
 		}
-		return s.errorResponse(msg.ID, vErr), true
+		return s.errorResponse(ctx, msg.ID, vErr), true
 	}
 
 	if isNotification {
@@ -36,17 +41,14 @@ func (s *Server) dispatch(ctx context.Context, msg protocol.Request) (protocol.R
 
 	// ping always works in any state.
 	if msg.Method == protocol.MethodPing {
-		resp, err := protocol.NewResultResponse(msg.ID, json.RawMessage("{}"))
-		if err != nil {
-			return s.errorResponse(msg.ID, protocol.ErrInternalError("failed to marshal ping result")), true
-		}
-		return resp, true
+		return s.marshalResult(ctx, msg.ID, json.RawMessage("{}"),
+			"marshal_ping_result", "failed to marshal ping result"), true
 	}
 
 	// rpc.* is reserved by JSON-RPC 2.0 §4.3 — reject in any state with
 	// -32601 (method not found), never the state-gate -32000.
 	if strings.HasPrefix(msg.Method, protocol.PrefixRPC) {
-		return s.errorResponse(msg.ID, protocol.ErrMethodNotFound("reserved method: "+msg.Method)), true
+		return s.errorResponse(ctx, msg.ID, protocol.ErrMethodNotFound("reserved method: "+msg.Method)), true
 	}
 
 	return s.dispatchByState(ctx, msg), true
@@ -57,38 +59,39 @@ func (s *Server) dispatchByState(ctx context.Context, msg protocol.Request) prot
 	switch s.state {
 	case stateUninitialized:
 		if msg.Method != protocol.MethodInitialize {
-			return s.errorResponse(msg.ID, protocol.ErrServerError("server not initialized (send initialize first)"))
+			return s.errorResponse(ctx, msg.ID, protocol.ErrServerError("server not initialized (send initialize first)"))
 		}
-		return s.handleInitialize(msg)
+		return s.handleInitialize(ctx, msg)
 
 	case stateInitializing:
 		if msg.Method == protocol.MethodInitialize {
-			return s.errorResponse(msg.ID, protocol.ErrServerError("initialize already received, awaiting notifications/initialized"))
+			return s.errorResponse(ctx, msg.ID, protocol.ErrServerError("initialize already received, awaiting notifications/initialized"))
 		}
-		return s.errorResponse(msg.ID, protocol.ErrServerError("server initializing, awaiting notifications/initialized"))
+		return s.errorResponse(ctx, msg.ID, protocol.ErrServerError("server initializing, awaiting notifications/initialized"))
 
 	case stateReady:
 		if msg.Method == protocol.MethodInitialize {
-			return s.errorResponse(msg.ID, protocol.ErrServerError("already initialized"))
+			return s.errorResponse(ctx, msg.ID, protocol.ErrServerError("already initialized"))
 		}
 		return s.handleMethod(ctx, msg)
 
 	default:
-		return s.errorResponse(msg.ID, protocol.ErrInternalError("unknown server state"))
+		return s.errorResponse(ctx, msg.ID, protocol.ErrInternalError("unknown server state"))
 	}
 }
 
 // errorResponse builds a JSON-RPC error response from any error. If the error
 // is a *protocol.CodeError, its code and message are used directly.
-// Otherwise, the error falls back to -32603 (internal error). The id is
-// normalized to null when structurally invalid, per JSON-RPC 2.0 §5
-// ("If there was an error in detecting the id [...] it MUST be Null.").
-func (s *Server) errorResponse(id json.RawMessage, err error) protocol.Response {
+// Otherwise, the error falls back to -32603 (internal error). The ctx-attached
+// logger (with request_id auto-injected by withRequestLogger at dispatch
+// entry) is used for the internal-error fallback so operators correlate log
+// lines with the request that produced them without manual plumbing.
+func (s *Server) errorResponse(ctx context.Context, id json.RawMessage, err error) protocol.Response {
 	s.errorCount.Add(1)
 	id = sanitizeErrorID(id)
 	pe, ok := errors.AsType[*protocol.CodeError](err)
 	if !ok {
-		s.logger.Error("internal_error", "error", err)
+		loggerFromContext(ctx, s.logger).Error("internal_error", "error", err)
 		return protocol.NewErrorResponse(id, protocol.InternalError, "internal error")
 	}
 	return protocol.NewErrorResponseFromCodeError(id, pe)
@@ -107,6 +110,21 @@ func sanitizeErrorID(id json.RawMessage) json.RawMessage {
 		return id
 	}
 	return protocol.NullID()
+}
+
+// marshalResult builds a JSON-RPC success response for the given value, or an
+// internal-error response if the value cannot be marshaled. Consolidates the
+// "marshal result or fall back to -32603" pattern shared by every handler so
+// the defensive failure path lives in one place. operation identifies which
+// handler hit the failure (attached as a slog attribute, since sloglint
+// requires a static msg); failMsg is the wire message returned to the client.
+func (s *Server) marshalResult(ctx context.Context, id json.RawMessage, result any, operation, failMsg string) protocol.Response {
+	resp, err := protocol.NewResultResponse(id, result)
+	if err != nil {
+		loggerFromContext(ctx, s.logger).Error("marshal_result_failed", "operation", operation, "error", err)
+		return s.errorResponse(ctx, id, protocol.ErrInternalError(failMsg))
+	}
+	return resp
 }
 
 // handleNotification processes notification messages (no response sent).

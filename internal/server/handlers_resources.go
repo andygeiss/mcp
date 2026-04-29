@@ -36,46 +36,38 @@ type resourcesReadResult struct {
 func (s *Server) handleResourcesMethod(ctx context.Context, msg protocol.Request) protocol.Response {
 	switch msg.Method {
 	case protocol.MethodResourcesList:
-		return s.handleResourcesList(msg)
+		return s.handleResourcesList(ctx, msg)
 	case protocol.MethodResourcesRead:
 		return s.handleResourcesRead(ctx, msg)
 	case protocol.MethodResourcesTemplatesList:
-		return s.handleResourcesTemplatesList(msg)
+		return s.handleResourcesTemplatesList(ctx, msg)
 	default:
-		return s.errorResponse(msg.ID, protocol.ErrMethodNotFound("unknown method: "+msg.Method))
+		return s.errorResponse(ctx, msg.ID, protocol.ErrMethodNotFound("unknown method: "+msg.Method))
 	}
 }
 
 // handleResourcesList returns all registered static resources.
-func (s *Server) handleResourcesList(msg protocol.Request) protocol.Response {
-	result := resourcesListResult{Resources: s.resources.Resources()}
-	resp, err := protocol.NewResultResponse(msg.ID, result)
-	if err != nil {
-		s.logger.Error("marshal_resources_list", "error", err)
-		return s.errorResponse(msg.ID, protocol.ErrInternalError("failed to marshal resources list"))
-	}
-	return resp
+func (s *Server) handleResourcesList(ctx context.Context, msg protocol.Request) protocol.Response {
+	return s.marshalResult(ctx, msg.ID,
+		resourcesListResult{Resources: s.resources.Resources()},
+		"marshal_resources_list", "failed to marshal resources list")
 }
 
 // handleResourcesTemplatesList returns all registered resource templates.
-func (s *Server) handleResourcesTemplatesList(msg protocol.Request) protocol.Response {
-	result := resourcesTemplatesListResult{ResourceTemplates: s.resources.Templates()}
-	resp, err := protocol.NewResultResponse(msg.ID, result)
-	if err != nil {
-		s.logger.Error("marshal_resources_templates_list", "error", err)
-		return s.errorResponse(msg.ID, protocol.ErrInternalError("failed to marshal resource templates list"))
-	}
-	return resp
+func (s *Server) handleResourcesTemplatesList(ctx context.Context, msg protocol.Request) protocol.Response {
+	return s.marshalResult(ctx, msg.ID,
+		resourcesTemplatesListResult{ResourceTemplates: s.resources.Templates()},
+		"marshal_resources_templates_list", "failed to marshal resource templates list")
 }
 
 // handleResourcesRead reads a specific resource by URI.
 func (s *Server) handleResourcesRead(ctx context.Context, msg protocol.Request) protocol.Response {
 	var params resourcesReadParams
 	if err := json.Unmarshal(msg.Params, &params); err != nil {
-		return s.errorResponse(msg.ID, protocol.ErrInvalidParams(fmt.Sprintf("invalid resources/read params: %v", err)))
+		return s.errorResponse(ctx, msg.ID, protocol.ErrInvalidParams(fmt.Sprintf("invalid resources/read params: %v", err)))
 	}
 	if params.URI == "" {
-		return s.errorResponse(msg.ID, protocol.ErrInvalidParams("uri is required"))
+		return s.errorResponse(ctx, msg.ID, protocol.ErrInvalidParams("uri is required"))
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, s.handlerTimeout)
@@ -89,24 +81,21 @@ func (s *Server) handleResourcesRead(ctx context.Context, msg protocol.Request) 
 	} else if tmpl, ok := s.resources.LookupTemplate(params.URI); ok {
 		result, err = tmpl.Handler(ctx, params.URI)
 	} else {
-		return s.errorResponse(msg.ID, protocol.ErrResourceNotFound("resource not found: "+params.URI))
+		return s.errorResponse(ctx, msg.ID, protocol.ErrResourceNotFound("resource not found: "+params.URI))
 	}
 	// Timeout/cancellation maps to ServerTimeout regardless of the handler's
 	// return value — consistent with tools/call and MCP §Error Codes.
 	if ctx.Err() != nil {
-		return s.errorResponse(msg.ID, &protocol.CodeError{
+		return s.errorResponse(ctx, msg.ID, &protocol.CodeError{
 			Code:    protocol.ServerTimeout,
 			Message: fmt.Sprintf("resource %q read timed out", params.URI),
 		})
 	}
 	if err != nil {
-		return s.errorResponse(msg.ID, err)
+		return s.errorResponse(ctx, msg.ID, err)
 	}
 
-	resp, rErr := protocol.NewResultResponse(msg.ID, resourcesReadResult{Contents: result.Contents})
-	if rErr != nil {
-		s.logger.Error("marshal_resource_read", "error", rErr)
-		return s.errorResponse(msg.ID, protocol.ErrInternalError("failed to marshal resource read result"))
-	}
-	return resp
+	return s.marshalResult(ctx, msg.ID,
+		resourcesReadResult{Contents: result.Contents},
+		"marshal_resource_read", "failed to marshal resource read result")
 }

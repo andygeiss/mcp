@@ -77,21 +77,31 @@ func extractProgressToken(raw json.RawMessage) json.RawMessage {
 // handler in a background goroutine. Returns (errorResp, false) if validation
 // fails, or (_, true) if the handler was started successfully.
 func (s *Server) startToolCallAsync(ctx context.Context, msg protocol.Request) (protocol.Response, bool) {
+	// Inject a per-request slog.Logger so logs emitted from within the
+	// async tool path automatically carry request_id without manual plumbing.
+	ctx = withRequestLogger(ctx, s.logger, msg.ID)
+
 	var params toolCallParams
 	if err := json.Unmarshal(msg.Params, &params); err != nil {
-		s.logger.Warn("invalid_tools_call_params", "error", err)
-		return s.errorResponse(msg.ID, protocol.ErrInvalidParams("invalid tools/call params")), false
+		loggerFromContext(ctx, s.logger).Warn("invalid_tools_call_params", "error", err)
+		return s.errorResponse(ctx, msg.ID, protocol.ErrInvalidParams("invalid tools/call params")), false
 	}
 	if len(params.Arguments) == 0 || bytes.Equal(params.Arguments, []byte("null")) {
 		params.Arguments = json.RawMessage("{}")
 	}
 	if params.Name == "" {
-		return s.errorResponse(msg.ID, protocol.ErrInvalidParams("tool name is required")), false
+		return s.errorResponse(ctx, msg.ID, protocol.ErrInvalidParams("tool name is required")), false
 	}
 	tool, ok := s.registry.Lookup(params.Name)
 	if !ok {
-		available := strings.Join(s.registry.Names(), ", ")
-		return s.errorResponse(msg.ID, protocol.ErrInvalidParams("unknown tool: "+params.Name+" (available: "+available+")")), false
+		names := s.registry.Names()
+		available := strings.Join(names, ", ")
+		return s.errorResponse(ctx, msg.ID, invalidParamError(
+			"unknown tool: "+params.Name+" (available: "+available+")",
+			"name",
+			params.Name,
+			names,
+		)), false
 	}
 
 	callCtx, cancel := context.WithCancel(ctx)

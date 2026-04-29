@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -20,7 +21,7 @@ func Test_errorResponse_With_NonCodeError_Should_SanitizeMessage(t *testing.T) {
 	srv := NewServer("mcp", "test", tools.NewRegistry(), strings.NewReader(""), &bytes.Buffer{}, &stderr)
 
 	// Act — pass a raw error with internal details
-	resp := srv.errorResponse(json.RawMessage(`1`), errors.New("open /etc/shadow: permission denied"))
+	resp := srv.errorResponse(context.Background(), json.RawMessage(`1`), errors.New("open /etc/shadow: permission denied"))
 
 	// Assert — client should NOT see the raw error
 	assert.That(t, "code", resp.Error.Code, protocol.InternalError)
