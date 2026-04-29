@@ -70,6 +70,12 @@ func (s *Server) handleInitialize(msg protocol.Request) protocol.Response {
 	s.clientCaps.Store(&caps)
 	s.state = stateInitializing
 
+	// Capability honesty (R2): advertise a registry-backed capability ONLY
+	// when its registry has at least one entry. An empty registry means a
+	// client `tools/list` would return `{tools: []}` — wasted round trip
+	// since the client already learned the surface in initialize. Empty →
+	// don't advertise. Logging is always advertised (logging/setLevel
+	// works regardless of state).
 	srvCaps := initializeCapabilities{
 		Experimental: map[string]any{
 			"concurrency": map[string]any{
@@ -78,13 +84,13 @@ func (s *Server) handleInitialize(msg protocol.Request) protocol.Response {
 		},
 	}
 	srvCaps.Logging = &loggingCapability{}
-	if s.prompts != nil {
+	if s.prompts != nil && len(s.prompts.Prompts()) > 0 {
 		srvCaps.Prompts = &promptsCapability{}
 	}
-	if s.resources != nil {
+	if s.resources != nil && (len(s.resources.Resources()) > 0 || len(s.resources.Templates()) > 0) {
 		srvCaps.Resources = &resourcesCapability{}
 	}
-	if s.registry != nil {
+	if s.registry != nil && len(s.registry.Names()) > 0 {
 		srvCaps.Tools = &toolsCapability{}
 	}
 
