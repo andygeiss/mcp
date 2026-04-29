@@ -199,7 +199,7 @@ func (s *Server) handleDecodeResultIdle(ctx context.Context, dr decodeResult) er
 // handleMessageDuringInFlight processes messages that arrive while a tool
 // handler is executing. Ping is answered immediately; notifications (including
 // cancellation) are handled normally; all other requests are rejected with
-// -32600 since maxInFlight is 1.
+// -32600 because dispatch is sequential.
 func (s *Server) handleMessageDuringInFlight(msg protocol.Request) error {
 	isNotification := len(msg.ID) == 0
 
@@ -223,7 +223,7 @@ func (s *Server) handleMessageDuringInFlight(msg protocol.Request) error {
 		return s.encodeResponse(resp)
 	}
 
-	return s.encodeResponse(s.errorResponse(msg.ID, protocol.ErrServerError("server busy: request in flight (maxInFlight is 1)")))
+	return s.encodeResponse(s.errorResponse(msg.ID, protocol.ErrServerError("server busy: request in flight (sequential dispatch)")))
 }
 
 // handleDecodeError processes errors from the decoder, returning nil for clean

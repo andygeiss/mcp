@@ -1,2 +1,2 @@
-{"id":1,"jsonrpc":"2.0","result":{"capabilities":{"experimental":{"concurrency":{"maxInFlight":1}},"logging":{},"tools":{}},"protocolVersion":"2025-11-25","serverInfo":{"name":"mcp","version":"test"}}}
+{"id":1,"jsonrpc":"2.0","result":{"capabilities":{"logging":{},"tools":{}},"protocolVersion":"2025-11-25","serverInfo":{"name":"mcp","version":"test"}}}
 {"id":"abc-123","jsonrpc":"2.0","result":{}}
