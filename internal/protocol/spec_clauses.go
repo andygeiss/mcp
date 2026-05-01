@@ -10,6 +10,16 @@ import (
 	"testing"
 )
 
+// Spec normative levels per RFC 2119. Use these constants instead of string
+// literals when constructing Clause entries so that misspellings become
+// compile-time errors and the goconst linter does not flag the same literal
+// across many test files.
+const (
+	LevelMAY    = "MAY"
+	LevelMUST   = "MUST"
+	LevelSHOULD = "SHOULD"
+)
+
 // Clause maps a single MUST/SHOULD/MAY-bearing requirement of the MCP
 // specification to the test functions that prove the server complies. Tests
 // are stored as function pointers — never strings — so that renaming or
@@ -43,7 +53,7 @@ func Register(c Clause) {
 		panic("protocol.Register: duplicate clause ID: " + c.ID)
 	}
 	switch c.Level {
-	case "MAY", "MUST", "SHOULD":
+	case LevelMAY, LevelMUST, LevelSHOULD:
 	default:
 		panic(fmt.Sprintf("protocol.Register: clause %s has invalid Level %q (want MUST|SHOULD|MAY)", c.ID, c.Level))
 	}

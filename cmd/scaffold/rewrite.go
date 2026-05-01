@@ -9,6 +9,11 @@ import (
 	"strings"
 )
 
+// claudeDirName is Claude Code's local-config directory. Hoisted as a package
+// constant so the goconst linter does not flag the same literal across the
+// scaffold and its tests.
+const claudeDirName = ".claude"
+
 const (
 	templateBinaryName = "mcp"
 	templateModulePath = "github.com/andygeiss/mcp"
@@ -305,7 +310,7 @@ func selfCleanup(dir string) error {
 // (_bmad, _bmad-output), and Claude Code's local config (.claude). os.RemoveAll
 // is idempotent — missing paths are a no-op.
 func removeTemplateOnlyContent(dir string) error {
-	for _, name := range []string{".claude", "CLAUDE.md", "_bmad", "_bmad-output"} {
+	for _, name := range []string{claudeDirName, "CLAUDE.md", "_bmad", "_bmad-output"} {
 		if err := os.RemoveAll(filepath.Join(dir, name)); err != nil {
 			return fmt.Errorf("remove %s: %w", name, err)
 		}
@@ -323,7 +328,7 @@ func shouldSkip(root, path string, info os.FileInfo) bool {
 	}
 	base := filepath.Base(rel)
 	switch base {
-	case ".git", "_bmad-output", "_bmad", ".claude":
+	case ".git", "_bmad-output", "_bmad", claudeDirName:
 		return true
 	}
 	return false

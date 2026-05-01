@@ -3630,7 +3630,7 @@ func Test_Server_With_SendRequest_Should_CorrelateResponse(t *testing.T) {
 	// Arrange — register a tool that uses SendRequest to call the client
 	r := tools.NewRegistry()
 	if err := tools.Register(r, "bidir", "bidirectional tool", func(ctx context.Context, _ testInput) (struct{}, tools.Result) {
-		resp, err := protocol.SendRequest(ctx, "sampling/createMessage", map[string]string{"prompt": "hello"})
+		resp, err := protocol.SendRequest(ctx, "sampling/createMessage", map[string]string{promptParamKey: "hello"})
 		if err != nil {
 			return struct{}{}, tools.ErrorResult("send request failed: " + err.Error())
 		}
@@ -3717,7 +3717,7 @@ func Test_SendRequest_With_ElicitationCreate_AndCapabilityAdvertised_Should_Roun
 	// Arrange — register a tool that elicits user input via the client.
 	r := tools.NewRegistry()
 	if err := tools.Register(r, "ask-name", "elicitation tool", func(ctx context.Context, _ testInput) (struct{}, tools.Result) {
-		resp, err := protocol.SendRequest(ctx, "elicitation/create", map[string]string{"prompt": "What is your name?"})
+		resp, err := protocol.SendRequest(ctx, "elicitation/create", map[string]string{promptParamKey: "What is your name?"})
 		if err != nil {
 			return struct{}{}, tools.ErrorResult("send request failed: " + err.Error())
 		}

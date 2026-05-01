@@ -13,6 +13,11 @@ import (
 	"github.com/andygeiss/mcp/internal/protocol"
 )
 
+// fixtureFiller is a placeholder string used for required Section/Summary
+// fields in throwaway test fixtures. Hoisted so the goconst linter does not
+// flag the same literal across many fixture builders.
+const fixtureFiller = "test"
+
 func Test_Clauses_Should_HaveConsistentMapKeys(t *testing.T) {
 	t.Parallel()
 
@@ -94,9 +99,9 @@ func Test_Register_With_DuplicateID_Should_Panic(t *testing.T) {
 
 	dup := protocol.Clause{
 		ID:      existingID,
-		Level:   "MUST",
-		Section: "test",
-		Summary: "test",
+		Level:   protocol.LevelMUST,
+		Section: fixtureFiller,
+		Summary: fixtureFiller,
 		Tests:   []func(*testing.T){func(_ *testing.T) {}},
 	}
 
@@ -140,9 +145,9 @@ func Test_Register_With_EmptyID_Should_Panic(t *testing.T) {
 	expectPanicAndCleanup(t, "", "expected panic on empty ID", func() {
 		protocol.Register(protocol.Clause{
 			ID:      "",
-			Level:   "MUST",
-			Section: "test",
-			Summary: "test",
+			Level:   protocol.LevelMUST,
+			Section: fixtureFiller,
+			Summary: fixtureFiller,
 			Tests:   []func(*testing.T){func(_ *testing.T) {}},
 		})
 	})
@@ -155,8 +160,8 @@ func Test_Register_With_InvalidLevel_Should_Panic(t *testing.T) {
 		protocol.Register(protocol.Clause{
 			ID:      "test/invalid-level",
 			Level:   "REQUIRED",
-			Section: "test",
-			Summary: "test",
+			Section: fixtureFiller,
+			Summary: fixtureFiller,
 			Tests:   []func(*testing.T){func(_ *testing.T) {}},
 		})
 	})
@@ -168,9 +173,9 @@ func Test_Register_With_EmptySection_Should_Panic(t *testing.T) {
 	expectPanicAndCleanup(t, "test/no-section", "expected panic on empty Section", func() {
 		protocol.Register(protocol.Clause{
 			ID:      "test/no-section",
-			Level:   "MUST",
+			Level:   protocol.LevelMUST,
 			Section: "",
-			Summary: "test",
+			Summary: fixtureFiller,
 			Tests:   []func(*testing.T){func(_ *testing.T) {}},
 		})
 	})
@@ -182,8 +187,8 @@ func Test_Register_With_EmptySummary_Should_Panic(t *testing.T) {
 	expectPanicAndCleanup(t, "test/no-summary", "expected panic on empty Summary", func() {
 		protocol.Register(protocol.Clause{
 			ID:      "test/no-summary",
-			Level:   "MUST",
-			Section: "test",
+			Level:   protocol.LevelMUST,
+			Section: fixtureFiller,
 			Summary: "",
 			Tests:   []func(*testing.T){func(_ *testing.T) {}},
 		})
@@ -196,9 +201,9 @@ func Test_Register_With_EmptyTests_Should_Panic(t *testing.T) {
 	expectPanicAndCleanup(t, "test/no-tests", "expected panic on empty Tests slice", func() {
 		protocol.Register(protocol.Clause{
 			ID:      "test/no-tests",
-			Level:   "MUST",
-			Section: "test",
-			Summary: "test",
+			Level:   protocol.LevelMUST,
+			Section: fixtureFiller,
+			Summary: fixtureFiller,
 			Tests:   nil,
 		})
 	})
@@ -210,9 +215,9 @@ func Test_Register_With_NilTestEntry_Should_Panic(t *testing.T) {
 	expectPanicAndCleanup(t, "test/nil-test", "expected panic on nil entry in Tests", func() {
 		protocol.Register(protocol.Clause{
 			ID:      "test/nil-test",
-			Level:   "MUST",
-			Section: "test",
-			Summary: "test",
+			Level:   protocol.LevelMUST,
+			Section: fixtureFiller,
+			Summary: fixtureFiller,
 			Tests:   []func(*testing.T){nil},
 		})
 	})

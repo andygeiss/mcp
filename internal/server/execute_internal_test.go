@@ -193,9 +193,9 @@ func Test_handleToolsList_With_ValidRegistry_Should_ReturnTools(t *testing.T) {
 	s.registry = r
 
 	msg := protocol.Request{
-		JSONRPC: "2.0",
+		JSONRPC: protocol.Version,
 		ID:      json.RawMessage(`1`),
-		Method:  "tools/list",
+		Method:  protocol.MethodToolsList,
 		Params:  json.RawMessage(`{}`),
 	}
 
@@ -218,9 +218,9 @@ func Test_handleInitialize_With_ValidRequest_Should_ReturnCapabilities(t *testin
 	s := newTestServer(t)
 
 	msg := protocol.Request{
-		JSONRPC: "2.0",
+		JSONRPC: protocol.Version,
 		ID:      json.RawMessage(`1`),
-		Method:  "initialize",
+		Method:  protocol.MethodInitialize,
 		Params:  json.RawMessage(`{"capabilities":{}}`),
 	}
 
@@ -242,9 +242,9 @@ func Test_handleInitialize_With_SupportedProtocolVersion_Should_EchoClientVersio
 	s := newTestServer(t)
 	params := fmt.Sprintf(`{"protocolVersion":%q,"clientInfo":{"name":"c","version":"1"}}`, protocol.MCPVersion)
 	msg := protocol.Request{
-		JSONRPC: "2.0",
+		JSONRPC: protocol.Version,
 		ID:      json.RawMessage(`1`),
-		Method:  "initialize",
+		Method:  protocol.MethodInitialize,
 		Params:  json.RawMessage(params),
 	}
 
@@ -268,9 +268,9 @@ func Test_handleInitialize_With_UnsupportedProtocolVersion_Should_ReturnServerVe
 	// Arrange
 	s := newTestServer(t)
 	msg := protocol.Request{
-		JSONRPC: "2.0",
+		JSONRPC: protocol.Version,
 		ID:      json.RawMessage(`1`),
-		Method:  "initialize",
+		Method:  protocol.MethodInitialize,
 		Params:  json.RawMessage(`{"protocolVersion":"1999-01-01"}`),
 	}
 
@@ -312,9 +312,9 @@ func Test_handleInitialize_With_AllRegistries_Should_AdvertiseAllCapabilities(t 
 	}
 
 	msg := protocol.Request{
-		JSONRPC: "2.0",
+		JSONRPC: protocol.Version,
 		ID:      json.RawMessage(`1`),
-		Method:  "initialize",
+		Method:  protocol.MethodInitialize,
 		Params:  json.RawMessage(`{"capabilities":{}}`),
 	}
 
@@ -351,9 +351,9 @@ func Test_handleInitialize_With_EmptyRegistries_Should_OmitOptionalCapabilities(
 	s.resources = resources.NewRegistry()
 
 	msg := protocol.Request{
-		JSONRPC: "2.0",
+		JSONRPC: protocol.Version,
 		ID:      json.RawMessage(`1`),
-		Method:  "initialize",
+		Method:  protocol.MethodInitialize,
 		Params:  json.RawMessage(`{"capabilities":{}}`),
 	}
 
@@ -387,7 +387,7 @@ func Test_handleLoggingSetLevel_With_ValidLevel_Should_Succeed(t *testing.T) {
 	s := newTestServer(t)
 
 	msg := protocol.Request{
-		JSONRPC: "2.0",
+		JSONRPC: protocol.Version,
 		ID:      json.RawMessage(`1`),
 		Method:  "logging/setLevel",
 		Params:  json.RawMessage(`{"level":"debug"}`),
@@ -417,9 +417,9 @@ func Test_handleResourcesRead_With_TemplateMatch_Should_ReturnContent(t *testing
 	s.resources = reg
 
 	msg := protocol.Request{
-		JSONRPC: "2.0",
+		JSONRPC: protocol.Version,
 		ID:      json.RawMessage(`1`),
-		Method:  "resources/read",
+		Method:  protocol.MethodResourcesRead,
 		Params:  json.RawMessage(`{"uri":"file://readme.md"}`),
 	}
 
@@ -440,7 +440,7 @@ func Test_handleResourcesMethod_With_UnknownMethod_Should_ReturnMethodNotFound(t
 	s.resources = resources.NewRegistry()
 
 	msg := protocol.Request{
-		JSONRPC: "2.0",
+		JSONRPC: protocol.Version,
 		ID:      json.RawMessage(`1`),
 		Method:  "resources/subscribe",
 		Params:  json.RawMessage(`{}`),
@@ -463,7 +463,7 @@ func Test_handlePromptsMethod_With_UnknownMethod_Should_ReturnMethodNotFound(t *
 	s.prompts = prompts.NewRegistry()
 
 	msg := protocol.Request{
-		JSONRPC: "2.0",
+		JSONRPC: protocol.Version,
 		ID:      json.RawMessage(`1`),
 		Method:  "prompts/complete",
 		Params:  json.RawMessage(`{}`),
@@ -486,9 +486,9 @@ func Test_dispatchByState_With_UnknownState_Should_ReturnInternalError(t *testin
 	s.state = 99 // invalid state
 
 	msg := protocol.Request{
-		JSONRPC: "2.0",
+		JSONRPC: protocol.Version,
 		ID:      json.RawMessage(`1`),
-		Method:  "tools/list",
+		Method:  protocol.MethodToolsList,
 		Params:  json.RawMessage(`{}`),
 	}
 
@@ -508,7 +508,7 @@ func Test_handleMethod_With_ToolsCall_Should_ReturnInternalError(t *testing.T) {
 	s := newTestServer(t)
 
 	msg := protocol.Request{
-		JSONRPC: "2.0",
+		JSONRPC: protocol.Version,
 		ID:      json.RawMessage(`1`),
 		Method:  "tools/call",
 		Params:  json.RawMessage(`{"name":"test","arguments":{}}`),
@@ -531,9 +531,9 @@ func Test_dispatch_With_Ping_Should_ReturnResult(t *testing.T) {
 	s.state = stateReady
 
 	msg := protocol.Request{
-		JSONRPC: "2.0",
+		JSONRPC: protocol.Version,
 		ID:      json.RawMessage(`1`),
-		Method:  "ping",
+		Method:  protocol.MethodPing,
 		Params:  json.RawMessage(`{}`),
 	}
 
@@ -636,9 +636,9 @@ func Test_handleMessageDuringInFlight_With_ServerBusy_Should_ReturnBusyError(t *
 	s.state = stateReady
 
 	msg := protocol.Request{
-		JSONRPC: "2.0",
+		JSONRPC: protocol.Version,
 		ID:      json.RawMessage(`2`),
-		Method:  "tools/list",
+		Method:  protocol.MethodToolsList,
 		Params:  json.RawMessage(`{}`),
 	}
 
@@ -658,9 +658,9 @@ func Test_handleMessageDuringInFlight_With_PingDuringInFlight_Should_RespondWith
 	s := newTestServer(t)
 
 	msg := protocol.Request{
-		JSONRPC: "2.0",
+		JSONRPC: protocol.Version,
 		ID:      json.RawMessage(`2`),
-		Method:  "ping",
+		Method:  protocol.MethodPing,
 		Params:  json.RawMessage(`{}`),
 	}
 
@@ -681,7 +681,7 @@ func Test_handleMessageDuringInFlight_With_NotificationDuringInFlight_Should_Han
 	s.state = stateReady
 
 	msg := protocol.Request{
-		JSONRPC: "2.0",
+		JSONRPC: protocol.Version,
 		Method:  "notifications/initialized",
 	}
 
@@ -723,7 +723,7 @@ func Test_handleMessageDuringInFlight_With_InvalidRequest_Should_ReturnValidatio
 	msg := protocol.Request{
 		JSONRPC: "1.0", // invalid version
 		ID:      json.RawMessage(`2`),
-		Method:  "tools/list",
+		Method:  protocol.MethodToolsList,
 	}
 
 	// Act
@@ -765,7 +765,7 @@ func Test_routeResponse_With_UnknownID_Should_DropSilently(t *testing.T) {
 	s.pending = make(map[string]pendingEntry)
 
 	resp := &protocol.Response{
-		JSONRPC: "2.0",
+		JSONRPC: protocol.Version,
 		ID:      json.RawMessage(`"unknown-id"`),
 	}
 
@@ -854,9 +854,9 @@ func Test_handleDecodeResultDuringInFlight_With_Message_Should_HandleBusy(t *tes
 	s.inFlightID = json.RawMessage(`1`)
 
 	msg := protocol.Request{
-		JSONRPC: "2.0",
+		JSONRPC: protocol.Version,
 		ID:      json.RawMessage(`2`),
-		Method:  "tools/list",
+		Method:  protocol.MethodToolsList,
 		Params:  json.RawMessage(`{}`),
 	}
 
@@ -884,9 +884,9 @@ func Test_handlePromptsGet_With_HandlerError_Should_ReturnInternalError(t *testi
 	s.resources = resReg
 
 	msg := protocol.Request{
-		JSONRPC: "2.0",
+		JSONRPC: protocol.Version,
 		ID:      json.RawMessage(`1`),
-		Method:  "resources/read",
+		Method:  protocol.MethodResourcesRead,
 		Params:  json.RawMessage(`{"uri":"err://test"}`),
 	}
 
@@ -914,9 +914,9 @@ func Test_handleResourcesRead_With_HandlerCodeError_Should_PassthroughCode(t *te
 	s.resources = reg
 
 	msg := protocol.Request{
-		JSONRPC: "2.0",
+		JSONRPC: protocol.Version,
 		ID:      json.RawMessage(`1`),
-		Method:  "resources/read",
+		Method:  protocol.MethodResourcesRead,
 		Params:  json.RawMessage(`{"uri":"err://code"}`),
 	}
 
@@ -944,7 +944,7 @@ func Test_handleResourcesList_With_Registry_Should_ReturnResources(t *testing.T)
 	s.resources = reg
 
 	msg := protocol.Request{
-		JSONRPC: "2.0",
+		JSONRPC: protocol.Version,
 		ID:      json.RawMessage(`1`),
 		Method:  "resources/list",
 		Params:  json.RawMessage(`{}`),
@@ -973,7 +973,7 @@ func Test_handlePromptsList_With_Registry_Should_ReturnPrompts(t *testing.T) {
 	s.prompts = reg
 
 	msg := protocol.Request{
-		JSONRPC: "2.0",
+		JSONRPC: protocol.Version,
 		ID:      json.RawMessage(`1`),
 		Method:  "prompts/list",
 		Params:  json.RawMessage(`{}`),
@@ -1111,9 +1111,9 @@ func Test_handleDecodeResultDuringInFlight_With_ConcurrentCompletion_Should_Proc
 
 	// New message arrives (a ping)
 	msg := protocol.Request{
-		JSONRPC: "2.0",
+		JSONRPC: protocol.Version,
 		ID:      json.RawMessage(`2`),
-		Method:  "ping",
+		Method:  protocol.MethodPing,
 		Params:  json.RawMessage(`{}`),
 	}
 
@@ -1141,9 +1141,9 @@ func Test_handleDecodeResultDuringInFlight_With_TraceEnabled_Should_LogTrace(t *
 	s.inFlightID = json.RawMessage(`1`)
 
 	msg := protocol.Request{
-		JSONRPC: "2.0",
+		JSONRPC: protocol.Version,
 		ID:      json.RawMessage(`2`),
-		Method:  "ping",
+		Method:  protocol.MethodPing,
 		Params:  json.RawMessage(`{}`),
 	}
 
@@ -1175,9 +1175,9 @@ func Test_handleDecodeResultDuringInFlight_With_ConcurrentCompletionEncodeError_
 	s.inFlightCh <- inFlightResult{resp: resp}
 
 	msg := protocol.Request{
-		JSONRPC: "2.0",
+		JSONRPC: protocol.Version,
 		ID:      json.RawMessage(`2`),
-		Method:  "ping",
+		Method:  protocol.MethodPing,
 		Params:  json.RawMessage(`{}`),
 	}
 
@@ -1209,9 +1209,9 @@ func Test_handleDecodeResultDuringInFlight_With_BusyEncodeError_Should_CancelAnd
 	s.inFlightCh <- inFlightResult{resp: resp}
 
 	msg := protocol.Request{
-		JSONRPC: "2.0",
+		JSONRPC: protocol.Version,
 		ID:      json.RawMessage(`2`),
-		Method:  "tools/list",
+		Method:  protocol.MethodToolsList,
 		Params:  json.RawMessage(`{}`),
 	}
 
@@ -1243,9 +1243,9 @@ func Test_handleMessageDuringInFlight_With_BrokenWriter_Should_ReturnError(t *te
 	s.inFlightCh <- inFlightResult{resp: resp}
 
 	msg := protocol.Request{
-		JSONRPC: "2.0",
+		JSONRPC: protocol.Version,
 		ID:      json.RawMessage(`2`),
-		Method:  "tools/list",
+		Method:  protocol.MethodToolsList,
 		Params:  json.RawMessage(`{}`),
 	}
 
@@ -1414,7 +1414,7 @@ func Test_handlePromptsGet_With_HandlerArgUnmarshalError_Should_ReturnInvalidPar
 	s.prompts = reg
 
 	msg := protocol.Request{
-		JSONRPC: "2.0",
+		JSONRPC: protocol.Version,
 		ID:      json.RawMessage(`1`),
 		Method:  "prompts/get",
 		Params:  json.RawMessage(`{"name":"counter","arguments":{"count":"abc"}}`),

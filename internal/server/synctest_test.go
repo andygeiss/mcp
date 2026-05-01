@@ -32,6 +32,11 @@ import (
 	"github.com/andygeiss/mcp/internal/tools"
 )
 
+// promptParamKey is the JSON-RPC param key for sampling/createMessage and
+// elicitation/create payloads in tests. Hoisted (rather than rewritten) so the
+// goconst linter does not flag the same literal across the bidi test files.
+const promptParamKey = "prompt"
+
 // Test_Server_With_SynctestHandlerTimeout_Should_TimeoutDeterministically
 // verifies that a tool handler's context.WithTimeout fires correctly using
 // virtual time. The handler blocks on <-ctx.Done() and returns when the
@@ -286,7 +291,7 @@ func Test_SendRequest_With_ElicitationCreate_AndCapabilityNotAdvertised_Should_R
 func init() {
 	protocol.Register(protocol.Clause{
 		ID:      "MCP-2025-11-25/elicitation/MUST-gate-on-capability",
-		Level:   "MUST",
+		Level:   protocol.LevelMUST,
 		Section: "Q18 elicitation/create outbound",
 		Summary: "When the client did not advertise the `elicitation` capability during initialize, the server MUST reject outbound `elicitation/create` requests with *protocol.CapabilityNotAdvertisedError and emit ZERO bytes on the wire (AI9 — first-statement gate, side-effect-free).",
 		Tests: []func(*testing.T){
@@ -295,7 +300,7 @@ func init() {
 	})
 	protocol.Register(protocol.Clause{
 		ID:      "MCP-2025-11-25/elicitation/MUST-roundtrip-when-advertised",
-		Level:   "MUST",
+		Level:   protocol.LevelMUST,
 		Section: "Q18 elicitation/create outbound",
 		Summary: "When the client advertised the `elicitation` capability, the server MUST encode an outbound `elicitation/create` request, await the correlated response, and surface the parsed result back to the tool handler that called protocol.SendRequest.",
 		Tests: []func(*testing.T){

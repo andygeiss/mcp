@@ -53,7 +53,7 @@ func Benchmark_Decode_Notification(b *testing.B) {
 func Benchmark_Encode_SuccessResponse(b *testing.B) {
 	resp := protocol.Response{
 		ID:      json.RawMessage("1"),
-		JSONRPC: "2.0",
+		JSONRPC: protocol.Version,
 		Result:  json.RawMessage(`{"content":[{"type":"text","text":"hello"}]}`),
 	}
 	var buf bytes.Buffer

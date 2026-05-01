@@ -189,7 +189,7 @@ func Test_ProgressReport_DuringOutboundBidi_Should_NotInterleave(t *testing.T) {
 			p.Report(2, 3) // during — must be dropped (AI10)
 		}()
 
-		_, err := protocol.SendRequest(ctx, "sampling/createMessage", map[string]string{"prompt": "x"})
+		_, err := protocol.SendRequest(ctx, "sampling/createMessage", map[string]string{promptParamKey: "x"})
 		<-duringDone
 		if err != nil {
 			return struct{}{}, tools.ErrorResult("send request failed: " + err.Error())
@@ -319,7 +319,7 @@ func countProgressNotifications(msgs []json.RawMessage) int {
 func init() {
 	protocol.Register(protocol.Clause{
 		ID:      "MCP-2025-11-25/progress/MUST-not-emit-without-token",
-		Level:   "MUST",
+		Level:   protocol.LevelMUST,
 		Section: "Q6 progress-token passthrough discipline",
 		Summary: "Progress.Report MUST NOT emit notifications/progress when the originating request omitted _meta.progressToken (client did not opt in).",
 		Tests: []func(*testing.T){
@@ -328,7 +328,7 @@ func init() {
 	})
 	protocol.Register(protocol.Clause{
 		ID:      "MCP-2025-11-25/progress/MUST-preserve-token-type",
-		Level:   "MUST",
+		Level:   protocol.LevelMUST,
 		Section: "Q6 progress-token passthrough discipline",
 		Summary: "When emitting notifications/progress the server MUST preserve the original JSON type of progressToken byte-for-byte (string stays string, number stays number) — never re-marshal.",
 		Tests: []func(*testing.T){

@@ -11,6 +11,13 @@ import (
 	"github.com/andygeiss/mcp/internal/tools"
 )
 
+// Test fixture filler strings hoisted so the goconst linter does not flag the
+// same literal across tools_test fixture builders.
+const (
+	testFixture    = "test"
+	countFieldName = "count"
+)
+
 func Test_WithAnnotations_With_ReadOnlyHint_Should_SetAnnotation(t *testing.T) {
 	t.Parallel()
 
@@ -18,7 +25,7 @@ func Test_WithAnnotations_With_ReadOnlyHint_Should_SetAnnotation(t *testing.T) {
 	r := tools.NewRegistry()
 
 	// Act
-	if err := tools.Register(r, "annotated", "test", func(_ context.Context, _ struct{}) (struct{}, tools.Result) {
+	if err := tools.Register(r, "annotated", testFixture, func(_ context.Context, _ struct{}) (struct{}, tools.Result) {
 		return struct{}{}, tools.TextResult("ok")
 	}, tools.WithAnnotations(tools.Annotations{ReadOnlyHint: true})); err != nil {
 		t.Fatal(err)
@@ -40,7 +47,7 @@ func Test_Register_With_NoOptions_Should_HaveNilAnnotations(t *testing.T) {
 	r := tools.NewRegistry()
 
 	// Act
-	if err := tools.Register(r, "plain", "test", func(_ context.Context, _ struct{}) (struct{}, tools.Result) {
+	if err := tools.Register(r, "plain", testFixture, func(_ context.Context, _ struct{}) (struct{}, tools.Result) {
 		return struct{}{}, tools.TextResult("ok")
 	}); err != nil {
 		t.Fatal(err)
@@ -57,8 +64,8 @@ func Test_Annotations_With_NilPointer_Should_OmitFromJSON(t *testing.T) {
 
 	// Arrange
 	tool := tools.Tool{
-		Description: "test",
-		Name:        "test",
+		Description: testFixture,
+		Name:        testFixture,
 	}
 
 	// Act
@@ -77,8 +84,8 @@ func Test_Annotations_With_NonNilPointer_Should_IncludeInJSON(t *testing.T) {
 	// Arrange
 	tool := tools.Tool{
 		Annotations: &tools.Annotations{ReadOnlyHint: true},
-		Description: "test",
-		Name:        "test",
+		Description: testFixture,
+		Name:        testFixture,
 	}
 
 	// Act
@@ -103,13 +110,13 @@ func Test_WithOutputSchema_With_Schema_Should_SetOutputSchema(t *testing.T) {
 	out := schema.OutputSchema{
 		Type: "object",
 		Properties: map[string]schema.Property{
-			"count": {Type: "integer", Description: "item count"},
+			countFieldName: {Type: "integer", Description: "item count"},
 		},
-		Required: []string{"count"},
+		Required: []string{countFieldName},
 	}
 
 	// Act
-	if err := tools.Register(r, "structured", "test", func(_ context.Context, _ struct{}) (struct{}, tools.Result) {
+	if err := tools.Register(r, "structured", testFixture, func(_ context.Context, _ struct{}) (struct{}, tools.Result) {
 		return struct{}{}, tools.TextResult("ok")
 	}, tools.WithOutputSchema(out)); err != nil {
 		t.Fatal(err)
@@ -144,7 +151,7 @@ func Test_WithOutputSchema_Should_OverrideAutoDerivedSchema(t *testing.T) {
 		},
 		Required: []string{"manual"},
 	}
-	if err := tools.Register(r, "override", "test",
+	if err := tools.Register(r, "override", testFixture,
 		func(_ context.Context, _ struct{}) (derivableOut, tools.Result) {
 			return derivableOut{Auto: "x"}, tools.Result{}
 		},
@@ -169,7 +176,7 @@ func Test_Tool_With_NoOutputSchema_Should_OmitFromJSON(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
-	tool := tools.Tool{Description: "test", Name: "test"}
+	tool := tools.Tool{Description: testFixture, Name: testFixture}
 
 	// Act
 	data, err := json.Marshal(tool)
@@ -188,7 +195,7 @@ func Test_WithTitle_With_DisplayName_Should_SetToolTitle(t *testing.T) {
 	r := tools.NewRegistry()
 
 	// Act
-	if err := tools.Register(r, "titled", "test", func(_ context.Context, _ struct{}) (struct{}, tools.Result) {
+	if err := tools.Register(r, "titled", testFixture, func(_ context.Context, _ struct{}) (struct{}, tools.Result) {
 		return struct{}{}, tools.TextResult("ok")
 	}, tools.WithTitle("My Display Name")); err != nil {
 		t.Fatal(err)
@@ -204,7 +211,7 @@ func Test_Tool_With_NoTitle_Should_OmitTitleFromJSON(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
-	tool := tools.Tool{Description: "test", Name: "test"}
+	tool := tools.Tool{Description: testFixture, Name: testFixture}
 
 	// Act
 	data, err := json.Marshal(tool)
@@ -220,7 +227,7 @@ func Test_Tool_With_Title_Should_IncludeTitleInJSON(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
-	tool := tools.Tool{Description: "test", Name: "test", Title: "Display Name"}
+	tool := tools.Tool{Description: testFixture, Name: testFixture, Title: "Display Name"}
 
 	// Act
 	data, err := json.Marshal(tool)
