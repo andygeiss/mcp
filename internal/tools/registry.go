@@ -153,20 +153,7 @@ func Register[In, Out any](
 			}
 		}
 		out, result := handler(ctx, input)
-		if result.IsError {
-			return result, nil
-		}
-		if isStructuredOutputPresent(out) {
-			raw, mErr := json.Marshal(out)
-			if mErr != nil {
-				return Result{}, &protocol.CodeError{
-					Code:    protocol.InternalError,
-					Message: fmt.Sprintf("marshal structured output for tool %q: %v", name, mErr),
-				}
-			}
-			result.StructuredContent = raw
-		}
-		return result, nil
+		return finalizeResult(name, out, result)
 	}
 
 	tool := Tool{
@@ -188,6 +175,33 @@ func Register[In, Out any](
 		r.index[t.Name] = i
 	}
 	return nil
+}
+
+// finalizeResult applies the dispatch-side post-processing common to every
+// registered tool: short-circuit error responses, auto-marshal a non-zero Out
+// into StructuredContent, and ensure Content serializes as a JSON array.
+//
+// The Content nil-guard is load-bearing: MCP CallToolResult requires content
+// as an array, and a nil slice marshals to "null", which TS-side clients
+// reject with an "expected: array, received: null" validation error.
+func finalizeResult(toolName string, out any, result Result) (Result, error) {
+	if result.IsError {
+		return result, nil
+	}
+	if isStructuredOutputPresent(out) {
+		raw, err := json.Marshal(out)
+		if err != nil {
+			return Result{}, &protocol.CodeError{
+				Code:    protocol.InternalError,
+				Message: fmt.Sprintf("marshal structured output for tool %q: %v", toolName, err),
+			}
+		}
+		result.StructuredContent = raw
+	}
+	if result.Content == nil {
+		result.Content = []ContentBlock{}
+	}
+	return result, nil
 }
 
 // isStructuredOutputPresent reports whether out should be marshaled into
