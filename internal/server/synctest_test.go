@@ -224,3 +224,82 @@ func Test_Server_With_CapabilityGate_Should_RejectSamplingWithoutAdvertisement(t
 		}
 	})
 }
+
+// Test_SendRequest_With_ElicitationCreate_AndCapabilityNotAdvertised_Should_ReturnCapabilityError
+// covers AI9 for the elicitation/create outbound route. When the client did
+// NOT advertise the elicitation capability during initialize, the handler's
+// protocol.SendRequest must return *protocol.CapabilityNotAdvertisedError
+// synchronously and ZERO bytes mentioning "elicitation/create" hit stdout —
+// proving the gate is the FIRST statement on the outbound path, not just
+// AN early statement.
+func Test_SendRequest_With_ElicitationCreate_AndCapabilityNotAdvertised_Should_ReturnCapabilityError(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		// Arrange — register a tool that tries to elicit user input without
+		// the client advertising the capability. Capture the typed error.
+		var capErr *protocol.CapabilityNotAdvertisedError
+		var sendErr error
+		r := tools.NewRegistry()
+		if err := tools.Register(r, "needsElicitation", "calls elicitation", func(ctx context.Context, _ testInput) (struct{}, tools.Result) {
+			_, e := protocol.SendRequest(ctx, "elicitation/create", nil)
+			sendErr = e
+			if errors.As(e, &capErr) {
+				return struct{}{}, tools.TextResult("rejected as expected")
+			}
+			return struct{}{}, tools.ErrorResult("unexpected outcome")
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		// Empty client capabilities — elicitation NOT advertised.
+		input := handshake() +
+			`{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"needsElicitation","arguments":{"message":"x"}}}` + "\n"
+
+		var stdout, stderr bytes.Buffer
+		srv := server.NewServer("mcp", "test", r, strings.NewReader(input), &stdout, &stderr,
+			server.WithHandlerTimeout(time.Hour))
+
+		// Act
+		err := srv.Run(t.Context())
+
+		// Assert — typed error surfaced through ContextWithPeer plumbing.
+		assert.That(t, "run error", err, nil)
+		if capErr == nil {
+			t.Fatalf("expected *CapabilityNotAdvertisedError, got: %v", sendErr)
+		}
+		assert.That(t, "capability", capErr.Capability, protocol.CapElicitation)
+		assert.That(t, "method", capErr.Method, "elicitation/create")
+
+		// Wire-side: stdout MUST NOT contain "elicitation/create" — the gate
+		// is side-effect-free on absence (no outbound request emitted).
+		if bytes.Contains(stdout.Bytes(), []byte(`"elicitation/create"`)) {
+			t.Fatalf("AI9 violation: outbound emitted despite missing capability; stdout=%s", stdout.String())
+		}
+	})
+}
+
+// init registers the Story 2.4 spec-conformance clauses for the elicitation/create
+// outbound bidi path. The AI9 invariant covers the side-effect-free rejection
+// when the capability is not advertised, and the happy-path covers the
+// round-trip when it is. Both tests are colocated by package (server_test);
+// the happy-path test lives in server_test.go.
+func init() {
+	protocol.Register(protocol.Clause{
+		ID:      "MCP-2025-11-25/elicitation/MUST-gate-on-capability",
+		Level:   "MUST",
+		Section: "Q18 elicitation/create outbound",
+		Summary: "When the client did not advertise the `elicitation` capability during initialize, the server MUST reject outbound `elicitation/create` requests with *protocol.CapabilityNotAdvertisedError and emit ZERO bytes on the wire (AI9 — first-statement gate, side-effect-free).",
+		Tests: []func(*testing.T){
+			Test_SendRequest_With_ElicitationCreate_AndCapabilityNotAdvertised_Should_ReturnCapabilityError,
+		},
+	})
+	protocol.Register(protocol.Clause{
+		ID:      "MCP-2025-11-25/elicitation/MUST-roundtrip-when-advertised",
+		Level:   "MUST",
+		Section: "Q18 elicitation/create outbound",
+		Summary: "When the client advertised the `elicitation` capability, the server MUST encode an outbound `elicitation/create` request, await the correlated response, and surface the parsed result back to the tool handler that called protocol.SendRequest.",
+		Tests: []func(*testing.T){
+			Test_SendRequest_With_ElicitationCreate_AndCapabilityAdvertised_Should_RoundTrip,
+		},
+	})
+}
