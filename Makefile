@@ -1,7 +1,7 @@
 FUZZTIME ?= 30s
 MODULE   ?= github.com/example/myproject
 
-.PHONY: bench build check coverage fuzz init lint setup smoke spec-coverage test
+.PHONY: bench build check coverage doc-lint fuzz init lint setup smoke spec-coverage test
 
 ## Run benchmarks and compare against baseline
 bench:
@@ -12,8 +12,8 @@ bench:
 build:
 	go build -trimpath -ldflags "-X main.version=$$(git describe --tags --always --dirty)" ./cmd/mcp/
 
-## Run the full quality pipeline (build, test, lint)
-check: build test lint
+## Run the full quality pipeline (build, test, lint, doc-lint)
+check: build test lint doc-lint
 
 ## Generate test coverage report and enforce threshold
 coverage:
@@ -26,6 +26,18 @@ coverage:
 		exit 1; \
 	fi; \
 	echo "OK: coverage $${total}% meets threshold $${threshold}%"
+
+## Lint checked-in docs for citations of gitignored paths
+doc-lint:
+	@found=$$(grep -rnE --include='*.md' '(_bmad-output|_bmad|\.claude|docs/\.archive)/[A-Za-z0-9._-]+' docs/ *.md 2>/dev/null || true); \
+	if [ -n "$$found" ]; then \
+		echo "FAIL: checked-in docs cite gitignored paths:"; \
+		echo "$$found"; \
+		echo ""; \
+		echo "Move the cited content into a checked-in doc (e.g., docs/agent-rules.md), or remove the citation."; \
+		exit 1; \
+	fi
+	@echo "OK: no gitignored citations in checked-in docs"
 
 ## Run fuzz tests (override duration with FUZZTIME=2m)
 fuzz:

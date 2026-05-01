@@ -11,11 +11,13 @@ This is independent of the cosign signature path: cosign proves the artifact was
 
 ## Recipe
 
+The published `checksums.txt` covers the `.tar.gz` archive, not the bare binary — so the comparison runs against the archived binary, not your fresh build directly.
+
 ```bash
 # 1. Pick a release version
-VERSION=0.1.0
-GOOS=linux       # darwin | linux
-GOARCH=amd64     # amd64 | arm64
+VERSION=1.3.2        # use a real shipped tag
+GOOS=linux           # darwin | linux
+GOARCH=amd64         # amd64 | arm64
 
 # 2. Check out the tagged commit
 git clone https://github.com/andygeiss/mcp
@@ -26,29 +28,19 @@ git checkout "v${VERSION}"
 GOOS=$GOOS GOARCH=$GOARCH go build \
   -trimpath \
   -ldflags "-X main.version=${VERSION}" \
-  -o mcp \
+  -o mcp-local \
   ./cmd/mcp/
 
-# 4. Compute the SHA-256 of your local build
-sha256sum mcp        # Linux
-# shasum -a 256 mcp  # macOS
-
-# 5. Download the published checksum and compare
-curl -sSL "https://github.com/andygeiss/mcp/releases/download/v${VERSION}/checksums.txt" \
-  | grep "mcp_${VERSION}_${GOOS}_${GOARCH}"
-```
-
-The SHA from step 4 should match the SHA in the line printed by step 5 (after extracting the binary from the release archive — see below).
-
-## Verifying the archived binary
-
-The published `checksums.txt` covers the `.tar.gz` archive, not the bare binary. To compare against the binary inside the archive:
-
-```bash
+# 4. Download the published archive and extract its binary
 curl -sSLO "https://github.com/andygeiss/mcp/releases/download/v${VERSION}/mcp_${VERSION}_${GOOS}_${GOARCH}.tar.gz"
 tar -xzf "mcp_${VERSION}_${GOOS}_${GOARCH}.tar.gz" mcp
-sha256sum mcp        # this should match the SHA from step 4
+
+# 5. Compare the two binaries — same SHA-256 means reproducible
+sha256sum mcp mcp-local        # Linux
+# shasum -a 256 mcp mcp-local  # macOS
 ```
+
+Both lines should print the same hash. If they differ, your toolchain version, build flags, or source tree diverge from what CI used.
 
 ## Inspecting the embedded build metadata
 

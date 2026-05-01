@@ -180,4 +180,4 @@ Tool handlers can send requests to the client (e.g., sampling, elicitation, root
 
 ## BMad Workflow System
 
-[BMad](https://github.com/bmadcode/BMAD-METHOD) agent workflow in `.claude/skills/` and `_bmad/` — use `/bmad-help` for next steps.
+[BMad](https://github.com/bmadcode/BMAD-METHOD) agent workflow — use `/bmad-help` for next steps.

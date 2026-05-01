@@ -20,9 +20,14 @@ Record every breaking change, additive change, renamed field, and capability shi
 
 ## 2. Update the version constants
 
-- `internal/protocol/constants.go` — bump `MCPVersion` to the new date.
-- `README.md` — grep for the old version string and update every occurrence.
-- `docs/project-overview.md`, `docs/architecture.md` — update if they pin the version.
+- `internal/protocol/constants.go` — bump `MCPVersion` to the new date. This is the only source of truth.
+- Sweep all checked-in docs for the old version string and update every occurrence:
+
+  ```bash
+  grep -rln "$OLD_VERSION" docs/ README.md *.md
+  ```
+
+  Update each hit to the new version. Don't enumerate doc paths in this playbook — the grep is authoritative and won't go stale.
 
 ## 3. Update conformance fixtures
 

@@ -8,7 +8,7 @@
 
 ## Executive summary
 
-A single Go binary that implements the Model Context Protocol over stdin/stdout. No HTTP layer, no router, no router middleware, no third-party dependencies. The architecture is deliberately flat — complexity is added only when the code demands it. The single biggest design choice is the transport: NDJSON on stdio, with stdout reserved for protocol bytes and stderr reserved for `slog.JSONHandler` diagnostics.
+A single Go binary that implements the Model Context Protocol over stdin/stdout. No HTTP layer, no router, no third-party dependencies. The architecture is deliberately flat — complexity is added only when the code demands it. The single biggest design choice is the transport: NDJSON on stdio, with stdout reserved for protocol bytes and stderr reserved for `slog.JSONHandler` diagnostics.
 
 ## Architectural style
 
@@ -74,6 +74,14 @@ internal/server/      The lifecycle, dispatch, and bidi transport layer.
 
 ## Lifecycle (three-state machine)
 
+```mermaid
+stateDiagram-v2
+    [*] --> Uninitialized
+    Uninitialized --> Initializing : initialize request
+    Initializing --> Ready : notifications/initialized
+    Ready --> [*] : EOF / SIGTERM
+```
+
 | State | Allowed methods | All other methods |
 |---|---|---|
 | **Uninitialized** | `initialize`, `ping` | `-32000` ("server not initialized") |
@@ -111,6 +119,30 @@ internal/server/      The lifecycle, dispatch, and bidi transport layer.
 
 Tool handlers can issue requests to the client (sampling, elicitation, roots, or any future method) via `protocol.SendRequest(ctx, method, params)`. The server attaches itself as a `protocol.Peer` to the handler's context (`protocol.ContextWithPeer`) at dispatch — handler packages never import `internal/server` (Invariant I1, CI-enforced via `depguard.no-server-in-handlers`).
 
+```mermaid
+sequenceDiagram
+    autonumber
+    participant H as Tool Handler
+    participant S as Server
+    participant R as Reader (stdin)
+    participant C as Client
+
+    H->>S: protocol.SendRequest(ctx, method, params)
+    Note over S: AI9 capability gate (FIRST statement)
+    alt client did not advertise capability
+        S-->>H: *CapabilityNotAdvertisedError<br/>(zero side effects)
+    else gate passes
+        S->>S: id = outboundIDCounter.Add(1)
+        S->>S: pending[id] = respChan (under mutex)
+        Note over S: AI10: defer suspendForOutbound()()
+        S->>C: encode request (stdoutMu)
+        C-->>R: response (async, via stdin)
+        R->>S: deliver to pending[id].respChan
+        S-->>H: *Response
+        Note over S: AI10 unsuspended (defer fires)
+    end
+```
+
 **Correlation primitive:** mutex-protected pending-request map keyed by monotonic `atomic.Int64` IDs (`outboundIDCounter`). The `respChan` is buffer-1 and **never closed** (Invariant I3 — closing races the cancel path).
 
 **AI9 capability gate:** outbound `sampling/`, `elicitation/`, `roots/` calls return `*protocol.CapabilityNotAdvertisedError` with **zero side effects** (pending-map untouched, no bytes written) when the client did not advertise the corresponding capability during `initialize`. The check is the first statement on the outbound path.
@@ -119,7 +151,7 @@ Tool handlers can issue requests to the client (sampling, elicitation, roots, or
 
 **AI10 enforcement (Q6):** `(*Server).SendRequest` brackets its outbound await with `defer ProgressFromContext(ctx).suspendForOutbound()()`, so any `Progress.Report` invocation between outbound dispatch and response correlation is dropped at the source. This prevents `notifications/progress` from interleaving with the awaited inbound response on the wire — which would otherwise corrupt the pending-request map's response correlation. Cross-references: [Progress reporting](./development-guide.md#progress-reporting-from-tool-handlers) and ADR-003 §Invariants.
 
-See [ADR-003](./adr/ADR-003-bidi-reader-split.md) (currently absent — restore via `git restore`) for the reader-split design and four ratified invariants (AI7–AI10).
+See [ADR-003](./adr/ADR-003-bidi-reader-split.md) for the reader-split design and four ratified invariants (AI7–AI10).
 
 ## Schema derivation
 
@@ -157,7 +189,7 @@ This means adding a tool is: define an input struct → write `func(ctx, T) Resu
 - **stdlib over hand-rolled.** No custom crypto, no string-built shell/SQL/exec invocations.
 - **Supply chain:** cosign keyless signing, SBOM attached per archive, SLSA L3 provenance via `slsa-framework/slsa-github-generator`, OSS-Fuzz integration on `internal/protocol/`.
 - **CI gates:** `codeql`, `scorecard`, `fuzz` workflows must pass.
-- **`MCP_TRACE=1`** logs every request and response to stderr — explicitly **not for production** when handlers may receive credentials or PII.
+- **`MCP_TRACE`** is debug-only — see [environment variables](./deployment-guide.md#environment-variables) for the production caveat.
 
 ## Error code taxonomy
 
@@ -198,5 +230,5 @@ This means adding a tool is: define an input struct → write `func(ctx, T) Resu
 - [Source Tree Analysis](./source-tree-analysis.md) — directory-by-directory map
 - [Development Guide](./development-guide.md) — building, testing, fuzzing
 - [Deployment Guide](./deployment-guide.md) — releases, signing, verification
-- [project-context.md (LLM agent rules)](../_bmad-output/project-context.md) — operational rules sheet
+- [Agent Rules](./agent-rules.md) — operational rules sheet for AI agents
 - [CLAUDE.md](../CLAUDE.md) — engineering philosophy

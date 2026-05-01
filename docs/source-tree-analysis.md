@@ -2,8 +2,6 @@
 
 **Repository:** `github.com/andygeiss/mcp`
 **Type:** monolith (single Go module)
-**LOC:** ~3,770 production / ~12,930 test (16,703 total across `cmd/` + `internal/`)
-**Files:** 29 production `.go` + 42 test `.go`
 
 ---
 
@@ -173,7 +171,7 @@ Handler packages reach the bidi path via `protocol.SendRequest(ctx, ...)` and `p
 ## Critical files for an AI agent to read first
 
 1. **`CLAUDE.md`** — engineering philosophy, build/test commands, conventions, guardrails.
-2. **`_bmad-output/project-context.md`** — load-bearing rules sheet (gitignored; supplements CLAUDE.md).
+2. **[`docs/agent-rules.md`](./agent-rules.md)** — load-bearing operational rules sheet for AI agents (supplements CLAUDE.md).
 3. **`go.mod`** — source of truth for Go version.
 4. **`internal/protocol/constants.go`** — protocol version, error codes, method names.
 5. **`cmd/mcp/main.go`** — wiring template; how a server is constructed.

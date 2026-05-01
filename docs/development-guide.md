@@ -35,7 +35,7 @@ The Makefile is the canonical entry point for development tasks.
 | `make coverage` | Runs tests with coverage and **enforces the 90% threshold**. Fails if total drops below. |
 | `make fuzz` | Fuzzes `Fuzz_Decoder_With_ArbitraryInput` for 30s. `make fuzz FUZZTIME=5m` to extend. |
 | `make bench` | Runs benchmarks (count=6) and compares against `testdata/benchmarks/baseline.txt` via benchstat. |
-| `make smoke` | End-to-end smoke test: pipes `initialize` + `notifications/initialized` + `tools/list` through the binary, checks the response. Prints `"Your server works. It exposes N tool(s)."` on success or two diagnostic hints + captured stderr on failure. |
+| `make smoke` | End-to-end smoke test: pipes `initialize` + `notifications/initialized` + `tools/list` through the binary and checks the response. On success, prints a one-liner naming the tool count; on failure, prints diagnostic hints + captured stderr (exit 1). |
 | `make spec-coverage` | Regenerate `docs/spec-coverage.txt` from the in-memory `protocol.Clauses` registry. Run after adding a new clause; commit the updated file alongside the test change. |
 | `make init MODULE=...` | Scaffold rewriter — rewrites the module path, repoints badges, runs `go mod tidy`, removes `cmd/scaffold/`, resets git history. **Refuses to run on a dirty tree** — commit/stash first or pass `--force`. |
 
@@ -256,11 +256,11 @@ Commit messages follow Conventional Commits: `type(scope): summary`.
 - **One concern per commit.** Bug-fix commits don't carry refactors; refactor commits don't carry behavior changes.
 - **Tests and the code they cover live and die together** in one commit.
 
-For AI-co-authored commits, the trailer is **literal**:
+For AI-co-authored commits, use a `Co-authored-by:` trailer naming the model that did the work — for example:
 ```
-Co-Authored-By: Claude <noreply@anthropic.com>
+Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 ```
-Capitalization matters (`Co-Authored-By`, not `co-authored-by`). Pass commit messages via HEREDOC — inline `-m` mangles newlines and breaks the trailer.
+GitHub renders this as a co-author on the commit. Pass commit messages via HEREDOC — inline `-m` mangles newlines and breaks the trailer.
 
 ## Pull requests
 
@@ -291,9 +291,7 @@ Breaking the template is silent until a downstream user files an issue.
 
 ## Environment variables
 
-| Variable | Effect |
-|---|---|
-| `MCP_TRACE=1` | Logs every request and response to stderr via `slog`. Useful for debugging. **Do not enable in production** — trace output includes full tool arguments which may contain credentials or PII. |
+`MCP_TRACE=1` is the only variable; it logs every request and response to stderr for local debugging. Production caveat lives with the operator-facing reference: see [environment variables](./deployment-guide.md#environment-variables).
 
 ## What we won't accept
 
@@ -313,4 +311,4 @@ Breaking the template is silent until a downstream user files an issue.
 - [Deployment Guide](./deployment-guide.md) — releases, signing
 - [CONTRIBUTING.md](../CONTRIBUTING.md) — short-form contributor onboarding
 - [CLAUDE.md](../CLAUDE.md) — engineering philosophy for AI agents
-- [`_bmad-output/project-context.md`](../_bmad-output/project-context.md) — the load-bearing operational rule sheet for AI agents (gitignored)
+- [Agent Rules](./agent-rules.md) — the load-bearing operational rule sheet for AI agents
