@@ -17,6 +17,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 - `internal/server/progress.go`: AI10 enforcement is now code-level, not convention-only. `*Progress` carries an `outboundDepth atomic.Int32`, and `(*Server).SendRequest` brackets its outbound await with `defer ProgressFromContext(ctx).suspendForOutbound()()`. `Progress.Report` returns no-op while depth > 0, so handlers may safely call `Report` from goroutines that fire during a parked `protocol.SendRequest` without corrupting response correlation. Each dropped `Report` also emits a `progress_dropped_during_outbound` warn on stderr (request-scoped logger, carries `request_id` + `reason=ai10_invariant`) so operators see when handler code is interleaving `Report` with `SendRequest` — silent correction with loud telemetry. The no-token no-op path stays silent. (Q6 / Story 2.3)
 - `internal/server/progress_internal_test.go` (new) and `internal/server/progress_test.go` (new): the Q6 spec-conformance battery — white-box dispatch plumbing (`Test_Dispatch_With_ProgressToken_Should_PlumbToContext`), AI10 unit drop (`Test_Progress_Report_With_OutboundActive_Should_Drop`), AI10 integration drop (`Test_ProgressReport_DuringOutboundBidi_Should_NotInterleave`), no-token negative path (`Test_ProgressReport_Without_Token_Should_NotEmit`), and byte-faithful golden tests for string and number tokens (`Test_ProgressReport_With_StringToken_Should_PreserveType`, `Test_ProgressReport_With_NumberToken_Should_PreserveType`). All five MUST clauses registered in the spec-clause registry from Story 2.1.
 - `internal/server/synctest_test.go`, `internal/server/server_test.go`, and `internal/server/bidi_internal_test.go` (new): Q18 spec-conformance pin for outbound `elicitation/create`. `Test_SendRequest_With_ElicitationCreate_AndCapabilityNotAdvertised_Should_ReturnCapabilityError` (black-box) proves the wire-side AI9 invariant — zero bytes mentioning `"elicitation/create"` reach stdout when the client did not advertise the capability. `Test_SendRequest_With_ElicitationCreate_AndCapabilityNotAdvertised_Should_LeavePendingMapEmpty` (white-box) is the server-state companion — pins `len(s.pending) == 0`, `s.outboundIDCounter.Load() == 0`, and `stdout.Len() == 0` together, proving the AI9 gate is the FIRST statement on the outbound path (no registerPending, no ID burn, no encode). `Test_SendRequest_With_ElicitationCreate_AndCapabilityAdvertised_Should_RoundTrip` is the bidi happy-path companion. The wiring (`CapElicitation`, `MethodCapability["elicitation/create"]`) was already in place since v1.3.0; this story pins the behavior with two MUST clauses in the spec-clause registry. (Q18 / Story 2.4)
+- `docs/agent-rules.md`: operational rules for AI agents — checked-in canonical source replacing the gitignored `_bmad-output/project-context.md`. Downstream forks via `make init` now inherit the rules instead of getting broken citations to a file the scaffold doesn't ship.
+- `make doc-lint` target: scans checked-in markdown for citations of gitignored paths (`_bmad-output/`, `_bmad/`, `.claude/`, `docs/.archive/`) and fails on hit; wired into `make check` so the pre-commit hook blocks regressions.
+- `docs/architecture.md`: Mermaid diagrams for the three-state lifecycle and the bidi outbound sequence (with AI9 capability gate + AI10 suspension window annotated).
 
 ### Changed
 
@@ -25,6 +28,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 - `cmd/scaffold/testdata/greet.go.fixture`: scaffold consumer fixture updated to the new pattern (`GreetOutput` type + `(GreetOutput, Result)` return).
 - `internal/server/testdata/conformance/tools-list.response.jsonl`: golden response updated to include the `outputSchema` field that every tool now advertises.
 - `docs/development-guide.md`: "Adding a new tool" section rewritten for the typed-output pattern.
+- `docs/`: DRY pass — deduplicated the key-facts table (canonical: `project-overview.md`), the "what's not implemented" list (canonical: `architecture.md`), and the `MCP_TRACE` warning (canonical: `deployment-guide.md`). Cross-links replace the duplicates so a single fact is updated in one place.
+- `docs/spec-upgrade.md` (renamed from `SPEC_UPGRADE.md`): kebab-case for consistency with the rest of `docs/`. The "update the version constants" step now uses a `grep -rln` recipe instead of an enumerated doc list, so the playbook can't go stale.
+- `docs/reproducible-build.md`: recipe rewritten as one linear flow comparing the archived binary (matching the actual `checksums.txt` target) instead of bouncing between two sections; `VERSION=0.1.0` example bumped to `1.3.2` (a real shipped tag).
+- `docs/development-guide.md`: `Co-authored-by:` trailer convention corrected to match git history (lowercase 'a' + model-specific attribution); `make smoke` table cell rewritten to describe the success contract instead of pinning a literal output string that has already drifted.
+- `docs/{index,architecture,project-overview}.md`: stripped stale "ADRs are absent — restore via `git restore`" claims (the ADRs are present in `docs/adr/`).
+- `docs/{source-tree-analysis,project-overview}.md`: dropped pinned LOC / file counts that rot every PR.
+- `CLAUDE.md`, `docs/retros/q1w1-2026-04-30.md`: stripped four pre-existing citations of gitignored paths surfaced by the new `make doc-lint` gate.
 
 ## [1.3.2] — 2026-04-25
 
@@ -99,7 +109,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 ### Added
 
 - `docs/adr/ADR-001-stdio-ndjson-transport.md`: records the stdio + NDJSON transport choice with the alternatives considered (LSP framing, HTTP+SSE, WebSocket) and the consequences for future revisit.
-- `docs/SPEC_UPGRADE.md`: the 5-step MCP spec upgrade playbook (diff the spec, update constants, update conformance fixtures, decide the bump per VERSIONING.md, tag/release/verify).
+- `docs/spec-upgrade.md`: the 5-step MCP spec upgrade playbook (diff the spec, update constants, update conformance fixtures, decide the bump per VERSIONING.md, tag/release/verify).
 - `README.md`: one-sentence pointer from the Protocol compliance section to ADR-001.
 - `cmd/init` integration test asserts that all four template-only paths (`CLAUDE.md`, `_bmad/`, `_bmad-output/`, `.claude/`) are absent post-init and that the consumer's full quality gate (build + `test -race` + lint) still passes, including after adding a second tool.
 

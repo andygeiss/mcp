@@ -16,15 +16,20 @@ A production-ready MCP server in pure Go that communicates over stdin/stdout usi
 
 | Aspect | Detail |
 |---|---|
+| **Module** | `github.com/andygeiss/mcp` |
 | **Language** | Go 1.26+ (`go.mod` is source of truth) |
+| **Entry point** | `cmd/mcp/main.go` (wiring only) |
 | **Protocol** | MCP `2025-11-25` over JSON-RPC 2.0 |
 | **Transport** | Newline-delimited JSON on stdin/stdout |
 | **Dependencies** | Zero external `go.mod` dependencies — standard library only |
 | **JSON codec** | `encoding/json` v1 (`GOEXPERIMENT=jsonv2` is unsupported) |
 | **Concurrency** | Sequential dispatch — `experimental.concurrency.maxInFlight: 1` advertised |
-| **Per-message cap** | 4 MB |
-| **Handler timeout** | 30s |
-| **Coverage threshold** | 90% (enforced via `make coverage`) |
+| **Per-message cap** | 4 MB (counting reader) |
+| **Handler timeout** | 30s → `-32001` |
+| **Tests** | `go test -race ./...` mandatory; 90% coverage threshold via `make coverage` |
+| **Lint** | `golangci-lint`; must pass with zero issues |
+| **Fuzz** | 5 targets; OSS-Fuzz integrated; `make fuzz` runs decoder for 30s |
+| **Release** | goreleaser + cosign keyless + SBOM + SLSA L3 provenance |
 | **Logging** | `slog.JSONHandler` to stderr; stdout stays protocol-only |
 | **Repository type** | Monolith (single Go module) |
 | **Architecture pattern** | Layered with strict dependency direction (`cmd → server → protocol`) |
@@ -41,12 +46,7 @@ A production-ready MCP server in pure Go that communicates over stdin/stdout usi
 - `ping` (always allowed, all states)
 - Generic server-to-client request primitive (enables bidirectional methods like sampling, elicitation, roots when invoked from a tool handler)
 
-**Not implemented (rejected with `-32601`):**
-- `resources/subscribe`, `resources/unsubscribe`
-- `completion/complete`
-- `roots/list`
-- `sampling/*`, `elicitation/*` as server-hosted methods
-- `*/list_changed` notifications (planned for v1.4.0)
+**Not implemented:** server-hosted `sampling/*`, `elicitation/*`, `completion/complete`, `roots/list`, `resources/{subscribe,unsubscribe}`, and `*/list_changed` notifications all return `-32601`. Full list with rationale: [Out of scope](./architecture.md#out-of-scope-deliberate-non-goals).
 
 ## Tech stack
 
@@ -93,7 +93,7 @@ A production-ready MCP server in pure Go that communicates over stdin/stdout usi
 └── _bmad/             # BMad agent workflow (planning + implementation)
 ```
 
-**Source breakdown:** ~29 production `.go` files, ~42 test files, 5 fuzz targets, ~11 benchmarks, 37 conformance fixtures, ~10 integration tests.
+**Source breakdown:** production + test files split across the packages above; 5 fuzz targets in `internal/protocol/`; conformance fixtures under `internal/server/testdata/conformance/`; benchmarks compared against `testdata/benchmarks/baseline.txt`.
 
 ## Release history
 
@@ -125,4 +125,4 @@ Authored references (root):
 - [SECURITY.md](../SECURITY.md) — security policy
 - [VERSIONING.md](../VERSIONING.md) — versioning policy
 
-ADRs (in `docs/adr/`) capture irreversible architectural decisions — currently absent from the working tree (recently deleted; restore via `git restore docs/adr/` if needed).
+ADRs in [`docs/adr/`](./adr/) capture irreversible architectural decisions.

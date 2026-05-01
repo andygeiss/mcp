@@ -9,23 +9,11 @@
 - **Type:** Monolith (single Go module)
 - **Project class:** CLI binary (`cmd/mcp/`) + scaffold/template for downstream MCP servers
 - **Primary Language:** Go 1.26+
-- **Architecture:** Layered with strict dependency direction; flat — no hexagonal/bounded-context layering
+- **Architecture:** Flat layered (no hexagonal / bounded-context structure), strict dependency direction
 
 ## Quick Reference
 
-| Aspect | Detail |
-|---|---|
-| **Module** | `github.com/andygeiss/mcp` |
-| **Entry point** | `cmd/mcp/main.go` (wiring only) |
-| **Protocol** | MCP `2025-11-25` over JSON-RPC 2.0, NDJSON on stdin/stdout |
-| **Dependencies** | Zero external `go.mod` deps — stdlib only |
-| **Lint** | `golangci-lint`; must pass with zero issues |
-| **Tests** | `go test -race ./...` mandatory; 90% coverage threshold (`make coverage`) |
-| **Fuzz** | 5 targets; OSS-Fuzz integrated; `make fuzz` runs decoder for 30s |
-| **Release** | goreleaser + cosign keyless + SBOM + SLSA L3 provenance |
-| **Concurrency** | Sequential — `experimental.concurrency.maxInFlight: 1` advertised |
-| **Per-message cap** | 4 MB (counting reader) |
-| **Handler timeout** | 30 seconds → `-32001` |
+For module path, protocol version, dependency policy, build/test/release commands, and operational limits: see [Key facts](./project-overview.md#key-facts) in the Project Overview.
 
 ## Generated Documentation
 
@@ -46,23 +34,17 @@
 
 ## Architecture Decision Records (ADRs)
 
-ADRs live in `docs/adr/` and capture irreversible architectural decisions. **Not present in the working tree** at scan time — recently deleted (`git status` shows `D docs/adr/ADR-001-stdio-ndjson-transport.md`, `D docs/adr/ADR-002-internal-package-layout.md`, `D docs/adr/ADR-003-bidi-reader-split.md`). Restore via:
+ADRs in `docs/adr/` capture irreversible architectural decisions:
 
-```bash
-git restore docs/adr/ docs/SPEC_UPGRADE.md
-```
-
-If restored, the canonical references are:
-
-- **ADR-001** — stdio + NDJSON transport rationale (referenced from README "Protocol compliance")
-- **ADR-002** — internal package layout
-- **ADR-003** — bidi reader-split design + `Peer` v1.x stability surface + four ratified invariants (AI7 cancel chain, AI8 typed errors, AI9 capability gate, AI10 no-progress-during-outbound)
+- [ADR-001](./adr/ADR-001-stdio-ndjson-transport.md) — stdio + NDJSON transport rationale (referenced from README "Protocol compliance")
+- [ADR-002](./adr/ADR-002-internal-package-layout.md) — internal package layout
+- [ADR-003](./adr/ADR-003-bidi-reader-split.md) — bidi reader-split design + `Peer` v1.x stability surface + four ratified invariants (AI7 cancel chain, AI8 typed errors, AI9 capability gate, AI10 no-progress-during-outbound)
 
 ADRs are written **after code stabilizes** (retrospective style) and never cite gitignored paths (`_bmad-output/`, `_bmad/`).
 
 ## Supplementary references
 
-- [`../_bmad-output/project-context.md`](../_bmad-output/project-context.md) — operational rule sheet for AI agents (gitignored). 173 bullets across 7 sections: Tech Stack, Language Rules, MCP Protocol Rules, Testing Rules, Code Quality, Development Workflow, Don't-Miss Rules.
+- [Agent Rules](./agent-rules.md) — operational rule sheet for AI agents. Tech Stack, Language Rules, MCP Protocol Rules, Testing Rules, Code Quality, Development Workflow, Don't-Miss Rules.
 
 ## Getting Started
 
@@ -95,15 +77,11 @@ make init MODULE=github.com/yourorg/yourproject
 
 After `make init` succeeds, the welcome banner names three steps: **Edit** (`internal/tools/echo.go`) → **Wire** (`cmd/mcp/main.go`) → **Verify** (`make smoke`).
 
-## What's not implemented (rejected with `-32601`)
+## What's not implemented
 
-- `resources/subscribe`, `resources/unsubscribe`
-- `completion/complete`
-- `roots/list`
-- Server-hosted `sampling/*`, `elicitation/*`
-- `*/list_changed` notifications (planned for v1.4.0)
+Server-hosted `sampling/*`, `elicitation/*`, `completion/complete`, `roots/list`, `resources/{subscribe,unsubscribe}`, and `*/list_changed` notifications all return `-32601`. The bidi primitive (`protocol.SendRequest`) lets a tool handler call the *client* for sampling/elicitation/roots, but the server does not host these as inbound methods.
 
-The bidi primitive (`protocol.SendRequest`) lets a tool handler call the *client* for sampling/elicitation/roots when invoked from a handler context — but the server does not host these as inbound methods.
+Full list and rationale: see [Out of scope](./architecture.md#out-of-scope-deliberate-non-goals) in the architecture doc.
 
 ## Source of truth on conflicts
 
@@ -114,6 +92,6 @@ When this documentation conflicts with the codebase, the codebase wins. Specific
 | Go version | `go.mod` |
 | Protocol version | `internal/protocol/constants.go` (`MCPVersion`) |
 | Engineering philosophy | `CLAUDE.md` |
-| Operational rules for AI agents | `_bmad-output/project-context.md` |
+| Operational rules for AI agents | [`docs/agent-rules.md`](./agent-rules.md) |
 | Build/test/release commands | `Makefile`, `.github/workflows/release.yml`, `.goreleaser.yml` |
 | Lint rules | `.golangci.yml` |
