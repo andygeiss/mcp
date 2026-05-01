@@ -390,13 +390,13 @@ func Test_RemoveTemplateOnlyContent_With_AllPaths_Should_RemoveThem(t *testing.T
 
 	// Arrange — populate every template-only path with realistic content.
 	dir := t.TempDir()
-	err := os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte("# Andy's conventions\n"), 0o600)
+	err := os.WriteFile(filepath.Join(dir, claudeMdName), []byte("# Andy's conventions\n"), 0o600)
 	assert.That(t, "write CLAUDE.md", err, nil)
-	err = os.MkdirAll(filepath.Join(dir, "_bmad", "sub"), 0o750)
+	err = os.MkdirAll(filepath.Join(dir, bmadDirName, "sub"), 0o750)
 	assert.That(t, "mkdir _bmad", err, nil)
-	err = os.WriteFile(filepath.Join(dir, "_bmad", "sub", "config.yaml"), []byte("key: value\n"), 0o600)
+	err = os.WriteFile(filepath.Join(dir, bmadDirName, "sub", "config.yaml"), []byte("key: value\n"), 0o600)
 	assert.That(t, "write bmad file", err, nil)
-	err = os.MkdirAll(filepath.Join(dir, "_bmad-output", "run"), 0o750)
+	err = os.MkdirAll(filepath.Join(dir, bmadOutputDirName, "run"), 0o750)
 	assert.That(t, "mkdir _bmad-output", err, nil)
 	err = os.MkdirAll(filepath.Join(dir, claudeDirName, "skills"), 0o750)
 	assert.That(t, "mkdir .claude", err, nil)
@@ -406,7 +406,7 @@ func Test_RemoveTemplateOnlyContent_With_AllPaths_Should_RemoveThem(t *testing.T
 
 	// Assert
 	assert.That(t, "remove error", err, nil)
-	for _, name := range []string{claudeDirName, "CLAUDE.md", "_bmad", "_bmad-output"} {
+	for _, name := range []string{claudeDirName, claudeMdName, bmadDirName, bmadOutputDirName} {
 		_, statErr := os.Stat(filepath.Join(dir, name))
 		assert.That(t, name+" gone", os.IsNotExist(statErr), true)
 	}
@@ -698,7 +698,7 @@ func Test_ShouldSkip_With_BmadDir_Should_ReturnTrue(t *testing.T) {
 
 	// Arrange
 	dir := t.TempDir()
-	bmadDir := filepath.Join(dir, "_bmad")
+	bmadDir := filepath.Join(dir, bmadDirName)
 	err := os.MkdirAll(bmadDir, 0o750)
 	assert.That(t, "mkdir error", err, nil)
 	info, err := os.Stat(bmadDir)
@@ -776,11 +776,11 @@ func Test_RewriteProject_With_ValidProject_Should_RewriteEverything(t *testing.T
 	assert.That(t, "write README.md", err, nil)
 
 	// Template-only content that must not leak to consumers.
-	err = os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte("# project conventions\n"), 0o600)
+	err = os.WriteFile(filepath.Join(dir, claudeMdName), []byte("# project conventions\n"), 0o600)
 	assert.That(t, "write CLAUDE.md", err, nil)
-	err = os.MkdirAll(filepath.Join(dir, "_bmad"), 0o750)
+	err = os.MkdirAll(filepath.Join(dir, bmadDirName), 0o750)
 	assert.That(t, "mkdir _bmad", err, nil)
-	err = os.WriteFile(filepath.Join(dir, "_bmad", "config.yaml"), []byte("key: value\n"), 0o600)
+	err = os.WriteFile(filepath.Join(dir, bmadDirName, "config.yaml"), []byte("key: value\n"), 0o600)
 	assert.That(t, "write bmad config", err, nil)
 	err = os.MkdirAll(filepath.Join(dir, claudeDirName), 0o750)
 	assert.That(t, "mkdir .claude", err, nil)
@@ -814,7 +814,7 @@ func Test_RewriteProject_With_ValidProject_Should_RewriteEverything(t *testing.T
 	}
 
 	// Check template-only content was removed
-	for _, name := range []string{claudeDirName, "CLAUDE.md", "_bmad"} {
+	for _, name := range []string{claudeDirName, claudeMdName, bmadDirName} {
 		_, statErr := os.Stat(filepath.Join(dir, name))
 		assert.That(t, name+" gone", os.IsNotExist(statErr), true)
 	}
