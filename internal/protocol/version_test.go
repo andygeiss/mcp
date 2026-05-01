@@ -7,6 +7,18 @@ import (
 	"github.com/andygeiss/mcp/internal/protocol"
 )
 
+func init() {
+	protocol.Register(protocol.Clause{
+		ID:      "MCP-2025-11-25/initialize/MUST-version-negotiation",
+		Level:   "MUST",
+		Section: "R5 initialize protocol-version negotiation",
+		Summary: "When the client requests an unsupported protocol version, the server returns its newest supported version as a counter-proposal rather than failing.",
+		Tests: []func(*testing.T){
+			Test_NegotiateVersion_With_UnsupportedVersion_Should_ReturnNewest,
+		},
+	})
+}
+
 func Test_SupportedVersions_Should_ContainCurrentVersion(t *testing.T) {
 	t.Parallel()
 

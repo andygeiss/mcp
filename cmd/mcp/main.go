@@ -36,7 +36,7 @@ func run() error {
 	registry := tools.NewRegistry()
 	// Register tools here. The echo tool is a minimal reference (~5 lines).
 	// Replace or extend with your own. See internal/tools/echo.go for the pattern.
-	if err := tools.Register(registry, "echo", "Echoes the input message", tools.Echo); err != nil {
+	if err := tools.Register[tools.EchoInput, tools.EchoOutput](registry, "echo", "Echoes the input message", tools.Echo); err != nil {
 		return fmt.Errorf("register echo: %w", err)
 	}
 

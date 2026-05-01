@@ -18,8 +18,8 @@ func Test_DeriveSchema_With_SingleField_Should_ProduceCorrectSchema(t *testing.T
 
 	// Arrange
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "stub", "stub tool", func(_ context.Context, input singleFieldInput) tools.Result {
-		return tools.TextResult(input.Message)
+	if err := tools.Register(r, "stub", "stub tool", func(_ context.Context, input singleFieldInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult(input.Message)
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -50,8 +50,8 @@ func Test_DeriveSchema_With_MultipleFields_Should_DeriveAllTypes(t *testing.T) {
 
 	// Arrange
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "multi", "multi-field tool", func(_ context.Context, _ multiFieldInput) tools.Result {
-		return tools.TextResult("ok")
+	if err := tools.Register(r, "multi", "multi-field tool", func(_ context.Context, _ multiFieldInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("ok")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -85,8 +85,8 @@ func Test_DeriveSchema_With_SliceField_Should_ProduceArrayType(t *testing.T) {
 
 	// Arrange
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "tagger", "tags tool", func(_ context.Context, _ sliceFieldInput) tools.Result {
-		return tools.TextResult("ok")
+	if err := tools.Register(r, "tagger", "tags tool", func(_ context.Context, _ sliceFieldInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("ok")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -112,8 +112,8 @@ func Test_DeriveSchema_With_MapField_Should_ProduceObjectType(t *testing.T) {
 
 	// Arrange
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "mapper", "map tool", func(_ context.Context, _ mapFieldInput) tools.Result {
-		return tools.TextResult("ok")
+	if err := tools.Register(r, "mapper", "map tool", func(_ context.Context, _ mapFieldInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("ok")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -144,8 +144,8 @@ func Test_DeriveSchema_With_NestedStruct_Should_ProduceNestedObject(t *testing.T
 
 	// Arrange
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "nested", "nested tool", func(_ context.Context, _ nestedStructInput) tools.Result {
-		return tools.TextResult("ok")
+	if err := tools.Register(r, "nested", "nested tool", func(_ context.Context, _ nestedStructInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("ok")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -176,8 +176,8 @@ func Test_DeriveSchema_With_UnsupportedType_Should_ReturnError(t *testing.T) {
 	r := tools.NewRegistry()
 
 	// Act
-	err := tools.Register(r, "bad", "bad tool", func(_ context.Context, _ unsupportedInput) tools.Result {
-		return tools.TextResult("ok")
+	err := tools.Register(r, "bad", "bad tool", func(_ context.Context, _ unsupportedInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("ok")
 	})
 
 	// Assert
@@ -201,8 +201,8 @@ func Test_DeriveSchema_With_PointerField_Should_UnwrapToUnderlyingTypeAndBeOptio
 
 	// Arrange
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "ptr", "pointer tool", func(_ context.Context, _ pointerFieldInput) tools.Result {
-		return tools.TextResult("ok")
+	if err := tools.Register(r, "ptr", "pointer tool", func(_ context.Context, _ pointerFieldInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("ok")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -227,8 +227,8 @@ func Test_DeriveSchema_With_NestedSlice_Should_ProduceNestedArraySchema(t *testi
 
 	// Arrange
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "matrix", "nested slice", func(_ context.Context, _ nestedSliceInput) tools.Result {
-		return tools.TextResult("ok")
+	if err := tools.Register(r, "matrix", "nested slice", func(_ context.Context, _ nestedSliceInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("ok")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -259,8 +259,8 @@ func Test_DeriveSchema_With_DashTag_Should_ExcludeField(t *testing.T) {
 
 	// Arrange
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "dash", "dash tag", func(_ context.Context, _ dashTagInput) tools.Result {
-		return tools.TextResult("ok")
+	if err := tools.Register(r, "dash", "dash tag", func(_ context.Context, _ dashTagInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("ok")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -286,8 +286,8 @@ func Test_DeriveSchema_With_BareCommaTag_Should_ExcludeField(t *testing.T) {
 
 	// Arrange — field with tag ",omitempty" has empty name, which causes skip
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "comma", "bare comma", func(_ context.Context, _ bareCommaTagInput) tools.Result {
-		return tools.TextResult("ok")
+	if err := tools.Register(r, "comma", "bare comma", func(_ context.Context, _ bareCommaTagInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("ok")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -346,8 +346,8 @@ func Test_DeriveSchema_With_ExcessiveDepth_Should_ReturnError(t *testing.T) {
 	r := tools.NewRegistry()
 
 	// Act
-	err := tools.Register(r, "deep", "deep tool", func(_ context.Context, _ excessiveDepthInput) tools.Result {
-		return tools.TextResult("ok")
+	err := tools.Register(r, "deep", "deep tool", func(_ context.Context, _ excessiveDepthInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("ok")
 	})
 
 	// Assert
@@ -374,8 +374,8 @@ func Test_DeriveSchema_With_SelfReferentialType_Should_ReturnError(t *testing.T)
 	r := tools.NewRegistry()
 
 	// Act
-	err := tools.Register(r, "selfref", "self-ref tool", func(_ context.Context, _ selfRefInput) tools.Result {
-		return tools.TextResult("ok")
+	err := tools.Register(r, "selfref", "self-ref tool", func(_ context.Context, _ selfRefInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("ok")
 	})
 
 	// Assert
@@ -431,8 +431,8 @@ func Test_DeriveSchema_With_ExactDepthLimit_Should_Succeed(t *testing.T) {
 	r := tools.NewRegistry()
 
 	// Act — should not error
-	if err := tools.Register(r, "exact", "exact depth tool", func(_ context.Context, _ exactDepthInput) tools.Result {
-		return tools.TextResult("ok")
+	if err := tools.Register(r, "exact", "exact depth tool", func(_ context.Context, _ exactDepthInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("ok")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -458,8 +458,8 @@ func Test_DeriveSchema_With_MixedNestingExceedingDepth_Should_ReturnError(t *tes
 	r := tools.NewRegistry()
 
 	// Act
-	err := tools.Register(r, "mixed", "mixed depth tool", func(_ context.Context, _ mixedDepthInput) tools.Result {
-		return tools.TextResult("ok")
+	err := tools.Register(r, "mixed", "mixed depth tool", func(_ context.Context, _ mixedDepthInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("ok")
 	})
 
 	// Assert
@@ -486,8 +486,8 @@ func Test_DeriveSchema_With_EmbeddedStruct_Should_PromoteFields(t *testing.T) {
 
 	// Arrange
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "embed", "embed tool", func(_ context.Context, _ embeddedInput) tools.Result {
-		return tools.TextResult("ok")
+	if err := tools.Register(r, "embed", "embed tool", func(_ context.Context, _ embeddedInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("ok")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -526,8 +526,8 @@ func Test_DeriveSchema_With_TaggedEmbeddedStruct_Should_NestFields(t *testing.T)
 
 	// Arrange
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "tagged-embed", "tagged embed tool", func(_ context.Context, _ taggedEmbeddedInput) tools.Result {
-		return tools.TextResult("ok")
+	if err := tools.Register(r, "tagged-embed", "tagged embed tool", func(_ context.Context, _ taggedEmbeddedInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("ok")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -571,8 +571,8 @@ func Test_DeriveSchema_With_DeepEmbedding_Should_PromoteAllLevels(t *testing.T) 
 
 	// Arrange
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "deep-embed", "deep embed tool", func(_ context.Context, _ deepEmbeddedInput) tools.Result {
-		return tools.TextResult("ok")
+	if err := tools.Register(r, "deep-embed", "deep embed tool", func(_ context.Context, _ deepEmbeddedInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("ok")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -604,8 +604,8 @@ func Test_DeriveSchema_With_EmbeddedPointerStruct_Should_PromoteFields(t *testin
 
 	// Arrange
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "ptr-embed", "ptr embed tool", func(_ context.Context, _ ptrEmbeddedInput) tools.Result {
-		return tools.TextResult("ok")
+	if err := tools.Register(r, "ptr-embed", "ptr embed tool", func(_ context.Context, _ ptrEmbeddedInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("ok")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -636,8 +636,8 @@ func Test_DeriveSchema_With_ShadowedField_Should_PreferParent(t *testing.T) {
 
 	// Arrange
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "shadow", "shadow tool", func(_ context.Context, _ shadowInput) tools.Result {
-		return tools.TextResult("ok")
+	if err := tools.Register(r, "shadow", "shadow tool", func(_ context.Context, _ shadowInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("ok")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -666,8 +666,8 @@ func Test_DeriveSchema_With_UnexportedEmbeddedStruct_Should_NotPromote(t *testin
 
 	// Arrange
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "unexported", "unexported tool", func(_ context.Context, _ unexportedEmbedInput) tools.Result {
-		return tools.TextResult("ok")
+	if err := tools.Register(r, "unexported", "unexported tool", func(_ context.Context, _ unexportedEmbedInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("ok")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -696,8 +696,8 @@ func Test_DeriveSchema_With_EmbeddedNonStructType_Should_NotPanic(t *testing.T) 
 
 	// Arrange
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "nonstruct", "nonstruct tool", func(_ context.Context, _ nonStructEmbedInput) tools.Result {
-		return tools.TextResult("ok")
+	if err := tools.Register(r, "nonstruct", "nonstruct tool", func(_ context.Context, _ nonStructEmbedInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("ok")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -720,8 +720,8 @@ func Test_DeriveSchema_With_Float64Field_Should_ProduceNumberType(t *testing.T) 
 
 	// Arrange
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "floater", "float tool", func(_ context.Context, _ float64FieldInput) tools.Result {
-		return tools.TextResult("ok")
+	if err := tools.Register(r, "floater", "float tool", func(_ context.Context, _ float64FieldInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("ok")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -746,8 +746,8 @@ func Test_DeriveSchema_With_UintField_Should_ProduceIntegerType(t *testing.T) {
 
 	// Arrange
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "uinter", "uint tool", func(_ context.Context, _ uintFieldInput) tools.Result {
-		return tools.TextResult("ok")
+	if err := tools.Register(r, "uinter", "uint tool", func(_ context.Context, _ uintFieldInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("ok")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -770,8 +770,8 @@ func Test_DeriveSchema_With_EmptyStruct_Should_ProduceEmptyProperties(t *testing
 
 	// Arrange
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "empty", "empty tool", func(_ context.Context, _ emptyStructInput) tools.Result {
-		return tools.TextResult("ok")
+	if err := tools.Register(r, "empty", "empty tool", func(_ context.Context, _ emptyStructInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("ok")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -796,8 +796,8 @@ func Test_DeriveSchema_With_AllOmitemptyFields_Should_ProduceEmptyRequired(t *te
 
 	// Arrange
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "allopt", "all optional tool", func(_ context.Context, _ allOmitemptyInput) tools.Result {
-		return tools.TextResult("ok")
+	if err := tools.Register(r, "allopt", "all optional tool", func(_ context.Context, _ allOmitemptyInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("ok")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -826,11 +826,11 @@ func Test_DeriveSchema_With_PointerTypeT_Should_UnwrapAndDeriveSchema(t *testing
 	r := tools.NewRegistry()
 
 	// Act
-	err := tools.Register(r, "ptrtype", "pointer type T", func(_ context.Context, input *pointerTypeInput) tools.Result {
+	err := tools.Register(r, "ptrtype", "pointer type T", func(_ context.Context, input *pointerTypeInput) (struct{}, tools.Result) {
 		if input == nil {
-			return tools.TextResult("")
+			return struct{}{}, tools.TextResult("")
 		}
-		return tools.TextResult(input.Label)
+		return struct{}{}, tools.TextResult(input.Label)
 	})
 	// Assert
 	if err != nil {
@@ -863,8 +863,8 @@ func Test_DeriveSchema_With_EmbeddedStructContainingUnsupportedType_Should_Retur
 	r := tools.NewRegistry()
 
 	// Act
-	err := tools.Register(r, "embedbad", "embedded bad", func(_ context.Context, _ embeddedUnsupportedInput) tools.Result {
-		return tools.TextResult("ok")
+	err := tools.Register(r, "embedbad", "embedded bad", func(_ context.Context, _ embeddedUnsupportedInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("ok")
 	})
 
 	// Assert
@@ -890,8 +890,8 @@ func Test_DeriveSchema_With_NonStringMapKey_Should_ReturnError(t *testing.T) {
 	r := tools.NewRegistry()
 
 	// Act
-	err := tools.Register(r, "badmap", "bad map", func(_ context.Context, _ nonStringMapKeyInput) tools.Result {
-		return tools.TextResult("ok")
+	err := tools.Register(r, "badmap", "bad map", func(_ context.Context, _ nonStringMapKeyInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("ok")
 	})
 
 	// Assert

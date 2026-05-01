@@ -42,9 +42,9 @@ func Test_Server_With_SynctestHandlerTimeout_Should_TimeoutDeterministically(t *
 	synctest.Test(t, func(t *testing.T) {
 		// Arrange — handler blocks until its timeout context fires
 		r := tools.NewRegistry()
-		if err := tools.Register(r, "blocker", "blocks until timed out", func(ctx context.Context, _ testInput) tools.Result {
+		if err := tools.Register(r, "blocker", "blocks until timed out", func(ctx context.Context, _ testInput) (struct{}, tools.Result) {
 			<-ctx.Done()
-			return tools.ErrorResult("handler context expired")
+			return struct{}{}, tools.ErrorResult("handler context expired")
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -94,9 +94,9 @@ func Test_Server_With_SynctestContextCancellation_Should_ShutdownCleanly(t *test
 		ctx, cancel := context.WithCancel(t.Context())
 
 		r := tools.NewRegistry()
-		if err := tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) tools.Result {
+		if err := tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) (struct{}, tools.Result) {
 			<-ctx.Done()
-			return tools.ErrorResult("cancelled")
+			return struct{}{}, tools.ErrorResult("cancelled")
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -126,9 +126,9 @@ func Test_Server_With_ConcurrentRequest_Should_RejectWithServerBusy(t *testing.T
 	synctest.Test(t, func(t *testing.T) {
 		// Arrange
 		r := tools.NewRegistry()
-		if err := tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) tools.Result {
+		if err := tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) (struct{}, tools.Result) {
 			<-ctx.Done()
-			return tools.ErrorResult("cancelled")
+			return struct{}{}, tools.ErrorResult("cancelled")
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -187,13 +187,13 @@ func Test_Server_With_CapabilityGate_Should_RejectSamplingWithoutAdvertisement(t
 		var capErr *protocol.CapabilityNotAdvertisedError
 		var sendErr error
 		r := tools.NewRegistry()
-		if err := tools.Register(r, "needsSampling", "calls sampling", func(ctx context.Context, _ testInput) tools.Result {
+		if err := tools.Register(r, "needsSampling", "calls sampling", func(ctx context.Context, _ testInput) (struct{}, tools.Result) {
 			_, e := protocol.SendRequest(ctx, "sampling/createMessage", nil)
 			sendErr = e
 			if errors.As(e, &capErr) {
-				return tools.TextResult("rejected as expected")
+				return struct{}{}, tools.TextResult("rejected as expected")
 			}
-			return tools.ErrorResult("unexpected outcome")
+			return struct{}{}, tools.ErrorResult("unexpected outcome")
 		}); err != nil {
 			t.Fatal(err)
 		}

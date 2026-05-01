@@ -53,8 +53,8 @@ func Test_Integration_With_FullPipeline_Should_CompleteSuccessfully(t *testing.T
 		`{"jsonrpc":"2.0","method":"tools/call","id":3,"params":{"name":"test","arguments":{"message":"integration test"}}}` + "\n"
 
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "test", "test tool", func(_ context.Context, input testInput) tools.Result {
-		return tools.TextResult(input.Message)
+	if err := tools.Register(r, "test", "test tool", func(_ context.Context, input testInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult(input.Message)
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -147,13 +147,13 @@ func Test_Integration_With_PanickingHandler_Should_RecoverAndContinue(t *testing
 	// Uses io.Pipe to sequence messages: the second tools/call is sent after the
 	// first response arrives, matching the maxInFlight:1 protocol contract.
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "panicker", "panics", func(_ context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "panicker", "panics", func(_ context.Context, _ testInput) (struct{}, tools.Result) {
 		panic("boom")
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := tools.Register(r, "test", "test tool", func(_ context.Context, input testInput) tools.Result {
-		return tools.TextResult(input.Message)
+	if err := tools.Register(r, "test", "test tool", func(_ context.Context, input testInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult(input.Message)
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -205,18 +205,18 @@ func Test_Integration_With_SlowHandler_Should_TimeoutAndContinue(t *testing.T) {
 
 	// Arrange — uses io.Pipe to sequence messages after the slow handler times out.
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "slow", "blocks", func(ctx context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "slow", "blocks", func(ctx context.Context, _ testInput) (struct{}, tools.Result) {
 		select {
 		case <-time.After(10 * time.Second):
-			return tools.TextResult("unreachable")
+			return struct{}{}, tools.TextResult("unreachable")
 		case <-ctx.Done():
-			return tools.ErrorResult("context cancelled")
+			return struct{}{}, tools.ErrorResult("context cancelled")
 		}
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := tools.Register(r, "test", "test tool", func(_ context.Context, input testInput) tools.Result {
-		return tools.TextResult(input.Message)
+	if err := tools.Register(r, "test", "test tool", func(_ context.Context, input testInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult(input.Message)
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -502,12 +502,12 @@ func Test_Server_With_OversizedString_DuringInFlight_Should_RejectNonFatallyAndC
 	t.Parallel()
 
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "slow", "blocks", func(ctx context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "slow", "blocks", func(ctx context.Context, _ testInput) (struct{}, tools.Result) {
 		select {
 		case <-time.After(10 * time.Second):
-			return tools.TextResult("unreachable")
+			return struct{}{}, tools.TextResult("unreachable")
 		case <-ctx.Done():
-			return tools.ErrorResult("context cancelled")
+			return struct{}{}, tools.ErrorResult("context cancelled")
 		}
 	}); err != nil {
 		t.Fatal(err)
@@ -591,12 +591,12 @@ func Test_Server_With_ToolTimeoutAndStructuralLimit_Should_BeDistinguishable(t *
 	t.Parallel()
 
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "slow", "blocks", func(ctx context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "slow", "blocks", func(ctx context.Context, _ testInput) (struct{}, tools.Result) {
 		select {
 		case <-time.After(10 * time.Second):
-			return tools.TextResult("unreachable")
+			return struct{}{}, tools.TextResult("unreachable")
 		case <-ctx.Done():
-			return tools.ErrorResult("context cancelled")
+			return struct{}{}, tools.ErrorResult("context cancelled")
 		}
 	}); err != nil {
 		t.Fatal(err)
@@ -704,4 +704,179 @@ func Test_Server_With_StructuralLimit_AndFailingStdout_Should_LogEncodeError(t *
 	if !strings.Contains(stderr.String(), `"decode_structural_limit"`) {
 		t.Fatalf("expected decode_structural_limit log on stderr, got: %s", stderr.String())
 	}
+}
+
+// echoOutInput / echoOutOutput exercise the Q5 path: the handler returns a
+// non-zero structured Out alongside the legacy text Result.
+type echoOutInput struct {
+	Message string `json:"message" description:"the message to echo"`
+}
+
+type echoOutOutput struct {
+	Echoed string `json:"echoed" description:"the message that was echoed"`
+}
+
+// noOutAck is a small typed wrapper for tools that have no rich structured
+// output but follow the dev-guide rule of using a named type rather than a
+// bare struct{}. The wrapper is intentionally trivial; what matters is that
+// the schema engine produces a stable, named shape.
+type noOutAck struct {
+	OK bool `json:"ok" description:"acknowledgment that the tool ran"`
+}
+
+// Test_Server_With_StructuredContent_Should_RoundTrip pins the MUST that a
+// tools/call response carries the typed Out as structuredContent, byte-for-
+// byte matching what the dispatch layer marshals from the handler return.
+func Test_Server_With_StructuredContent_Should_RoundTrip(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — a tool whose Out type is non-zero on every call.
+	r := tools.NewRegistry()
+	if err := tools.Register[echoOutInput, echoOutOutput](r, "echoOut", "echo with structured output",
+		func(_ context.Context, in echoOutInput) (echoOutOutput, tools.Result) {
+			return echoOutOutput{Echoed: in.Message}, tools.Result{}
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	input := handshake() +
+		`{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"echoOut","arguments":{"message":"hello"}}}` + "\n"
+
+	var stdout, stderr bytes.Buffer
+	srv := server.NewServer("mcp", "test", r, strings.NewReader(input), &stdout, &stderr)
+
+	// Act
+	if err := srv.Run(context.Background()); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	// Assert — at least handshake response + tools/call response.
+	responses := parseResponses(t, &stdout)
+	if len(responses) < 2 {
+		t.Fatalf("expected ≥2 responses (init + tools/call), got %d", len(responses))
+	}
+	assert.That(t, "tools/call id", string(responses[1].ID), "2")
+
+	var result struct {
+		Content           []tools.ContentBlock `json:"content"`
+		StructuredContent json.RawMessage      `json:"structuredContent"`
+	}
+	if err := json.Unmarshal(responses[1].Result, &result); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+
+	// Assert — structuredContent matches what json.Marshal(echoOutOutput{...})
+	// produces, byte-for-byte. This is the actual round-trip claim from the
+	// Clause Summary, not a relaxed field-level equality.
+	expected, err := json.Marshal(echoOutOutput{Echoed: "hello"})
+	if err != nil {
+		t.Fatalf("marshal expected: %v", err)
+	}
+	assert.That(t, "structuredContent bytes", string(result.StructuredContent), string(expected))
+}
+
+// Test_ToolsList_With_TypedOutputs_Should_AdvertiseOutputSchema pins the MUST
+// that every tool definition emitted by tools/list carries an outputSchema
+// derived from its registered Out type, with the expected structural shape.
+func Test_ToolsList_With_TypedOutputs_Should_AdvertiseOutputSchema(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — register two tools with different named Out types. The
+	// no-rich-output tool uses a small typed wrapper (noOutAck) per the
+	// dev-guide convention; bare struct{} would also work but defeats the
+	// "concrete types document the contract" intent.
+	r := tools.NewRegistry()
+	if err := tools.Register[echoOutInput, echoOutOutput](r, "echoOut", "...",
+		func(_ context.Context, in echoOutInput) (echoOutOutput, tools.Result) {
+			return echoOutOutput{Echoed: in.Message}, tools.Result{}
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := tools.Register[testInput, noOutAck](r, "ackOut", "...",
+		func(_ context.Context, _ testInput) (noOutAck, tools.Result) {
+			return noOutAck{OK: true}, tools.Result{}
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	input := handshake() + `{"jsonrpc":"2.0","method":"tools/list","id":2,"params":{}}` + "\n"
+
+	var stdout, stderr bytes.Buffer
+	srv := server.NewServer("mcp", "test", r, strings.NewReader(input), &stdout, &stderr)
+
+	// Act
+	if err := srv.Run(context.Background()); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	// Assert — at least handshake response + tools/list response.
+	responses := parseResponses(t, &stdout)
+	if len(responses) < 2 {
+		t.Fatalf("expected ≥2 responses (init + tools/list), got %d", len(responses))
+	}
+
+	var listResult struct {
+		Tools []struct {
+			Name         string `json:"name"`
+			OutputSchema struct {
+				Properties map[string]json.RawMessage `json:"properties"`
+				Required   []string                   `json:"required"`
+				Type       string                     `json:"type"`
+			} `json:"outputSchema"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(responses[1].Result, &listResult); err != nil {
+		t.Fatalf("unmarshal tools/list: %v", err)
+	}
+	assert.That(t, "tool count", len(listResult.Tools), 2)
+
+	// Assert — every tool has a structurally valid outputSchema (Type
+	// "object"). Empty-bytes / "null" / "{}" all fail this check.
+	byName := map[string]int{}
+	for i, tool := range listResult.Tools {
+		assert.That(t, "outputSchema.type for "+tool.Name, tool.OutputSchema.Type, "object")
+		byName[tool.Name] = i
+	}
+
+	// Assert — echoOut's outputSchema includes the expected `echoed` property,
+	// proving the schema is reflection-derived from echoOutOutput rather than
+	// a placeholder.
+	echoIdx, ok := byName["echoOut"]
+	assert.That(t, "echoOut tool present", ok, true)
+	if ok {
+		_, hasEchoed := listResult.Tools[echoIdx].OutputSchema.Properties["echoed"]
+		assert.That(t, "echoOut outputSchema has echoed property", hasEchoed, true)
+	}
+	ackIdx, ok := byName["ackOut"]
+	assert.That(t, "ackOut tool present", ok, true)
+	if ok {
+		_, hasOK := listResult.Tools[ackIdx].OutputSchema.Properties["ok"]
+		assert.That(t, "ackOut outputSchema has ok property", hasOK, true)
+	}
+}
+
+// Spec-coverage clause registrations for the Q5 MUSTs covered by the two
+// tests above. Mirrors Story 2.1's colocation pattern.
+func init() {
+	protocol.Register(protocol.Clause{
+		ID:      "MCP-2025-11-25/tools/MUST-emit-structuredContent",
+		Level:   "MUST",
+		Section: "Q5 typed tool outputs (structuredContent + outputSchema)",
+		Summary: "When a tool handler returns a non-zero structured Out, the server marshals it into the tool-call response's structuredContent field.",
+		Tests: []func(*testing.T){
+			Test_Server_With_StructuredContent_Should_RoundTrip,
+		},
+	})
+	protocol.Register(protocol.Clause{
+		ID:      "MCP-2025-11-25/tools/MUST-advertise-outputSchema",
+		Level:   "MUST",
+		Section: "Q5 typed tool outputs (structuredContent + outputSchema)",
+		Summary: "tools/list advertises outputSchema for every registered tool, derived from the registered Out type.",
+		Tests: []func(*testing.T){
+			Test_ToolsList_With_TypedOutputs_Should_AdvertiseOutputSchema,
+		},
+	})
 }

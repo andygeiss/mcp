@@ -185,8 +185,8 @@ func Test_handleToolsList_With_ValidRegistry_Should_ReturnTools(t *testing.T) {
 	// Arrange
 	s := newTestServer(t)
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "echo", "echoes", func(_ context.Context, _ struct{}) tools.Result {
-		return tools.TextResult("ok")
+	if err := tools.Register(r, "echo", "echoes", func(_ context.Context, _ struct{}) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("ok")
 	}); err != nil {
 		t.Fatal(err)
 	}

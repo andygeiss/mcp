@@ -118,8 +118,8 @@ func Test_UnmarshalAndValidate_With_InvalidJSON_Should_ReturnDecodeError(t *test
 
 	// Arrange
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "decode-err", "decode error tool", func(_ context.Context, _ decodeErrorInput) tools.Result {
-		return tools.TextResult("ok")
+	if err := tools.Register(r, "decode-err", "decode error tool", func(_ context.Context, _ decodeErrorInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("ok")
 	}); err != nil {
 		t.Fatal(err)
 	}

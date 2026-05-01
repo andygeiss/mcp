@@ -6,6 +6,23 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ## [Unreleased]
 
+### Added
+
+- `internal/tools.Register[In, Out]`: tool handlers now declare a typed structured-output `Out` alongside the input `In`. Handler signature changed from `func(ctx, In) Result` to `func(ctx, In) (Out, Result)`. The dispatch wrapper auto-marshals a non-zero `Out` into `Result.StructuredContent` via `encoding/json` v1; zero-value `Out` is skipped via `reflect.Value.IsZero` so `omitempty` stays honest. Marshal failures surface as `-32603` Internal error.
+- `internal/tools.Tool.OutputSchema *schema.OutputSchema` populated at `Register` from the `Out` type via the shared reflection engine. Every registered tool now advertises an `outputSchema` in `tools/list` (the empty `struct{}` shape produces `{"type":"object"}` — the spec-conformant "any object" default).
+- `internal/schema.DeriveOutputSchema[T]()`: companion to `DeriveInputSchema`, sharing the engine via a new private `deriveStructSchema[T]` helper. Same rules: struct-only, `json` + `description` tags, pointer-or-omitempty for optional fields.
+- `internal/tools.EchoOutput`: typed structured output the reference Echo handler now produces (mirrors the input message). Demonstrates the new pattern for downstream scaffold consumers.
+- `internal/tools/testdata/golden_schemas/`: each tool now has `<name>.input.json` and `<name>.output.json` goldens. Three new tools added to the golden test table to exercise the new outputSchema surface across nested structs, pointer-typed optional fields, and array-of-struct shapes (`nested-output`, `optional-output`, `array-output`).
+- `internal/server/integration_test.go`: two MUST tests pinning the Q5 wire shape — `Test_Server_With_StructuredContent_Should_RoundTrip` (handler's typed `Out` round-trips byte-for-byte via the codec) and `Test_ToolsList_With_TypedOutputs_Should_AdvertiseOutputSchema` (every registered tool advertises an `outputSchema` in `tools/list`). Both registered as `protocol.Clause` entries so the audit story (Story 2.1) carries them.
+
+### Changed
+
+- **Breaking:** `tools.Register` API: `Register[T]` → `Register[In, Out]`. Every existing call site updated. Backward compatibility with the single-parameter form is intentionally not preserved (v1.4.0 protocol-feature add, all callers move together).
+- `internal/tools/_TOOL_TEMPLATE.go`: updated to demonstrate the `(Out, Result)` signature and dual-type registration.
+- `cmd/scaffold/testdata/greet.go.fixture`: scaffold consumer fixture updated to the new pattern (`GreetOutput` type + `(GreetOutput, Result)` return).
+- `internal/server/testdata/conformance/tools-list.response.jsonl`: golden response updated to include the `outputSchema` field that every tool now advertises.
+- `docs/development-guide.md`: "Adding a new tool" section rewritten for the typed-output pattern.
+
 ## [1.3.2] — 2026-04-25
 
 ### Changed

@@ -1,12 +1,12 @@
 {
   "properties": {
-    "message": {
-      "description": "The message to echo back",
+    "id": {
+      "description": "Record id",
       "type": "string"
     }
   },
   "required": [
-    "message"
+    "id"
   ],
   "type": "object"
 }

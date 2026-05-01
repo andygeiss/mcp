@@ -22,9 +22,13 @@ func WithAnnotations(a Annotations) Option {
 	}
 }
 
-// WithOutputSchema returns an Option that declares a JSON Schema for the tool's
-// structured output. Tools with an output schema may return [StructuredResult]
-// to provide machine-readable content alongside the human-readable text.
+// WithOutputSchema returns an Option that overrides the tool's outputSchema.
+// [Register] derives the schema from the Out type parameter via reflection
+// and sets it BEFORE applying options, so this option is the deliberate
+// escape hatch for callers who need a hand-authored shape (e.g., a richer
+// schema than reflection can express, or a stable wire shape decoupled from
+// internal Out struct changes). When this option is not used, the
+// reflection-derived schema is canonical.
 func WithOutputSchema(out schema.OutputSchema) Option {
 	return func(t *Tool) {
 		t.OutputSchema = &out

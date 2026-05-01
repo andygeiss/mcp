@@ -135,9 +135,10 @@ linters:
           - forbidigo
       - path: "_test\\.go"
         linters:
-          - funlen
-          - gocognit
           - cyclop
+          - funlen
+          - gochecknoinits
+          - gocognit
       - path: "_internal_test\\.go"
         linters:
           - testpackage

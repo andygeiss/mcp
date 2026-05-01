@@ -15,8 +15,8 @@ func ExampleRegister() {
 	}
 
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "greet", "Says hello", func(_ context.Context, input GreetInput) tools.Result {
-		return tools.TextResult("Hello, " + input.Name + "!")
+	if err := tools.Register(r, "greet", "Says hello", func(_ context.Context, input GreetInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("Hello, " + input.Name + "!")
 	}); err != nil {
 		fmt.Println("error:", err)
 		return

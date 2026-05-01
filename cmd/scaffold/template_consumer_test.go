@@ -84,10 +84,10 @@ func Test_Integration_With_TemplateConsumer_Should_PassAllQualityGates(t *testin
 	mainData, err := os.ReadFile(filepath.Clean(mainGoPath))
 	assert.That(t, "read main.go", err, nil)
 
-	echoBlock := []byte(`if err := tools.Register(registry, "echo", "Echoes the input message", tools.Echo); err != nil {
+	echoBlock := []byte(`if err := tools.Register[tools.EchoInput, tools.EchoOutput](registry, "echo", "Echoes the input message", tools.Echo); err != nil {
 		return fmt.Errorf("register echo: %w", err)
 	}`)
-	greetReg := []byte("\n\tif err := tools.Register(registry, \"greet\", \"Greets a person by name\", tools.Greet); err != nil {\n\t\treturn fmt.Errorf(\"register greet: %w\", err)\n\t}")
+	greetReg := []byte("\n\tif err := tools.Register[tools.GreetInput, tools.GreetOutput](registry, \"greet\", \"Greets a person by name\", tools.Greet); err != nil {\n\t\treturn fmt.Errorf(\"register greet: %w\", err)\n\t}")
 	echoAndGreet := make([]byte, 0, len(echoBlock)+len(greetReg))
 	echoAndGreet = append(echoAndGreet, echoBlock...)
 	echoAndGreet = append(echoAndGreet, greetReg...)

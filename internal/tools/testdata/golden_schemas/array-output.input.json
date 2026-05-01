@@ -1,0 +1,12 @@
+{
+  "properties": {
+    "limit": {
+      "description": "Maximum results",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "limit"
+  ],
+  "type": "object"
+}

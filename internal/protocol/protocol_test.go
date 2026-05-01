@@ -12,6 +12,31 @@ import (
 	"github.com/andygeiss/mcp/internal/protocol"
 )
 
+// Spec-coverage registry bootstrap: see docs/development-guide.md
+// "Adding a spec clause" for the canonical pattern.
+
+func init() {
+	protocol.Register(protocol.Clause{
+		ID:      "MCP-2025-11-25/jsonrpc/MUST-echo-id",
+		Level:   "MUST",
+		Section: "JSON-RPC 2.0 §5 Response object",
+		Summary: "Decoder preserves request id exactly (string and number forms) for echo back to the client.",
+		Tests: []func(*testing.T){
+			Test_Decode_With_StringID_Should_PreserveExactly,
+			Test_Decode_With_NumberID_Should_PreserveExactly,
+		},
+	})
+	protocol.Register(protocol.Clause{
+		ID:      "MCP-2025-11-25/decode/MUST-reject-deep-nesting",
+		Level:   "MUST",
+		Section: "M1a decode-time structural limits",
+		Summary: "Decoder rejects payloads whose JSON nesting exceeds MaxJSONDepth before unmarshal.",
+		Tests: []func(*testing.T){
+			Test_Decode_With_DeeplyNestedJSON_Should_ReturnError,
+		},
+	})
+}
+
 // --- Decode tests ---
 
 func Test_Decode_With_ValidRequest_Should_PreserveAllFields(t *testing.T) {

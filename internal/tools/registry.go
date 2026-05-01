@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"slices"
 
 	"github.com/andygeiss/mcp/internal/protocol"
@@ -93,45 +94,87 @@ func (r *Registry) Names() []string {
 	return names
 }
 
-// Register adds a tool to the registry. The generic type parameter T defines
-// the tool's input struct — its exported fields (with json tags) are reflected
-// to build the JSON Schema returned in tools/list. Fields without an
-// "omitempty" option in their json tag are marked as required.
+// Register adds a tool to the registry. The generic type parameters describe
+// the handler's typed input In and structured output Out:
+//
+//   - Exported fields of In (with json tags) are reflected to build the JSON
+//     Schema returned in tools/list. Fields without an "omitempty" option and
+//     non-pointer types are marked as required.
+//   - Out drives the outputSchema advertised on the tool definition. Tools
+//     without meaningful structured output should use a small named typed
+//     wrapper rather than [any] or struct{} — concrete types document the
+//     contract and let the schema engine produce a stable shape.
+//
+// The handler receives a typed In after the server unmarshals the raw JSON
+// arguments and returns (Out, [Result]). The dispatch layer marshals a
+// non-zero Out into Result.StructuredContent via [encoding/json] (v1) before
+// the response leaves the server; zero-value Out (including nil pointer Out
+// and a non-nil pointer to a zero struct) is skipped so omitempty stays
+// honest. When the handler also sets Result.StructuredContent manually, the
+// auto-marshaled Out wins — the Out-side path is the canonical surface; the
+// manual escape hatch survives only as a no-op when Out is zero. When
+// Result.IsError is true, the auto-marshal step is skipped entirely so error
+// responses do not carry success-shaped structuredContent.
 //
 // Register returns an error if a tool with the same name is already registered
-// or if the input type contains unsupported field types (channels, funcs,
-// etc.). The registry is kept sorted alphabetically after each registration so
-// that tools/list responses are deterministic.
+// or if either the input or output type contains unsupported field types
+// (channels, funcs, etc.). The registry is kept sorted alphabetically after
+// each registration so that tools/list responses are deterministic.
 //
-// The handler receives a typed input T after the server unmarshals the raw
-// JSON arguments. Return [TextResult] for success or [ErrorResult] for
-// tool-level failures.
-func Register[T any](r *Registry, name, description string, handler func(ctx context.Context, input T) Result, opts ...Option) error {
+// The reflection-derived OutputSchema is set on the Tool BEFORE opts are
+// applied, so [WithOutputSchema] (or any option that writes the same field)
+// deliberately overrides the derived schema for callers who need a
+// hand-authored shape.
+func Register[In, Out any](
+	r *Registry,
+	name, description string,
+	handler func(ctx context.Context, input In) (Out, Result),
+	opts ...Option,
+) error {
 	if _, exists := r.index[name]; exists {
 		return fmt.Errorf("duplicate tool name: %s", name)
 	}
 
-	inputSchema, err := schema.DeriveInputSchema[T]()
+	inputSchema, err := schema.DeriveInputSchema[In]()
 	if err != nil {
-		return fmt.Errorf("derive schema for tool %q: %w", name, err)
+		return fmt.Errorf("derive input schema for tool %q: %w", name, err)
+	}
+	outputSchema, err := schema.DeriveOutputSchema[Out]()
+	if err != nil {
+		return fmt.Errorf("derive output schema for tool %q: %w", name, err)
 	}
 
 	wrapped := func(ctx context.Context, params json.RawMessage) (Result, error) {
-		var input T
+		var input In
 		if err := unmarshalAndValidate(params, &input, inputSchema.Required); err != nil {
 			return Result{}, &protocol.CodeError{
 				Code:    protocol.InvalidParams,
 				Message: fmt.Sprintf("invalid arguments for tool %q: %v", name, err),
 			}
 		}
-		return handler(ctx, input), nil
+		out, result := handler(ctx, input)
+		if result.IsError {
+			return result, nil
+		}
+		if isStructuredOutputPresent(out) {
+			raw, mErr := json.Marshal(out)
+			if mErr != nil {
+				return Result{}, &protocol.CodeError{
+					Code:    protocol.InternalError,
+					Message: fmt.Sprintf("marshal structured output for tool %q: %v", name, mErr),
+				}
+			}
+			result.StructuredContent = raw
+		}
+		return result, nil
 	}
 
 	tool := Tool{
-		Description: description,
-		Handler:     wrapped,
-		InputSchema: inputSchema,
-		Name:        name,
+		Description:  description,
+		Handler:      wrapped,
+		InputSchema:  inputSchema,
+		Name:         name,
+		OutputSchema: &outputSchema,
 	}
 	for _, opt := range opts {
 		opt(&tool)
@@ -145,6 +188,20 @@ func Register[T any](r *Registry, name, description string, handler func(ctx con
 		r.index[t.Name] = i
 	}
 	return nil
+}
+
+// isStructuredOutputPresent reports whether out should be marshaled into
+// StructuredContent. Skipped cases (return false): zero value of a value
+// type, nil pointer, non-nil pointer to a zero struct. Marshal-worthy cases
+// (return true): non-zero value type, non-nil pointer to a non-zero struct.
+// reflect.Indirect collapses the pointer/value distinction so callers don't
+// need to special-case Out = *T versus Out = T at registration sites.
+func isStructuredOutputPresent(out any) bool {
+	v := reflect.Indirect(reflect.ValueOf(out))
+	if !v.IsValid() {
+		return false
+	}
+	return !v.IsZero()
 }
 
 // StructuredResult creates a successful Result with both a human-readable text

@@ -27,15 +27,25 @@ type YourToolInput struct {
 	Query string `json:"query" description:"What the user is asking. Keep it one sentence."`
 }
 
+// YourToolOutput describes the structured output your tool returns. The
+// reflection engine derives the outputSchema from this type so clients can
+// validate the structuredContent on the response. Use a small typed struct
+// even for tools without rich output — `struct{}` is allowed if you really
+// have nothing to return, but a concrete type documents the contract.
+type YourToolOutput struct {
+	Result string `json:"result" description:"The tool's primary output."`
+}
+
 // YourTool is the handler. It runs in a context-bounded, sequentially-
-// dispatched goroutine. Return a Result from the tools package — most tools
-// use TextResult for free-form string output.
-func YourTool(ctx context.Context, input YourToolInput) Result {
+// dispatched goroutine. Return (Out, Result): Out becomes structuredContent
+// on the response (auto-marshaled by the dispatch layer when non-zero); the
+// Result carries the human-readable Content blocks and IsError flag.
+func YourTool(ctx context.Context, input YourToolInput) (YourToolOutput, Result) {
 	_ = ctx
 	_ = input
-	return TextResult("replace me")
+	return YourToolOutput{Result: "replace me"}, TextResult("replace me")
 }
 
 // Register in cmd/mcp/main.go:
 //
-//	tools.Register[YourToolInput](reg, "your-tool", YourTool)
+//	tools.Register[YourToolInput, YourToolOutput](reg, "your-tool", "...", YourTool)

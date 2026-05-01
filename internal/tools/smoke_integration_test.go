@@ -31,7 +31,7 @@ func Test_MakeSmoke_With_BaseTemplate_Should_ExitZero_AndEmitBanner(t *testing.T
 	if !bytes.Contains(out, []byte("Your server works.")) {
 		t.Fatalf("missing success banner in output: %s", out)
 	}
-	if !bytes.Contains(out, []byte("tool(s).")) {
-		t.Fatalf("missing tool count suffix in output: %s", out)
+	if !bytes.Contains(out, []byte("tool(s) with outputSchema advertised.")) {
+		t.Fatalf("missing tool count + outputSchema suffix in output: %s", out)
 	}
 }

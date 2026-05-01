@@ -7,7 +7,14 @@ type GreetInput struct {
 	Name string `json:"name" description:"Name of the person to greet"`
 }
 
-// Greet returns a greeting message.
-func Greet(_ context.Context, input GreetInput) Result {
-	return TextResult("Hello, " + input.Name)
+// GreetOutput is the structured output Greet returns.
+type GreetOutput struct {
+	Greeting string `json:"greeting" description:"The greeting message"`
+}
+
+// Greet returns a greeting via structuredContent (the dispatch wrapper
+// auto-marshals the non-zero Out). Follows the single-surface pattern that
+// echo.go demonstrates — no legacy text content block.
+func Greet(_ context.Context, input GreetInput) (GreetOutput, Result) {
+	return GreetOutput{Greeting: "Hello, " + input.Name}, Result{}
 }
