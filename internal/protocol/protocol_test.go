@@ -18,7 +18,7 @@ import (
 func init() {
 	protocol.Register(protocol.Clause{
 		ID:      "MCP-2025-11-25/jsonrpc/MUST-echo-id",
-		Level:   "MUST",
+		Level:   protocol.LevelMUST,
 		Section: "JSON-RPC 2.0 §5 Response object",
 		Summary: "Decoder preserves request id exactly (string and number forms) for echo back to the client.",
 		Tests: []func(*testing.T){
@@ -28,7 +28,7 @@ func init() {
 	})
 	protocol.Register(protocol.Clause{
 		ID:      "MCP-2025-11-25/decode/MUST-reject-deep-nesting",
-		Level:   "MUST",
+		Level:   protocol.LevelMUST,
 		Section: "M1a decode-time structural limits",
 		Summary: "Decoder rejects payloads whose JSON nesting exceeds MaxJSONDepth before unmarshal.",
 		Tests: []func(*testing.T){
@@ -289,7 +289,7 @@ func Test_Encode_With_SuccessResponse_Should_ProduceValidJSON(t *testing.T) {
 	enc := json.NewEncoder(&buf)
 	resp := protocol.Response{
 		ID:      json.RawMessage("1"),
-		JSONRPC: "2.0",
+		JSONRPC: protocol.Version,
 		Result:  json.RawMessage(`{"status":"ok"}`),
 	}
 
@@ -357,21 +357,25 @@ func Test_NewResultResponse_Should_MarshalResult(t *testing.T) {
 
 // --- CodeError tests ---
 
+// errMsgUnknownToolFoo is a fixture error message reused across CodeError
+// tests; hoisted to satisfy the goconst linter (3+ occurrences in this file).
+const errMsgUnknownToolFoo = "unknown tool: foo"
+
 func Test_CodeError_Should_ImplementErrorInterface(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
-	var err error = &protocol.CodeError{Code: protocol.InvalidParams, Message: "unknown tool: foo"}
+	var err error = &protocol.CodeError{Code: protocol.InvalidParams, Message: errMsgUnknownToolFoo}
 
 	// Assert
-	assert.That(t, "error message", err.Error(), "unknown tool: foo")
+	assert.That(t, "error message", err.Error(), errMsgUnknownToolFoo)
 }
 
 func Test_CodeError_With_ErrorsAsType_Should_Unwrap(t *testing.T) {
 	t.Parallel()
 
 	// Arrange
-	err := fmt.Errorf("dispatch: %w", &protocol.CodeError{Code: protocol.InvalidParams, Message: "unknown tool: foo"})
+	err := fmt.Errorf("dispatch: %w", &protocol.CodeError{Code: protocol.InvalidParams, Message: errMsgUnknownToolFoo})
 
 	// Act
 	pe, ok := errors.AsType[*protocol.CodeError](err)
@@ -379,7 +383,7 @@ func Test_CodeError_With_ErrorsAsType_Should_Unwrap(t *testing.T) {
 	// Assert
 	assert.That(t, "found", ok, true)
 	assert.That(t, "code", pe.Code, protocol.InvalidParams)
-	assert.That(t, "message", pe.Message, "unknown tool: foo")
+	assert.That(t, "message", pe.Message, errMsgUnknownToolFoo)
 }
 
 func Test_CodeError_With_NonCodeError_Should_NotMatch(t *testing.T) {
@@ -518,7 +522,7 @@ func Test_NewErrorResponse_With_Data_Should_RoundTrip(t *testing.T) {
 	ce := &protocol.CodeError{
 		Code:    protocol.InvalidParams,
 		Data:    data,
-		Message: "unknown tool: foo",
+		Message: errMsgUnknownToolFoo,
 	}
 	resp := protocol.NewErrorResponseFromCodeError(json.RawMessage("7"), ce)
 
@@ -535,7 +539,7 @@ func Test_NewErrorResponse_With_Data_Should_RoundTrip(t *testing.T) {
 	// Assert
 	assert.That(t, "decode error", err, nil)
 	assert.That(t, "error code", decoded.Error.Code, protocol.InvalidParams)
-	assert.That(t, "error message", decoded.Error.Message, "unknown tool: foo")
+	assert.That(t, "error message", decoded.Error.Message, errMsgUnknownToolFoo)
 	assert.That(t, "error data", string(decoded.Error.Data), `{"trace_id":"abc-123"}`)
 }
 
@@ -547,7 +551,7 @@ func Test_Validate_With_WrongVersion_Should_ReturnInvalidRequest(t *testing.T) {
 	// Arrange
 	req := protocol.Request{
 		JSONRPC: "1.0",
-		Method:  "ping",
+		Method:  protocol.MethodPing,
 		Params:  json.RawMessage("{}"),
 	}
 
@@ -567,7 +571,7 @@ func Test_Validate_With_EmptyMethod_Should_ReturnInvalidRequest(t *testing.T) {
 
 	// Arrange
 	req := protocol.Request{
-		JSONRPC: "2.0",
+		JSONRPC: protocol.Version,
 		Method:  "",
 		Params:  json.RawMessage("{}"),
 	}
@@ -588,8 +592,8 @@ func Test_Validate_With_ArrayParams_Should_ReturnInvalidRequest(t *testing.T) {
 
 	// Arrange
 	req := protocol.Request{
-		JSONRPC: "2.0",
-		Method:  "ping",
+		JSONRPC: protocol.Version,
+		Method:  protocol.MethodPing,
 		Params:  json.RawMessage("[1,2]"),
 	}
 
@@ -609,8 +613,8 @@ func Test_Validate_With_ValidRequest_Should_ReturnNil(t *testing.T) {
 
 	// Arrange
 	req := protocol.Request{
-		JSONRPC: "2.0",
-		Method:  "ping",
+		JSONRPC: protocol.Version,
+		Method:  protocol.MethodPing,
 		Params:  json.RawMessage("{}"),
 	}
 
@@ -626,8 +630,8 @@ func Test_Validate_With_EmptyParams_Should_ReturnNil(t *testing.T) {
 
 	// Arrange
 	req := protocol.Request{
-		JSONRPC: "2.0",
-		Method:  "ping",
+		JSONRPC: protocol.Version,
+		Method:  protocol.MethodPing,
 	}
 
 	// Act
@@ -685,8 +689,8 @@ func Test_Validate_With_BooleanID_Should_ReturnInvalidRequest(t *testing.T) {
 	// Arrange
 	req := protocol.Request{
 		ID:      json.RawMessage("true"),
-		JSONRPC: "2.0",
-		Method:  "ping",
+		JSONRPC: protocol.Version,
+		Method:  protocol.MethodPing,
 		Params:  json.RawMessage("{}"),
 	}
 	// Act
@@ -704,8 +708,8 @@ func Test_Validate_With_BooleanFalseID_Should_ReturnInvalidRequest(t *testing.T)
 	// Arrange
 	req := protocol.Request{
 		ID:      json.RawMessage("false"),
-		JSONRPC: "2.0",
-		Method:  "ping",
+		JSONRPC: protocol.Version,
+		Method:  protocol.MethodPing,
 		Params:  json.RawMessage("{}"),
 	}
 	// Act
@@ -723,8 +727,8 @@ func Test_Validate_With_ArrayID_Should_ReturnInvalidRequest(t *testing.T) {
 	// Arrange
 	req := protocol.Request{
 		ID:      json.RawMessage("[1]"),
-		JSONRPC: "2.0",
-		Method:  "ping",
+		JSONRPC: protocol.Version,
+		Method:  protocol.MethodPing,
 		Params:  json.RawMessage("{}"),
 	}
 	// Act
@@ -742,8 +746,8 @@ func Test_Validate_With_ObjectID_Should_ReturnInvalidRequest(t *testing.T) {
 	// Arrange
 	req := protocol.Request{
 		ID:      json.RawMessage(`{"a":1}`),
-		JSONRPC: "2.0",
-		Method:  "ping",
+		JSONRPC: protocol.Version,
+		Method:  protocol.MethodPing,
 		Params:  json.RawMessage("{}"),
 	}
 	// Act
@@ -761,8 +765,8 @@ func Test_Validate_With_FloatID_Should_ReturnInvalidRequest(t *testing.T) {
 	// Arrange
 	req := protocol.Request{
 		ID:      json.RawMessage("1.5"),
-		JSONRPC: "2.0",
-		Method:  "ping",
+		JSONRPC: protocol.Version,
+		Method:  protocol.MethodPing,
 		Params:  json.RawMessage("{}"),
 	}
 	// Act
@@ -780,8 +784,8 @@ func Test_Validate_With_ScientificNotationID_Should_ReturnInvalidRequest(t *test
 	// Arrange
 	req := protocol.Request{
 		ID:      json.RawMessage("1e308"),
-		JSONRPC: "2.0",
-		Method:  "ping",
+		JSONRPC: protocol.Version,
+		Method:  protocol.MethodPing,
 		Params:  json.RawMessage("{}"),
 	}
 	// Act
@@ -799,8 +803,8 @@ func Test_Validate_With_NullID_Should_ReturnNil(t *testing.T) {
 	// Arrange
 	req := protocol.Request{
 		ID:      json.RawMessage("null"),
-		JSONRPC: "2.0",
-		Method:  "ping",
+		JSONRPC: protocol.Version,
+		Method:  protocol.MethodPing,
 		Params:  json.RawMessage("{}"),
 	}
 	// Act
@@ -814,8 +818,8 @@ func Test_Validate_With_ZeroID_Should_ReturnNil(t *testing.T) {
 	// Arrange
 	req := protocol.Request{
 		ID:      json.RawMessage("0"),
-		JSONRPC: "2.0",
-		Method:  "ping",
+		JSONRPC: protocol.Version,
+		Method:  protocol.MethodPing,
 		Params:  json.RawMessage("{}"),
 	}
 	// Act
@@ -829,8 +833,8 @@ func Test_Validate_With_EmptyStringID_Should_ReturnNil(t *testing.T) {
 	// Arrange
 	req := protocol.Request{
 		ID:      json.RawMessage(`""`),
-		JSONRPC: "2.0",
-		Method:  "ping",
+		JSONRPC: protocol.Version,
+		Method:  protocol.MethodPing,
 		Params:  json.RawMessage("{}"),
 	}
 	// Act
@@ -844,8 +848,8 @@ func Test_Validate_With_NegativeNumberID_Should_ReturnNil(t *testing.T) {
 	// Arrange
 	req := protocol.Request{
 		ID:      json.RawMessage("-1"),
-		JSONRPC: "2.0",
-		Method:  "ping",
+		JSONRPC: protocol.Version,
+		Method:  protocol.MethodPing,
 		Params:  json.RawMessage("{}"),
 	}
 	// Act
@@ -858,7 +862,7 @@ func Test_Validate_With_NotificationNoID_Should_SkipValidation(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	req := protocol.Request{
-		JSONRPC: "2.0",
+		JSONRPC: protocol.Version,
 		Method:  "notifications/initialized",
 		Params:  json.RawMessage("{}"),
 	}
@@ -877,7 +881,7 @@ func Test_Encode_With_FailingWriter_Should_ReturnError(t *testing.T) {
 	enc := json.NewEncoder(&failWriter{})
 	resp := protocol.Response{
 		ID:      json.RawMessage("1"),
-		JSONRPC: "2.0",
+		JSONRPC: protocol.Version,
 		Result:  json.RawMessage(`{}`),
 	}
 

@@ -43,21 +43,22 @@ func Test_sanitizeErrorID_Should_NormalizeMalformedIDs(t *testing.T) {
 	// (null, number, negative number, string) and structurally invalid types
 	// (boolean, array, object). Per JSON-RPC 2.0 §5, invalid ids must surface
 	// as null on the wire.
+	const jsonNull = "null"
 	cases := []struct {
 		name string
 		in   string
 		want string
 	}{
 		{"empty (notification)", "", ""},
-		{"null", "null", "null"},
+		{"null", jsonNull, jsonNull},
 		{"positive int", "42", "42"},
 		{"negative int", "-7", "-7"},
 		{"zero", "0", "0"},
 		{"string", `"abc"`, `"abc"`},
-		{"boolean true", "true", "null"},
-		{"boolean false", "false", "null"},
-		{"array", "[1,2]", "null"},
-		{"object", `{"a":1}`, "null"},
+		{"boolean true", "true", jsonNull},
+		{"boolean false", "false", jsonNull},
+		{"array", "[1,2]", jsonNull},
+		{"object", `{"a":1}`, jsonNull},
 	}
 
 	for _, tc := range cases {

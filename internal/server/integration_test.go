@@ -863,7 +863,7 @@ func Test_ToolsList_With_TypedOutputs_Should_AdvertiseOutputSchema(t *testing.T)
 func init() {
 	protocol.Register(protocol.Clause{
 		ID:      "MCP-2025-11-25/tools/MUST-emit-structuredContent",
-		Level:   "MUST",
+		Level:   protocol.LevelMUST,
 		Section: "Q5 typed tool outputs (structuredContent + outputSchema)",
 		Summary: "When a tool handler returns a non-zero structured Out, the server marshals it into the tool-call response's structuredContent field.",
 		Tests: []func(*testing.T){
@@ -872,7 +872,7 @@ func init() {
 	})
 	protocol.Register(protocol.Clause{
 		ID:      "MCP-2025-11-25/tools/MUST-advertise-outputSchema",
-		Level:   "MUST",
+		Level:   protocol.LevelMUST,
 		Section: "Q5 typed tool outputs (structuredContent + outputSchema)",
 		Summary: "tools/list advertises outputSchema for every registered tool, derived from the registered Out type.",
 		Tests: []func(*testing.T){

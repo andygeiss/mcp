@@ -63,7 +63,7 @@ func Test_DeriveSchema_With_MultipleFields_Should_DeriveAllTypes(t *testing.T) {
 	assert.That(t, "found", ok, true)
 	assert.That(t, "properties count", len(tool.InputSchema.Properties), 3)
 
-	countProp := tool.InputSchema.Properties["count"]
+	countProp := tool.InputSchema.Properties[countFieldName]
 	assert.That(t, "count type", countProp.Type, "integer")
 
 	nameProp := tool.InputSchema.Properties["name"]
@@ -757,10 +757,10 @@ func Test_DeriveSchema_With_UintField_Should_ProduceIntegerType(t *testing.T) {
 
 	// Assert
 	assert.That(t, "found", ok, true)
-	countProp := tool.InputSchema.Properties["count"]
+	countProp := tool.InputSchema.Properties[countFieldName]
 	assert.That(t, "count type", countProp.Type, "integer")
 	assert.That(t, "count description", countProp.Description, "An unsigned integer count")
-	assert.That(t, "required", tool.InputSchema.Required, []string{"count"})
+	assert.That(t, "required", tool.InputSchema.Required, []string{countFieldName})
 }
 
 type emptyStructInput struct{}

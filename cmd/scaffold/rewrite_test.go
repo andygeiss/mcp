@@ -11,6 +11,10 @@ import (
 	"github.com/andygeiss/mcp/internal/assert"
 )
 
+// repoShortFixture is a fixture short-form repo path used by test tables;
+// hoisted so the goconst linter does not flag the same literal across rows.
+const repoShortFixture = "myorg/mytool"
+
 // isolateGit neutralizes the developer's global and system git configuration
 // and sets a throwaway identity so `git commit` succeeds deterministically in
 // tests and on a clean CI runner. Callers must not use t.Parallel — t.Setenv
@@ -33,11 +37,11 @@ func Test_RepoShortForm_With_VariousPaths_Should_ReturnOwnerRepo(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{name: "github owner/repo", input: "github.com/myorg/mytool", expected: "myorg/mytool"},
-		{name: "github with v2 suffix", input: "github.com/myorg/mytool/v2", expected: "myorg/mytool"},
+		{name: "github owner/repo", input: "github.com/" + repoShortFixture, expected: repoShortFixture},
+		{name: "github with v2 suffix", input: "github.com/" + repoShortFixture + "/v2", expected: repoShortFixture},
 		{name: "gitlab host", input: "gitlab.com/group/project", expected: "group/project"},
 		{name: "custom host with subpath", input: "example.com/a/b/c", expected: "a/b"},
-		{name: "trailing slash", input: "github.com/myorg/mytool/", expected: "myorg/mytool"},
+		{name: "trailing slash", input: "github.com/" + repoShortFixture + "/", expected: repoShortFixture},
 		{name: "two segments only", input: "foo/bar", expected: ""},
 		{name: "single segment", input: "single", expected: ""},
 		{name: "empty string", input: "", expected: ""},
@@ -386,15 +390,15 @@ func Test_RemoveTemplateOnlyContent_With_AllPaths_Should_RemoveThem(t *testing.T
 
 	// Arrange — populate every template-only path with realistic content.
 	dir := t.TempDir()
-	err := os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte("# Andy's conventions\n"), 0o600)
+	err := os.WriteFile(filepath.Join(dir, claudeMdName), []byte("# Andy's conventions\n"), 0o600)
 	assert.That(t, "write CLAUDE.md", err, nil)
-	err = os.MkdirAll(filepath.Join(dir, "_bmad", "sub"), 0o750)
+	err = os.MkdirAll(filepath.Join(dir, bmadDirName, "sub"), 0o750)
 	assert.That(t, "mkdir _bmad", err, nil)
-	err = os.WriteFile(filepath.Join(dir, "_bmad", "sub", "config.yaml"), []byte("key: value\n"), 0o600)
+	err = os.WriteFile(filepath.Join(dir, bmadDirName, "sub", "config.yaml"), []byte("key: value\n"), 0o600)
 	assert.That(t, "write bmad file", err, nil)
-	err = os.MkdirAll(filepath.Join(dir, "_bmad-output", "run"), 0o750)
+	err = os.MkdirAll(filepath.Join(dir, bmadOutputDirName, "run"), 0o750)
 	assert.That(t, "mkdir _bmad-output", err, nil)
-	err = os.MkdirAll(filepath.Join(dir, ".claude", "skills"), 0o750)
+	err = os.MkdirAll(filepath.Join(dir, claudeDirName, "skills"), 0o750)
 	assert.That(t, "mkdir .claude", err, nil)
 
 	// Act
@@ -402,7 +406,7 @@ func Test_RemoveTemplateOnlyContent_With_AllPaths_Should_RemoveThem(t *testing.T
 
 	// Assert
 	assert.That(t, "remove error", err, nil)
-	for _, name := range []string{".claude", "CLAUDE.md", "_bmad", "_bmad-output"} {
+	for _, name := range []string{claudeDirName, claudeMdName, bmadDirName, bmadOutputDirName} {
 		_, statErr := os.Stat(filepath.Join(dir, name))
 		assert.That(t, name+" gone", os.IsNotExist(statErr), true)
 	}
@@ -694,7 +698,7 @@ func Test_ShouldSkip_With_BmadDir_Should_ReturnTrue(t *testing.T) {
 
 	// Arrange
 	dir := t.TempDir()
-	bmadDir := filepath.Join(dir, "_bmad")
+	bmadDir := filepath.Join(dir, bmadDirName)
 	err := os.MkdirAll(bmadDir, 0o750)
 	assert.That(t, "mkdir error", err, nil)
 	info, err := os.Stat(bmadDir)
@@ -709,7 +713,7 @@ func Test_ShouldSkip_With_ClaudeDir_Should_ReturnTrue(t *testing.T) {
 
 	// Arrange
 	dir := t.TempDir()
-	claudeDir := filepath.Join(dir, ".claude")
+	claudeDir := filepath.Join(dir, claudeDirName)
 	err := os.MkdirAll(claudeDir, 0o750)
 	assert.That(t, "mkdir error", err, nil)
 	info, err := os.Stat(claudeDir)
@@ -772,13 +776,13 @@ func Test_RewriteProject_With_ValidProject_Should_RewriteEverything(t *testing.T
 	assert.That(t, "write README.md", err, nil)
 
 	// Template-only content that must not leak to consumers.
-	err = os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte("# project conventions\n"), 0o600)
+	err = os.WriteFile(filepath.Join(dir, claudeMdName), []byte("# project conventions\n"), 0o600)
 	assert.That(t, "write CLAUDE.md", err, nil)
-	err = os.MkdirAll(filepath.Join(dir, "_bmad"), 0o750)
+	err = os.MkdirAll(filepath.Join(dir, bmadDirName), 0o750)
 	assert.That(t, "mkdir _bmad", err, nil)
-	err = os.WriteFile(filepath.Join(dir, "_bmad", "config.yaml"), []byte("key: value\n"), 0o600)
+	err = os.WriteFile(filepath.Join(dir, bmadDirName, "config.yaml"), []byte("key: value\n"), 0o600)
 	assert.That(t, "write bmad config", err, nil)
-	err = os.MkdirAll(filepath.Join(dir, ".claude"), 0o750)
+	err = os.MkdirAll(filepath.Join(dir, claudeDirName), 0o750)
 	assert.That(t, "mkdir .claude", err, nil)
 
 	// Act
@@ -810,7 +814,7 @@ func Test_RewriteProject_With_ValidProject_Should_RewriteEverything(t *testing.T
 	}
 
 	// Check template-only content was removed
-	for _, name := range []string{".claude", "CLAUDE.md", "_bmad"} {
+	for _, name := range []string{claudeDirName, claudeMdName, bmadDirName} {
 		_, statErr := os.Stat(filepath.Join(dir, name))
 		assert.That(t, name+" gone", os.IsNotExist(statErr), true)
 	}

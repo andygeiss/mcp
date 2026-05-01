@@ -130,7 +130,7 @@ func copyDir(src, dst string) error {
 
 		if info.IsDir() {
 			base := filepath.Base(rel)
-			if base == ".git" || base == "_bmad-output" || base == "_bmad" || base == ".claude" {
+			if base == ".git" || base == bmadOutputDirName || base == bmadDirName || base == claudeDirName {
 				return filepath.SkipDir
 			}
 			return os.MkdirAll(filepath.Join(dst, rel), info.Mode())

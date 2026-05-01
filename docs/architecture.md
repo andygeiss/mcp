@@ -117,6 +117,8 @@ Tool handlers can issue requests to the client (sampling, elicitation, roots, or
 
 **Stability commitment:** the `Peer` method set and parameter types are a **v1.x stability surface** per ADR-003.
 
+**AI10 enforcement (Q6):** `(*Server).SendRequest` brackets its outbound await with `defer ProgressFromContext(ctx).suspendForOutbound()()`, so any `Progress.Report` invocation between outbound dispatch and response correlation is dropped at the source. This prevents `notifications/progress` from interleaving with the awaited inbound response on the wire — which would otherwise corrupt the pending-request map's response correlation. Cross-references: [Progress reporting](./development-guide.md#progress-reporting-from-tool-handlers) and ADR-003 §Invariants.
+
 See [ADR-003](./adr/ADR-003-bidi-reader-split.md) (currently absent — restore via `git restore`) for the reader-split design and four ratified invariants (AI7–AI10).
 
 ## Schema derivation

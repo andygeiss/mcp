@@ -3630,7 +3630,7 @@ func Test_Server_With_SendRequest_Should_CorrelateResponse(t *testing.T) {
 	// Arrange — register a tool that uses SendRequest to call the client
 	r := tools.NewRegistry()
 	if err := tools.Register(r, "bidir", "bidirectional tool", func(ctx context.Context, _ testInput) (struct{}, tools.Result) {
-		resp, err := protocol.SendRequest(ctx, "sampling/createMessage", map[string]string{"prompt": "hello"})
+		resp, err := protocol.SendRequest(ctx, "sampling/createMessage", map[string]string{promptParamKey: "hello"})
 		if err != nil {
 			return struct{}{}, tools.ErrorResult("send request failed: " + err.Error())
 		}
@@ -3702,6 +3702,94 @@ func Test_Server_With_SendRequest_Should_CorrelateResponse(t *testing.T) {
 	}
 	assert.That(t, "content count", len(result.Content), 1)
 	assert.That(t, "echoed client payload", result.Content[0].Text, `client said: "world"`)
+}
+
+// Test_SendRequest_With_ElicitationCreate_AndCapabilityAdvertised_Should_RoundTrip
+// is the AC4/AC5 happy-path test for outbound elicitation. With the client
+// advertising the elicitation capability, a tool handler's
+// protocol.SendRequest("elicitation/create", ...) must encode the request,
+// correlate the response, and surface the parsed result back into the
+// handler. Mirrors the sampling outbound test (above) — same shape, different
+// method name. Pinning both proves the AI9 gate routing is per-method.
+func Test_SendRequest_With_ElicitationCreate_AndCapabilityAdvertised_Should_RoundTrip(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — register a tool that elicits user input via the client.
+	r := tools.NewRegistry()
+	if err := tools.Register(r, "ask-name", "elicitation tool", func(ctx context.Context, _ testInput) (struct{}, tools.Result) {
+		resp, err := protocol.SendRequest(ctx, "elicitation/create", map[string]string{promptParamKey: "What is your name?"})
+		if err != nil {
+			return struct{}{}, tools.ErrorResult("send request failed: " + err.Error())
+		}
+		return struct{}{}, tools.TextResult("client said: " + string(resp.Result))
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	stdinR, stdinW := io.Pipe()
+	stdoutR, stdoutW := io.Pipe()
+	var stderr bytes.Buffer
+	srv := server.NewServer("mcp", "test", r, stdinR, stdoutW, &stderr)
+
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(context.Background()) }()
+
+	// Act — handshake advertising elicitation so AI9 lets the outbound through.
+	bidirHandshake := `{"jsonrpc":"2.0","method":"initialize","id":1,"params":{"capabilities":{"elicitation":{}}}}` + "\n" + initializedNotification
+	if _, werr := stdinW.Write([]byte(bidirHandshake)); werr != nil {
+		t.Fatalf("write handshake: %v", werr)
+	}
+
+	dec := json.NewDecoder(stdoutR)
+	var initResp json.RawMessage
+	if derr := dec.Decode(&initResp); derr != nil {
+		t.Fatalf("decode init response: %v", derr)
+	}
+
+	if _, werr := stdinW.Write([]byte(`{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"ask-name","arguments":{"message":"test"}}}` + "\n")); werr != nil {
+		t.Fatalf("write tool call: %v", werr)
+	}
+
+	// Read the server's elicitation/create request.
+	var srvReq struct {
+		ID     json.RawMessage `json:"id"`
+		Method string          `json:"method"`
+	}
+	if derr := dec.Decode(&srvReq); derr != nil {
+		t.Fatalf("decode outbound: %v", derr)
+	}
+
+	// Send the client's elicitation result back.
+	response := fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":"Andy"}`, string(srvReq.ID))
+	if _, werr := stdinW.Write([]byte(response + "\n")); werr != nil {
+		t.Fatalf("write outbound response: %v", werr)
+	}
+
+	// Read the tool call result.
+	var toolResp protocol.Response
+	if derr := dec.Decode(&toolResp); derr != nil {
+		t.Fatalf("decode tool result: %v", derr)
+	}
+
+	_ = stdinW.Close()
+	err := <-done
+
+	// Assert — round-trip correlation: tool result must contain the echoed
+	// payload from the elicitation response.
+	assert.That(t, "error", err, nil)
+	assert.That(t, "method", srvReq.Method, "elicitation/create")
+
+	var result struct {
+		Content []struct {
+			Text string `json:"text"`
+			Type string `json:"type"`
+		} `json:"content"`
+	}
+	if jerr := json.Unmarshal(toolResp.Result, &result); jerr != nil {
+		t.Fatalf("unmarshal tool result: %v", jerr)
+	}
+	assert.That(t, "content count", len(result.Content), 1)
+	assert.That(t, "echoed client payload", result.Content[0].Text, `client said: "Andy"`)
 }
 
 func testResourcesRegistryWithTemplate() *resources.Registry {
