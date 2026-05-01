@@ -5,6 +5,7 @@
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/andygeiss/mcp/badge)](https://scorecard.dev/viewer/?uri=github.com/andygeiss/mcp)
 [![CodeQL](https://github.com/andygeiss/mcp/actions/workflows/codeql.yml/badge.svg)](https://github.com/andygeiss/mcp/actions/workflows/codeql.yml)
 [![Coverage](https://codecov.io/gh/andygeiss/mcp/branch/main/graph/badge.svg)](https://codecov.io/gh/andygeiss/mcp)
+[![Nightly Fuzz](https://github.com/andygeiss/mcp/actions/workflows/fuzz.yml/badge.svg)](https://github.com/andygeiss/mcp/actions/workflows/fuzz.yml)
 [![License](https://img.shields.io/github/license/andygeiss/mcp)](LICENSE)
 
 A minimal, zero-dependency Go implementation of the [Model Context Protocol](https://modelcontextprotocol.io) (MCP).
@@ -165,6 +166,8 @@ cosign verify-blob \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   mcp_<version>_<os>_<arch>.tar.gz
 ```
+
+For a stronger guarantee — rebuild the binary from source on your own machine and confirm the SHA matches the published checksum: see [docs/reproducible-build.md](docs/reproducible-build.md).
 
 ## Protocol compliance
 

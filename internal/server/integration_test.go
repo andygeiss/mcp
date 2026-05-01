@@ -483,6 +483,177 @@ func Test_Server_Started_Should_LogPidAndGoVersion(t *testing.T) {
 	}
 }
 
+// Test_Server_With_OversizedString_DuringInFlight_Should_RejectNonFatallyAndContinue
+// drives a structural-limit rejection while a tool handler is in flight and
+// pins the wire-level invariants:
+//
+//   - The structural rejection (id=null, names maxStringLength) is emitted.
+//   - The in-flight handler's timeout response (id=2, names the tool) is emitted.
+//   - The connection survives for a subsequent ping (id=4).
+//
+// The order between the structural rejection and the in-flight timeout is
+// intentionally not pinned: at the wire level the dispatch loop has a benign
+// race between the decoder delivering the structural error and the in-flight
+// handler completing its timeout. Both orderings are semantically correct.
+// `Test_handleDecodeErrorDuringInFlight_With_StructuralLimit_AndHandlerStuck_Should_LogAbandon`
+// pins the specific handleDecodeErrorDuringInFlight path deterministically via
+// synctest.
+func Test_Server_With_OversizedString_DuringInFlight_Should_RejectNonFatallyAndContinue(t *testing.T) {
+	t.Parallel()
+
+	r := tools.NewRegistry()
+	if err := tools.Register(r, "slow", "blocks", func(ctx context.Context, _ testInput) tools.Result {
+		select {
+		case <-time.After(10 * time.Second):
+			return tools.TextResult("unreachable")
+		case <-ctx.Done():
+			return tools.ErrorResult("context cancelled")
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	pr, pw := io.Pipe()
+	var stdout, stderr bytes.Buffer
+	srv := server.NewServer("mcp", "test", r, pr, &stdout, &stderr,
+		server.WithHandlerTimeout(200*time.Millisecond))
+
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(context.Background()) }()
+
+	// Send handshake + slow tools/call so the server enters the in-flight branch.
+	_, _ = pw.Write([]byte(handshake() +
+		`{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"slow","arguments":{"message":"x"}}}` + "\n"))
+
+	// Brief settle so the in-flight handler is dispatched before the
+	// structural-limit message races the decode loop.
+	time.Sleep(50 * time.Millisecond)
+
+	// Push the oversized-string ping mid-flight.
+	bigValue := strings.Repeat("a", protocol.MaxJSONStringLen+1)
+	_, _ = pw.Write([]byte(`{"jsonrpc":"2.0","method":"ping","id":3,"params":{"data":"` + bigValue + `"}}` + "\n"))
+
+	// Wait long enough for handlerTimeout (200ms) + safetyMargin (1s default)
+	// to elapse so the slow handler has been timed out and its response
+	// encoded before we push the next message.
+	time.Sleep(2 * time.Second)
+
+	// Final ping must land on a healthy connection.
+	_, _ = pw.Write([]byte(`{"jsonrpc":"2.0","method":"ping","id":4,"params":{}}` + "\n"))
+	_ = pw.Close()
+
+	err := <-done
+	assert.That(t, "run error", err, nil)
+
+	responses := parseResponses(t, &stdout)
+	// 4 responses: init first, final ping last, with the structural error
+	// and slow-timeout in either order in the middle.
+	assert.That(t, "response count", len(responses), 4)
+	assert.That(t, "init id", string(responses[0].ID), "1")
+	assert.That(t, "final ping id", string(responses[3].ID), "4")
+	assert.That(t, "final ping result", string(responses[3].Result), "{}")
+
+	var structural, slowTimeout *protocol.Response
+	for i := 1; i <= 2; i++ {
+		switch string(responses[i].ID) {
+		case "null":
+			structural = &responses[i]
+		case "2":
+			slowTimeout = &responses[i]
+		}
+	}
+	if structural == nil {
+		t.Fatalf("expected structural error response (id=null) among responses[1:3], got: %+v", responses[1:3])
+	}
+	if slowTimeout == nil {
+		t.Fatalf("expected slow-timeout response (id=2) among responses[1:3], got: %+v", responses[1:3])
+	}
+
+	assert.That(t, "structural error code", structural.Error.Code, protocol.ServerTimeout)
+	if !strings.Contains(structural.Error.Message, "maxStringLength") {
+		t.Errorf("expected maxStringLength in structural error, got: %s", structural.Error.Message)
+	}
+
+	assert.That(t, "slow timeout code", slowTimeout.Error.Code, protocol.ServerTimeout)
+	if !strings.Contains(slowTimeout.Error.Message, "slow") {
+		t.Errorf("expected tool name in slow timeout, got: %s", slowTimeout.Error.Message)
+	}
+}
+
+// Test_Server_With_ToolTimeoutAndStructuralLimit_Should_BeDistinguishable
+// pins the wire-level distinguishability between the two failure modes that
+// share error code -32001 (ServerTimeout): a tool handler that runs over
+// budget vs. a payload that breaches a structural limit. They MUST be
+// distinguishable to operators reading logs and clients deciding whether
+// to retry — without this test, a future refactor could collapse one
+// into the other and silently break that contract.
+func Test_Server_With_ToolTimeoutAndStructuralLimit_Should_BeDistinguishable(t *testing.T) {
+	t.Parallel()
+
+	r := tools.NewRegistry()
+	if err := tools.Register(r, "slow", "blocks", func(ctx context.Context, _ testInput) tools.Result {
+		select {
+		case <-time.After(10 * time.Second):
+			return tools.TextResult("unreachable")
+		case <-ctx.Done():
+			return tools.ErrorResult("context cancelled")
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	bigValue := strings.Repeat("a", protocol.MaxJSONStringLen+1)
+	input := handshake() +
+		`{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"slow","arguments":{"message":"x"}}}` + "\n" +
+		`{"jsonrpc":"2.0","method":"ping","id":3,"params":{"data":"` + bigValue + `"}}` + "\n"
+
+	var stdout, stderr bytes.Buffer
+	srv := server.NewServer("mcp", "test", r, strings.NewReader(input), &stdout, &stderr,
+		server.WithHandlerTimeout(50*time.Millisecond))
+
+	err := srv.Run(context.Background())
+	assert.That(t, "run error", err, nil)
+
+	responses := parseResponses(t, &stdout)
+	assert.That(t, "response count", len(responses), 3)
+
+	toolTimeout := responses[1]
+	structural := responses[2]
+
+	// Both share the -32001 code — that is the very thing we are pinning
+	// distinguishability for.
+	assert.That(t, "tool-timeout code", toolTimeout.Error.Code, protocol.ServerTimeout)
+	assert.That(t, "structural code", structural.Error.Code, protocol.ServerTimeout)
+
+	// Tool-timeout: original request id, message names the tool, error.data
+	// carries timingDiag with toolName.
+	assert.That(t, "tool-timeout id", string(toolTimeout.ID), "2")
+	if !strings.Contains(toolTimeout.Error.Message, "slow") {
+		t.Errorf("tool-timeout message should name the tool, got: %s", toolTimeout.Error.Message)
+	}
+	if len(toolTimeout.Error.Data) == 0 {
+		t.Fatalf("tool-timeout must carry error.data (timingDiag), got: %+v", toolTimeout.Error)
+	}
+	var td struct {
+		ToolName string `json:"toolName"`
+	}
+	if err := json.Unmarshal(toolTimeout.Error.Data, &td); err != nil {
+		t.Fatalf("tool-timeout error.data is not JSON: %v", err)
+	}
+	assert.That(t, "tool-timeout data toolName", td.ToolName, "slow")
+
+	// Structural-limit: id=null (request never decoded), message names the
+	// limit, NO error.data — the M1a contract is "no leakage of internal
+	// scanner state to the wire".
+	assert.That(t, "structural id", string(structural.ID), "null")
+	if !strings.Contains(structural.Error.Message, "maxStringLength") {
+		t.Errorf("structural message should name the limit, got: %s", structural.Error.Message)
+	}
+	if len(structural.Error.Data) != 0 {
+		t.Errorf("structural-limit MUST NOT carry error.data, got: %s", structural.Error.Data)
+	}
+}
+
 // parseResponses reads all JSON-RPC responses from the buffer.
 func parseResponses(t *testing.T, buf *bytes.Buffer) []protocol.Response {
 	t.Helper()
