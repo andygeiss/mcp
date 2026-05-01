@@ -501,3 +501,43 @@ func Test_Register_With_UnmarshalableOutAtRuntime_Should_ReturnInternalError(t *
 		t.Errorf("error should mention marshal failure, got: %s", err.Error())
 	}
 }
+
+// Bare Result{} success returns must serialize content as []. The MCP
+// CallToolResult schema requires content to be an array; nil slices marshal
+// to "null" by default and TS-side clients reject the response with an
+// "expected: array, received: null" validation error.
+func Test_Register_With_BareSuccessResult_Should_SerializeContentAsEmptyArray(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — handler returns a non-zero Out plus Result{} and relies on
+	// the dispatch wrapper to emit StructuredContent. Result.Content stays
+	// nil; without a guard, json.Marshal emits "content":null.
+	r := tools.NewRegistry()
+	if err := tools.Register(r, "bare-success", "structured-only success",
+		func(_ context.Context, in structuredOutInput) (structuredOutOutput, tools.Result) {
+			return structuredOutOutput{Echoed: in.Echo}, tools.Result{}
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
+	tool, _ := r.Lookup("bare-success")
+
+	// Act
+	result, err := tool.Handler(context.Background(), json.RawMessage(`{"echo":"x"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, mErr := json.Marshal(result)
+	if mErr != nil {
+		t.Fatal(mErr)
+	}
+
+	// Assert — content serializes as an empty array, never null.
+	s := string(data)
+	if strings.Contains(s, `"content":null`) {
+		t.Fatalf("content must not serialize as null; MCP clients reject it: %s", s)
+	}
+	if !strings.Contains(s, `"content":[]`) {
+		t.Fatalf(`expected "content":[] in JSON, got: %s`, s)
+	}
+}
