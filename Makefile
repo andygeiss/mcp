@@ -1,7 +1,7 @@
 FUZZTIME ?= 30s
 MODULE   ?= github.com/example/myproject
 
-.PHONY: bench build check coverage fuzz init lint setup smoke test
+.PHONY: bench build check coverage fuzz init lint setup smoke spec-coverage test
 
 ## Run benchmarks and compare against baseline
 bench:
@@ -51,9 +51,16 @@ smoke:
 	   '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}' \
 	   '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
 	   | go run ./cmd/mcp/ 2>$$STDERR); \
-	 if echo "$$OUT" | grep -q '"result":{"tools":'; then \
-	   N=$$(echo "$$OUT" | grep -o '"name":"' | wc -l | tr -d ' '); \
-	   echo "Your server works. It exposes $$N tool(s)."; \
+	 TOOLS_LINE=$$(echo "$$OUT" | grep '"result":{"tools":'); \
+	 if [ -n "$$TOOLS_LINE" ]; then \
+	   if ! echo "$$TOOLS_LINE" | grep -q '"outputSchema":'; then \
+	     echo "Smoke test failed: tools/list response missing outputSchema field."; \
+	     echo "  AC8 of Story 2.2 requires every tool to advertise outputSchema."; \
+	     echo "--- response ---"; echo "$$TOOLS_LINE"; \
+	     rm -f $$STDERR; exit 1; \
+	   fi; \
+	   N=$$(echo "$$TOOLS_LINE" | grep -o '"inputSchema":' | wc -l | tr -d ' '); \
+	   echo "Your server works. It exposes $$N tool(s) with outputSchema advertised."; \
 	   rm -f $$STDERR; exit 0; \
 	 else \
 	   echo "Smoke test failed."; \
@@ -66,6 +73,17 @@ smoke:
 	   cat $$STDERR; \
 	   rm -f $$STDERR; exit 1; \
 	 fi
+
+## Regenerate the spec-coverage audit at docs/spec-coverage.txt
+spec-coverage:
+	@TEST=Test_RenderSpecCoverage_Should_MatchCommittedReport; \
+	 OUT=$$(go test -race -run "^$$TEST$$" -count=1 -v ./internal/protocol/ 2>&1); \
+	 STATUS=$$?; \
+	 if ! echo "$$OUT" | grep -qE "^(--- PASS|--- FAIL): $$TEST"; then \
+	   echo "spec-coverage: $$TEST did not run (renamed?)"; \
+	   echo "$$OUT"; exit 1; \
+	 fi; \
+	 echo "$$OUT"; exit $$STATUS
 
 ## Run all tests with race detector
 test:

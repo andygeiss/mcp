@@ -1,12 +1,12 @@
 {
   "properties": {
-    "message": {
-      "description": "The message to echo back",
+    "echoed": {
+      "description": "The message that was echoed back",
       "type": "string"
     }
   },
   "required": [
-    "message"
+    "echoed"
   ],
   "type": "object"
 }

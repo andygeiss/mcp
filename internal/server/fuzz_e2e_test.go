@@ -82,8 +82,8 @@ func Fuzz_Server_E2E(f *testing.F) {
 		if err := tools.Register(r, "echo", "echo tool", func(_ context.Context, in struct {
 			Text string `json:"text" description:"text to echo"`
 		},
-		) tools.Result {
-			return tools.TextResult(in.Text)
+		) (struct{}, tools.Result) {
+			return struct{}{}, tools.TextResult(in.Text)
 		}); err != nil {
 			t.Fatal(err)
 		}

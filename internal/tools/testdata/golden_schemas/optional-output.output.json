@@ -1,0 +1,20 @@
+{
+  "properties": {
+    "comment": {
+      "description": "Optional comment",
+      "type": "string"
+    },
+    "score": {
+      "description": "Optional score 0-100",
+      "type": "integer"
+    },
+    "title": {
+      "description": "Required title",
+      "type": "string"
+    }
+  },
+  "required": [
+    "title"
+  ],
+  "type": "object"
+}

@@ -1,0 +1,31 @@
+{
+  "properties": {
+    "address": {
+      "description": "Mailing address",
+      "properties": {
+        "city": {
+          "description": "City name",
+          "type": "string"
+        },
+        "zip": {
+          "description": "Postal code",
+          "type": "string"
+        }
+      },
+      "required": [
+        "city",
+        "zip"
+      ],
+      "type": "object"
+    },
+    "name": {
+      "description": "Person name",
+      "type": "string"
+    }
+  },
+  "required": [
+    "address",
+    "name"
+  ],
+  "type": "object"
+}

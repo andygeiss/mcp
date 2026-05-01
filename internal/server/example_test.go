@@ -73,9 +73,11 @@ func Example_fullToolLifecycle() {
 			}
 			fmt.Printf("Tools: %v\n", names)
 		case "3":
-			var result struct{ Content []struct{ Text string } }
+			var result struct {
+				StructuredContent struct{ Echoed string } `json:"structuredContent"`
+			}
 			_ = json.Unmarshal(resp.Result, &result)
-			fmt.Printf("Call echo: %s\n", result.Content[0].Text)
+			fmt.Printf("Call echo: %s\n", result.StructuredContent.Echoed)
 		}
 	}
 	// Output:

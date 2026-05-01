@@ -60,8 +60,8 @@ func runConformanceTest(t *testing.T, reqFile string) {
 	}
 
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "test", "test tool", func(_ context.Context, input testInput) tools.Result {
-		return tools.TextResult(input.Message)
+	if err := tools.Register(r, "test", "test tool", func(_ context.Context, input testInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult(input.Message)
 	}); err != nil {
 		t.Fatal(err)
 	}

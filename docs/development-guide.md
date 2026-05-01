@@ -36,6 +36,7 @@ The Makefile is the canonical entry point for development tasks.
 | `make fuzz` | Fuzzes `Fuzz_Decoder_With_ArbitraryInput` for 30s. `make fuzz FUZZTIME=5m` to extend. |
 | `make bench` | Runs benchmarks (count=6) and compares against `testdata/benchmarks/baseline.txt` via benchstat. |
 | `make smoke` | End-to-end smoke test: pipes `initialize` + `notifications/initialized` + `tools/list` through the binary, checks the response. Prints `"Your server works. It exposes N tool(s)."` on success or two diagnostic hints + captured stderr on failure. |
+| `make spec-coverage` | Regenerate `docs/spec-coverage.txt` from the in-memory `protocol.Clauses` registry. Run after adding a new clause; commit the updated file alongside the test change. |
 | `make init MODULE=...` | Scaffold rewriter — rewrites the module path, repoints badges, runs `go mod tidy`, removes `cmd/scaffold/`, resets git history. **Refuses to run on a dirty tree** — commit/stash first or pass `--force`. |
 
 ## Direct `go` commands (canonical incantations)
@@ -85,30 +86,66 @@ If you can't name which box catches a regression, you've duplicated coverage in 
 
 ## Adding a new tool
 
-1. **Define the input struct** in `internal/tools/yourtool.go`:
+1. **Define the input and output structs** in `internal/tools/yourtool.go`:
    ```go
    type GreetInput struct {
        Name string `json:"name" description:"Name to greet"`
    }
-   ```
-2. **Write the handler:**
-   ```go
-   func Greet(_ context.Context, input GreetInput) Result {
-       return TextResult("Hello, " + input.Name + "!")
+   type GreetOutput struct {
+       Greeting string `json:"greeting" description:"The greeting message"`
    }
    ```
-3. **Register** in `cmd/mcp/main.go`:
+2. **Write the handler.** Return both the typed `Out` (auto-marshaled into `structuredContent` when non-zero) and the legacy `Result` (carries Content/IsError):
    ```go
-   if err := tools.Register(registry, "greet", "Greets someone by name", tools.Greet); err != nil {
+   func Greet(_ context.Context, input GreetInput) (GreetOutput, Result) {
+       msg := "Hello, " + input.Name + "!"
+       return GreetOutput{Greeting: msg}, TextResult(msg)
+   }
+   ```
+3. **Register** in `cmd/mcp/main.go` (provide both type parameters explicitly when the inferrer can't see them):
+   ```go
+   if err := tools.Register[tools.GreetInput, tools.GreetOutput](registry, "greet", "Greets someone by name", tools.Greet); err != nil {
        return fmt.Errorf("register greet: %w", err)
    }
    ```
 4. **Write tests** — unit test for the handler, integration test through the server.
 5. **Verify:** `make smoke` prints `"Your server works. It exposes N tool(s)."` (count includes your new tool).
 
-The input schema (`{"type":"object","properties":{...},"required":[...]}`) is **auto-derived** by `internal/schema/schema.go` from struct tags — never hand-roll JSON Schema.
+Both `inputSchema` and `outputSchema` (`{"type":"object","properties":{...},"required":[...]}`) are **auto-derived** by `internal/schema/schema.go` from struct tags — never hand-roll JSON Schema. The dispatch layer skips the structured-content marshal when the handler returns the zero value of `Out`, so `omitempty` stays honest.
 
-**Constraints on `T` for `tools.Register[T]`:** `T` must be a struct (or pointer to struct). `int`, `map`, slice-of-primitive at the top level error out.
+**Constraints on `In` and `Out` for `tools.Register[In, Out]`:** both must be struct types (or pointer-to-struct). `int`, `map`, slice-of-primitive at the top level error out. For tools without meaningful structured output, pick a small typed wrapper (`type FooOutput struct{}` is allowed) — concrete types document the contract and let the schema engine produce a stable shape.
+
+## Adding a spec clause
+
+The spec-conformance registry (`internal/protocol/spec_clauses.go`) maps every MUST/SHOULD/MAY-bearing requirement of the MCP specification to the test functions that prove the server complies. **Tests are stored as function pointers, never as strings** — so renaming or removing a covered test is a compile-time error, not a silent runtime drift. This is the load-bearing design choice; do not "simplify" by switching to test-name strings.
+
+To register a new clause, add a `func init()` block to the `_test.go` file that holds the test you are pinning. The colocation pattern keeps drift visible at the diff level:
+
+```go
+// internal/protocol/protocol_test.go
+package protocol_test
+
+import (
+    "testing"
+
+    "github.com/andygeiss/mcp/internal/protocol"
+)
+
+func init() {
+    protocol.Register(protocol.Clause{
+        ID:      "MCP-2025-11-25/jsonrpc/MUST-echo-id",
+        Level:   "MUST",
+        Section: "JSON-RPC 2.0 §5 Response object",
+        Summary: "Decoder preserves request id exactly for echo back to the client.",
+        Tests: []func(*testing.T){
+            Test_Decode_With_StringID_Should_PreserveExactly,
+            Test_Decode_With_NumberID_Should_PreserveExactly,
+        },
+    })
+}
+```
+
+After adding a clause, run `make spec-coverage` to regenerate `docs/spec-coverage.txt` and commit the file alongside the test change. Reviewers should see the audit grow on every PR that lands a new MUST-bearing test. The renderer at `cmd/spec-coverage/main.go` is the compile-checked entry point; the committed audit artifact is produced by the `Test_RenderSpecCoverage_Should_WriteCommittedReport` test (bootstrap `init()` blocks live in `_test.go` files, so plain `go run ./cmd/spec-coverage` sees an empty registry — that's expected).
 
 ## Adding a new resource or prompt
 

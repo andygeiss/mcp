@@ -16,9 +16,24 @@ type EchoInput struct {
 	Message string `json:"message" description:"The message to echo back"`
 }
 
-// Echo returns the input message as a text result.
-func Echo(_ context.Context, input EchoInput) Result {
-	return TextResult(input.Message)
+// EchoOutput is the structured output Echo returns. The reflection engine
+// derives the tool's outputSchema from this type so clients can validate the
+// structuredContent on the response without ad-hoc string parsing.
+type EchoOutput struct {
+	Echoed string `json:"echoed" description:"The message that was echoed back"`
 }
 
-// Register this tool in cmd/mcp/main.go with tools.Register[EchoInput](reg, "echo", Echo).
+// Echo returns the input message as a typed EchoOutput. The dispatch wrapper
+// auto-marshals the non-zero Out into Result.StructuredContent — no legacy
+// text content block is emitted. New tools should follow this single-surface
+// pattern: clients read structuredContent, the typed schema teaches them how
+// to parse it. If you need the legacy text path for a particular client, add
+// a TextResult(...) explicitly via the returned Result; do not double-emit
+// by default.
+func Echo(_ context.Context, input EchoInput) (EchoOutput, Result) {
+	return EchoOutput{Echoed: input.Message}, Result{}
+}
+
+// Register this tool in cmd/mcp/main.go with
+//
+//	tools.Register[tools.EchoInput, tools.EchoOutput](reg, "echo", "...", tools.Echo)

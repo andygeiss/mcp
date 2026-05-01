@@ -399,3 +399,77 @@ func Test_DeriveInputSchema_With_InterfaceField_Should_ReturnOpenSchema(t *testi
 	assert.That(t, "error", err, nil)
 	assert.That(t, "meta has no type constraint", s.Properties["meta"].Type, "")
 }
+
+// --- DeriveOutputSchema parity tests ---
+//
+// DeriveOutputSchema shares its engine with DeriveInputSchema, so the unit
+// tests focus on the OutputSchema-specific surface: same shape contract,
+// same special-case handling, same error paths. Exhaustive type-derivation
+// coverage lives in the DeriveInputSchema cases above.
+
+type outSimple struct {
+	Comment *string `json:"comment,omitempty" description:"optional comment"`
+	Count   int     `json:"count" description:"required count"`
+}
+
+func Test_DeriveOutputSchema_With_SimpleStruct_Should_ReturnSameShapeAsInput(t *testing.T) {
+	t.Parallel()
+
+	// Act
+	out, err := schema.DeriveOutputSchema[outSimple]()
+
+	// Assert — required for non-pointer non-omitempty, optional for pointer.
+	assert.That(t, "error", err, nil)
+	assert.That(t, "type", out.Type, schema.TypeObject)
+	assert.That(t, "count type", out.Properties["count"].Type, schema.TypeInteger)
+	assert.That(t, "comment type", out.Properties["comment"].Type, schema.TypeString)
+	assert.That(t, "required count", len(out.Required), 1)
+	assert.That(t, "required is count", out.Required[0], "count")
+}
+
+func Test_DeriveOutputSchema_With_EmptyStruct_Should_ReturnObjectWithNoProperties(t *testing.T) {
+	t.Parallel()
+
+	// Act — Out=struct{} is the canonical "no structured output" type.
+	out, err := schema.DeriveOutputSchema[struct{}]()
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "type", out.Type, schema.TypeObject)
+	assert.That(t, "no properties", len(out.Properties), 0)
+	assert.That(t, "no required", len(out.Required), 0)
+}
+
+type outNested struct {
+	Inner struct {
+		Value string `json:"value" description:"inner value"`
+	} `json:"inner"`
+}
+
+func Test_DeriveOutputSchema_With_NestedStruct_Should_ReturnNestedProperties(t *testing.T) {
+	t.Parallel()
+
+	// Act
+	out, err := schema.DeriveOutputSchema[outNested]()
+
+	// Assert
+	assert.That(t, "error", err, nil)
+	assert.That(t, "inner type", out.Properties["inner"].Type, schema.TypeObject)
+	assert.That(t, "inner.value type", out.Properties["inner"].Properties["value"].Type, schema.TypeString)
+}
+
+type outUnsupported struct {
+	Ch chan int `json:"ch" description:"unsupported channel"`
+}
+
+func Test_DeriveOutputSchema_With_UnsupportedField_Should_ReturnError(t *testing.T) {
+	t.Parallel()
+
+	// Act
+	_, err := schema.DeriveOutputSchema[outUnsupported]()
+
+	// Assert — same engine, same error surface as DeriveInputSchema.
+	if err == nil {
+		t.Fatal("expected error for chan field, got nil")
+	}
+}

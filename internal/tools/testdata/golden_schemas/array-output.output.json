@@ -1,0 +1,29 @@
+{
+  "properties": {
+    "items": {
+      "description": "Result items",
+      "items": {
+        "properties": {
+          "label": {
+            "description": "Item label",
+            "type": "string"
+          },
+          "value": {
+            "description": "Item value",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "label",
+          "value"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "items"
+  ],
+  "type": "object"
+}

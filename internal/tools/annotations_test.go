@@ -18,8 +18,8 @@ func Test_WithAnnotations_With_ReadOnlyHint_Should_SetAnnotation(t *testing.T) {
 	r := tools.NewRegistry()
 
 	// Act
-	if err := tools.Register(r, "annotated", "test", func(_ context.Context, _ struct{}) tools.Result {
-		return tools.TextResult("ok")
+	if err := tools.Register(r, "annotated", "test", func(_ context.Context, _ struct{}) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("ok")
 	}, tools.WithAnnotations(tools.Annotations{ReadOnlyHint: true})); err != nil {
 		t.Fatal(err)
 	}
@@ -40,8 +40,8 @@ func Test_Register_With_NoOptions_Should_HaveNilAnnotations(t *testing.T) {
 	r := tools.NewRegistry()
 
 	// Act
-	if err := tools.Register(r, "plain", "test", func(_ context.Context, _ struct{}) tools.Result {
-		return tools.TextResult("ok")
+	if err := tools.Register(r, "plain", "test", func(_ context.Context, _ struct{}) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("ok")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -109,8 +109,8 @@ func Test_WithOutputSchema_With_Schema_Should_SetOutputSchema(t *testing.T) {
 	}
 
 	// Act
-	if err := tools.Register(r, "structured", "test", func(_ context.Context, _ struct{}) tools.Result {
-		return tools.TextResult("ok")
+	if err := tools.Register(r, "structured", "test", func(_ context.Context, _ struct{}) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("ok")
 	}, tools.WithOutputSchema(out)); err != nil {
 		t.Fatal(err)
 	}
@@ -123,6 +123,46 @@ func Test_WithOutputSchema_With_Schema_Should_SetOutputSchema(t *testing.T) {
 	}
 	assert.That(t, "type", tool.OutputSchema.Type, "object")
 	assert.That(t, "required", len(tool.OutputSchema.Required), 1)
+}
+
+type derivableOut struct {
+	Auto string `json:"auto" description:"reflection-derived field"`
+}
+
+func Test_WithOutputSchema_Should_OverrideAutoDerivedSchema(t *testing.T) {
+	t.Parallel()
+
+	// Arrange — register with both an Out type that yields a non-empty
+	// reflection schema AND an explicit WithOutputSchema option carrying a
+	// distinct hand-authored schema. The option must win — that's the
+	// documented escape hatch in WithOutputSchema's godoc.
+	r := tools.NewRegistry()
+	override := schema.OutputSchema{
+		Type: "object",
+		Properties: map[string]schema.Property{
+			"manual": {Type: "string", Description: "hand-authored field"},
+		},
+		Required: []string{"manual"},
+	}
+	if err := tools.Register(r, "override", "test",
+		func(_ context.Context, _ struct{}) (derivableOut, tools.Result) {
+			return derivableOut{Auto: "x"}, tools.Result{}
+		},
+		tools.WithOutputSchema(override),
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert — the option-supplied schema wins; the derivable Out's "auto"
+	// property is gone, replaced by the override's "manual" property.
+	tool, _ := r.Lookup("override")
+	if tool.OutputSchema == nil {
+		t.Fatal("expected non-nil outputSchema")
+	}
+	_, hasManual := tool.OutputSchema.Properties["manual"]
+	_, hasAuto := tool.OutputSchema.Properties["auto"]
+	assert.That(t, "override schema has 'manual' property", hasManual, true)
+	assert.That(t, "override schema does NOT carry derived 'auto' property", hasAuto, false)
 }
 
 func Test_Tool_With_NoOutputSchema_Should_OmitFromJSON(t *testing.T) {
@@ -148,8 +188,8 @@ func Test_WithTitle_With_DisplayName_Should_SetToolTitle(t *testing.T) {
 	r := tools.NewRegistry()
 
 	// Act
-	if err := tools.Register(r, "titled", "test", func(_ context.Context, _ struct{}) tools.Result {
-		return tools.TextResult("ok")
+	if err := tools.Register(r, "titled", "test", func(_ context.Context, _ struct{}) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("ok")
 	}, tools.WithTitle("My Display Name")); err != nil {
 		t.Fatal(err)
 	}

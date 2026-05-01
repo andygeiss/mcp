@@ -1,12 +1,12 @@
 {
   "properties": {
-    "message": {
-      "description": "The message to echo back",
+    "query": {
+      "description": "Search query",
       "type": "string"
     }
   },
   "required": [
-    "message"
+    "query"
   ],
   "type": "object"
 }

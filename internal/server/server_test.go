@@ -27,8 +27,8 @@ type testInput struct {
 // testRegistry creates a registry with a single tool for protocol tests.
 func testRegistry() *tools.Registry {
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "test", "test tool", func(_ context.Context, input testInput) tools.Result {
-		return tools.TextResult(input.Message)
+	if err := tools.Register(r, "test", "test tool", func(_ context.Context, input testInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult(input.Message)
 	}); err != nil {
 		panic("testRegistry: " + err.Error())
 	}
@@ -183,13 +183,13 @@ func Test_Server_With_ToolsList_Should_ReturnAlphabetically(t *testing.T) {
 
 	// Arrange
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "zeta", "z tool", func(_ context.Context, _ testInput) tools.Result {
-		return tools.TextResult("z")
+	if err := tools.Register(r, "zeta", "z tool", func(_ context.Context, _ testInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("z")
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := tools.Register(r, "alpha", "a tool", func(_ context.Context, _ testInput) tools.Result {
-		return tools.TextResult("a")
+	if err := tools.Register(r, "alpha", "a tool", func(_ context.Context, _ testInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("a")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +275,7 @@ func Test_Server_With_PanickingHandler_Should_Return32603(t *testing.T) {
 
 			// Arrange
 			r := testRegistry()
-			if err := tools.Register(r, tt.toolName, "panics", func(_ context.Context, _ testInput) tools.Result {
+			if err := tools.Register(r, tt.toolName, "panics", func(_ context.Context, _ testInput) (struct{}, tools.Result) {
 				panic(tt.panicValue)
 			}); err != nil {
 				t.Fatal(err)
@@ -302,7 +302,7 @@ func Test_Server_With_PanickingHandler_Should_IncludeDataFields(t *testing.T) {
 
 	// Arrange
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "panicker", "panics", func(_ context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "panicker", "panics", func(_ context.Context, _ testInput) (struct{}, tools.Result) {
 		panic("test-panic-value")
 	}); err != nil {
 		t.Fatal(err)
@@ -335,7 +335,7 @@ func Test_Server_With_PanickingHandler_Should_LogPanicToStderr(t *testing.T) {
 
 	// Arrange
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "panicker", "panics", func(_ context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "panicker", "panics", func(_ context.Context, _ testInput) (struct{}, tools.Result) {
 		panic("test-panic-value")
 	}); err != nil {
 		t.Fatal(err)
@@ -549,8 +549,8 @@ func Test_Server_With_ErrorResult_Should_ReturnSuccessEnvelope(t *testing.T) {
 
 	// Arrange — handler returns ErrorResult (tool-level failure, not protocol error)
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "failing", "returns error result", func(_ context.Context, _ testInput) tools.Result {
-		return tools.ErrorResult("something went wrong")
+	if err := tools.Register(r, "failing", "returns error result", func(_ context.Context, _ testInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.ErrorResult("something went wrong")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -582,12 +582,12 @@ func Test_Server_With_DefaultTimeout_Should_AllowSlowHandler(t *testing.T) {
 
 	// Arrange — handler that takes 100ms succeeds under the default 30s timeout.
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "slow", "takes 100ms", func(ctx context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "slow", "takes 100ms", func(ctx context.Context, _ testInput) (struct{}, tools.Result) {
 		select {
 		case <-time.After(100 * time.Millisecond):
-			return tools.TextResult("done")
+			return struct{}{}, tools.TextResult("done")
 		case <-ctx.Done():
-			return tools.ErrorResult("cancelled")
+			return struct{}{}, tools.ErrorResult("cancelled")
 		}
 	}); err != nil {
 		t.Fatal(err)
@@ -619,7 +619,7 @@ func Test_Server_With_TimeoutHandler_Should_ReturnError(t *testing.T) {
 
 	// Arrange — handler that ignores context and blocks forever
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "hang", "blocks forever", func(_ context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "hang", "blocks forever", func(_ context.Context, _ testInput) (struct{}, tools.Result) {
 		select {} //nolint:gosimple // intentionally block forever to test timeout
 	}); err != nil {
 		t.Fatal(err)
@@ -660,9 +660,9 @@ func Test_Server_With_DeadlineExceeded_Should_IncludeTimingInData(t *testing.T) 
 
 	// Arrange — handler that respects context and returns on deadline
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "slow", "blocks until timeout", func(ctx context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "slow", "blocks until timeout", func(ctx context.Context, _ testInput) (struct{}, tools.Result) {
 		<-ctx.Done()
-		return tools.ErrorResult(ctx.Err().Error())
+		return struct{}{}, tools.ErrorResult(ctx.Err().Error())
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -711,9 +711,9 @@ func Test_Server_With_ContextCanceled_Should_IncludeElapsedOnly(t *testing.T) {
 
 	// Arrange — handler that blocks until cancelled
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "blocker", "blocks forever", func(ctx context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "blocker", "blocks forever", func(ctx context.Context, _ testInput) (struct{}, tools.Result) {
 		<-ctx.Done()
-		return tools.ErrorResult(ctx.Err().Error())
+		return struct{}{}, tools.ErrorResult(ctx.Err().Error())
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -770,7 +770,7 @@ func Test_Server_With_SafetyTimer_Should_IncludeTimingInData(t *testing.T) {
 
 	// Arrange — handler that ignores context completely
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "hang", "ignores context", func(_ context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "hang", "ignores context", func(_ context.Context, _ testInput) (struct{}, tools.Result) {
 		select {} //nolint:gosimple // intentionally block forever
 	}); err != nil {
 		t.Fatal(err)
@@ -1242,9 +1242,9 @@ func Test_Server_With_Malformed_Cancelled_Notification_Should_SilentlyIgnore(t *
 	// when the malformed cancel notification arrives. Per MCP, malformed
 	// notifications are silently ignored: no response, no non-debug log.
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) (struct{}, tools.Result) {
 		<-ctx.Done()
-		return tools.ErrorResult("cancelled")
+		return struct{}{}, tools.ErrorResult("cancelled")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1276,10 +1276,10 @@ func Test_Server_With_CancelledNotification_Should_CancelInFlightContext(t *test
 	// Arrange — handler that blocks until context cancelled
 	cancelled := make(chan struct{})
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) (struct{}, tools.Result) {
 		<-ctx.Done()
 		close(cancelled)
-		return tools.ErrorResult("cancelled")
+		return struct{}{}, tools.ErrorResult("cancelled")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1312,9 +1312,9 @@ func Test_Server_With_CancelledNotification_Should_SuppressResponse(t *testing.T
 
 	// Arrange
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) (struct{}, tools.Result) {
 		<-ctx.Done()
-		return tools.ErrorResult("cancelled")
+		return struct{}{}, tools.ErrorResult("cancelled")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1353,18 +1353,18 @@ func Test_Server_With_ToolsListMultipleTools_Should_ReturnAlphabeticalOrder(t *t
 
 	// Arrange — three tools in non-alphabetical order
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "zeta", "z tool", func(_ context.Context, _ testInput) tools.Result {
-		return tools.TextResult("z")
+	if err := tools.Register(r, "zeta", "z tool", func(_ context.Context, _ testInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("z")
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := tools.Register(r, "alpha", "a tool", func(_ context.Context, _ testInput) tools.Result {
-		return tools.TextResult("a")
+	if err := tools.Register(r, "alpha", "a tool", func(_ context.Context, _ testInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("a")
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := tools.Register(r, "mid", "m tool", func(_ context.Context, _ testInput) tools.Result {
-		return tools.TextResult("m")
+	if err := tools.Register(r, "mid", "m tool", func(_ context.Context, _ testInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("m")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1429,8 +1429,8 @@ func Test_Server_With_ToolsListAnnotations_Should_IncludeAnnotations(t *testing.
 
 	// Arrange
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "readonly", "read-only tool", func(_ context.Context, _ testInput) tools.Result {
-		return tools.TextResult("ok")
+	if err := tools.Register(r, "readonly", "read-only tool", func(_ context.Context, _ testInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("ok")
 	}, tools.WithAnnotations(tools.Annotations{ReadOnlyHint: true})); err != nil {
 		t.Fatal(err)
 	}
@@ -1491,9 +1491,9 @@ func Test_Server_With_RequestDuringInFlight_Should_ReturnServerBusy(t *testing.T
 
 	// Arrange — handler that blocks until context cancelled, second request arrives while in flight
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "blocker", "blocks", func(ctx context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "blocker", "blocks", func(ctx context.Context, _ testInput) (struct{}, tools.Result) {
 		<-ctx.Done()
-		return tools.TextResult("done")
+		return struct{}{}, tools.TextResult("done")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1658,9 +1658,9 @@ func Test_Server_With_CancelledNotification_NonMatchingId_Should_SilentlyIgnore(
 
 	// Arrange — blocker tool, cancel with wrong id (id:99 vs in-flight id:2)
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) (struct{}, tools.Result) {
 		<-ctx.Done()
-		return tools.ErrorResult("cancelled")
+		return struct{}{}, tools.ErrorResult("cancelled")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1704,9 +1704,9 @@ func Test_Server_With_PingDuringInFlight_Should_ReturnPingResult(t *testing.T) {
 
 	// Arrange — blocker tool followed by ping while in-flight
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) (struct{}, tools.Result) {
 		<-ctx.Done()
-		return tools.ErrorResult("cancelled")
+		return struct{}{}, tools.ErrorResult("cancelled")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1759,8 +1759,8 @@ func Test_Server_With_LargeToolResult_Should_TruncateResult(t *testing.T) {
 
 	// Arrange — handler returns > 1MB of data
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "large", "returns large result", func(_ context.Context, _ testInput) tools.Result {
-		return tools.TextResult(strings.Repeat("x", 1*1024*1024+1))
+	if err := tools.Register(r, "large", "returns large result", func(_ context.Context, _ testInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult(strings.Repeat("x", 1*1024*1024+1))
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1802,9 +1802,9 @@ func Test_Server_With_TraceEnabled_And_InFlightDecode_Should_LogTraceMessages(t 
 
 	// Arrange — blocker tool with trace enabled, send ping while in-flight
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) (struct{}, tools.Result) {
 		<-ctx.Done()
-		return tools.ErrorResult("cancelled")
+		return struct{}{}, tools.ErrorResult("cancelled")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1845,9 +1845,9 @@ func Test_Server_With_ContextCancelledDuringInFlight_Should_CancelAndAwait(t *te
 	defer cancel()
 
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) (struct{}, tools.Result) {
 		<-ctx.Done()
-		return tools.ErrorResult("cancelled")
+		return struct{}{}, tools.ErrorResult("cancelled")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1892,9 +1892,9 @@ func Test_Server_With_CancelledInFlightOnDecodeError_Should_SuppressResponse(t *
 
 	// Arrange — blocker tool, cancel notification with matching id, then EOF
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) (struct{}, tools.Result) {
 		<-ctx.Done()
-		return tools.ErrorResult("cancelled")
+		return struct{}{}, tools.ErrorResult("cancelled")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1942,9 +1942,9 @@ func Test_Server_With_InvalidNotificationDuringInFlight_Should_SilentlyIgnore(t 
 
 	// Arrange — blocker tool, then a notification with wrong jsonrpc version
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) (struct{}, tools.Result) {
 		<-ctx.Done()
-		return tools.ErrorResult("cancelled")
+		return struct{}{}, tools.ErrorResult("cancelled")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1988,9 +1988,9 @@ func Test_Server_With_InvalidRequestDuringInFlight_Should_ReturnError(t *testing
 
 	// Arrange — blocker tool, then a request with wrong jsonrpc version (has id)
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) (struct{}, tools.Result) {
 		<-ctx.Done()
-		return tools.ErrorResult("cancelled")
+		return struct{}{}, tools.ErrorResult("cancelled")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -2045,8 +2045,8 @@ func Test_Server_With_PipeControlledTiming_Should_HitProcessInFlightResult(t *te
 
 	// Arrange — fast echo handler completes before next message arrives
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "fast", "returns immediately", func(_ context.Context, input testInput) tools.Result {
-		return tools.TextResult(input.Message)
+	if err := tools.Register(r, "fast", "returns immediately", func(_ context.Context, input testInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult(input.Message)
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -2104,9 +2104,9 @@ func Test_Server_With_PipeHandlerError_Should_HitProcessInFlightErrorPath(t *tes
 
 	// Arrange — handler returns a CodeError
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "errtool", "returns error", func(_ context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "errtool", "returns error", func(_ context.Context, _ testInput) (struct{}, tools.Result) {
 		// Return result — the handler wrapper returns nil error.
-		return tools.ErrorResult("something broke")
+		return struct{}{}, tools.ErrorResult("something broke")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -2190,8 +2190,8 @@ func Test_Server_With_HandlerReturningNonCodeError_Should_Return32603(t *testing
 	// Arrange — Register wraps the handler so non-CodeError paths aren't reachable
 	// from the public API. Exercise the CodeError path via missing required field.
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "test", "test", func(_ context.Context, _ testInput) tools.Result {
-		return tools.TextResult("ok")
+	if err := tools.Register(r, "test", "test", func(_ context.Context, _ testInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("ok")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -2262,10 +2262,10 @@ func Test_Server_With_CancelledInFlight_Should_SuppressToolResponse(t *testing.T
 	// Arrange — handler blocks until context cancelled
 	r := tools.NewRegistry()
 	handlerStarted := make(chan struct{})
-	if err := tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) (struct{}, tools.Result) {
 		close(handlerStarted)
 		<-ctx.Done()
-		return tools.ErrorResult("cancelled")
+		return struct{}{}, tools.ErrorResult("cancelled")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -2348,8 +2348,8 @@ func Test_Server_With_FastHandlerAndSlowDecode_Should_HitPriorityPath(t *testing
 
 	// Arrange — instant handler
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "fast", "returns immediately", func(_ context.Context, input testInput) tools.Result {
-		return tools.TextResult(input.Message)
+	if err := tools.Register(r, "fast", "returns immediately", func(_ context.Context, input testInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult(input.Message)
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -2573,8 +2573,8 @@ func Test_Server_With_InFlightCodeError_Should_IncrementErrorCount(t *testing.T)
 
 	// Arrange — handler returns a *protocol.CodeError so resp.Error != nil
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "errtool", "returns protocol error", func(_ context.Context, _ testInput) tools.Result {
-		return tools.ErrorResult("something went wrong")
+	if err := tools.Register(r, "errtool", "returns protocol error", func(_ context.Context, _ testInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.ErrorResult("something went wrong")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -2630,8 +2630,8 @@ func Test_Server_With_InFlightProtocolError_Should_HitIsErrorPath(t *testing.T) 
 	// into a *protocol.CodeError, which executeToolCall surfaces as resp.Error != nil
 	// (so inFlightResult.isError = true).
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "coderr", "returns protocol CodeError", func(_ context.Context, _ testInput) tools.Result {
-		return tools.TextResult("ok")
+	if err := tools.Register(r, "coderr", "returns protocol CodeError", func(_ context.Context, _ testInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("ok")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -2700,10 +2700,10 @@ func Test_Server_With_SizeExceededDuringInFlight_Should_HandleGracefully(t *test
 	// Arrange — blocking handler; send oversized message while it's in flight
 	r := tools.NewRegistry()
 	handlerReady := make(chan struct{})
-	if err := tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "blocker", "blocks until cancelled", func(ctx context.Context, _ testInput) (struct{}, tools.Result) {
 		close(handlerReady)
 		<-ctx.Done()
-		return tools.ErrorResult("cancelled")
+		return struct{}{}, tools.ErrorResult("cancelled")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -3125,11 +3125,11 @@ func Test_Server_With_ProgressToken_Should_EmitProgressNotification(t *testing.T
 
 	// Arrange — register a tool that reports progress
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "slow", "slow tool", func(ctx context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "slow", "slow tool", func(ctx context.Context, _ testInput) (struct{}, tools.Result) {
 		p := server.ProgressFromContext(ctx)
 		p.Report(1, 10)
 		p.Report(10, 10)
-		return tools.TextResult("done")
+		return struct{}{}, tools.TextResult("done")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -3179,8 +3179,8 @@ func Test_Server_With_InvalidMetaObject_Should_IgnoreProgressToken(t *testing.T)
 
 	// Arrange — _meta is not a valid JSON object (it's a string)
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "meta-test", "meta test tool", func(_ context.Context, _ testInput) tools.Result {
-		return tools.TextResult("ok")
+	if err := tools.Register(r, "meta-test", "meta test tool", func(_ context.Context, _ testInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.TextResult("ok")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -3201,11 +3201,11 @@ func Test_Server_With_ProgressTokenAndTrace_Should_EmitTracedProgress(t *testing
 
 	// Arrange — tool reports progress with trace enabled
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "traced", "traced tool", func(ctx context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "traced", "traced tool", func(ctx context.Context, _ testInput) (struct{}, tools.Result) {
 		p := server.ProgressFromContext(ctx)
 		p.Report(5, 10)
 		p.Log("info", "tracer", "traced log")
-		return tools.TextResult("traced done")
+		return struct{}{}, tools.TextResult("traced done")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -3232,10 +3232,10 @@ func Test_Server_Without_ProgressToken_Should_NotEmitProgress(t *testing.T) {
 
 	// Arrange — tool reports progress but no _meta.progressToken in request
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "fast", "fast tool", func(ctx context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "fast", "fast tool", func(ctx context.Context, _ testInput) (struct{}, tools.Result) {
 		p := server.ProgressFromContext(ctx)
 		p.Report(1, 1) // no-op because no token
-		return tools.TextResult("done")
+		return struct{}{}, tools.TextResult("done")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -3283,10 +3283,10 @@ func Test_Server_With_ToolHandler_Log_Should_EmitLogNotification(t *testing.T) {
 
 	// Arrange — register a tool that logs
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "logger", "logging tool", func(ctx context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "logger", "logging tool", func(ctx context.Context, _ testInput) (struct{}, tools.Result) {
 		p := server.ProgressFromContext(ctx)
 		p.Log("info", "test-logger", "hello from tool")
-		return tools.TextResult("done")
+		return struct{}{}, tools.TextResult("done")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -3629,12 +3629,12 @@ func Test_Server_With_SendRequest_Should_CorrelateResponse(t *testing.T) {
 
 	// Arrange — register a tool that uses SendRequest to call the client
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "bidir", "bidirectional tool", func(ctx context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "bidir", "bidirectional tool", func(ctx context.Context, _ testInput) (struct{}, tools.Result) {
 		resp, err := protocol.SendRequest(ctx, "sampling/createMessage", map[string]string{"prompt": "hello"})
 		if err != nil {
-			return tools.ErrorResult("send request failed: " + err.Error())
+			return struct{}{}, tools.ErrorResult("send request failed: " + err.Error())
 		}
-		return tools.TextResult("client said: " + string(resp.Result))
+		return struct{}{}, tools.TextResult("client said: " + string(resp.Result))
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -3916,10 +3916,10 @@ func Test_Server_With_TraceEnabledNotification_Should_LogTraceNotification(t *te
 
 	// Arrange — tool that emits a log notification, with trace enabled
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "logger", "emits log", func(ctx context.Context, _ testInput) tools.Result {
+	if err := tools.Register(r, "logger", "emits log", func(ctx context.Context, _ testInput) (struct{}, tools.Result) {
 		p := server.ProgressFromContext(ctx)
 		p.Log("info", "test", "hello from tool")
-		return tools.TextResult("done")
+		return struct{}{}, tools.TextResult("done")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -3988,8 +3988,8 @@ func Test_Server_With_ToolCallErrorResult_Should_ReturnErrorFlag(t *testing.T) {
 
 	// Arrange — tool returns an error result (isError flag)
 	r := tools.NewRegistry()
-	if err := tools.Register(r, "errtool", "returns error result", func(_ context.Context, _ testInput) tools.Result {
-		return tools.ErrorResult("something went wrong")
+	if err := tools.Register(r, "errtool", "returns error result", func(_ context.Context, _ testInput) (struct{}, tools.Result) {
+		return struct{}{}, tools.ErrorResult("something went wrong")
 	}); err != nil {
 		t.Fatal(err)
 	}

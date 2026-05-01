@@ -4,6 +4,7 @@ package schema
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -55,23 +56,47 @@ type Property struct {
 
 // DeriveInputSchema reflects over struct T to build an InputSchema.
 func DeriveInputSchema[T any]() (InputSchema, error) {
+	props, required, err := deriveStructSchema[T]()
+	if err != nil {
+		return InputSchema{}, err
+	}
+	return InputSchema{Properties: props, Required: required, Type: TypeObject}, nil
+}
+
+// DeriveOutputSchema reflects over struct T to build an OutputSchema. Shares
+// the engine with DeriveInputSchema — same rules for required fields,
+// pointer-vs-non-pointer handling, and special types (time.Time, RawMessage).
+// An empty struct produces a schema with no properties and no required list,
+// which marshals to {"type":"object"} — the spec-conformant "any object" shape.
+func DeriveOutputSchema[T any]() (OutputSchema, error) {
+	props, required, err := deriveStructSchema[T]()
+	if err != nil {
+		return OutputSchema{}, err
+	}
+	return OutputSchema{Properties: props, Required: required, Type: TypeObject}, nil
+}
+
+// deriveStructSchema is the shared engine behind DeriveInputSchema and
+// DeriveOutputSchema. Returns the property map (nil-safe — empty map when no
+// fields) and the sorted required-field list.
+func deriveStructSchema[T any]() (map[string]Property, []string, error) {
 	var zero T
 	t := reflect.TypeOf(zero)
+	if t == nil {
+		return nil, nil, errors.New("schema: cannot derive from untyped nil")
+	}
 	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 
-	s := InputSchema{
-		Properties: make(map[string]Property),
-		Type:       TypeObject,
+	props := make(map[string]Property)
+	var required []string
+	if err := collectFields(t, props, &required, 0, map[reflect.Type]bool{t: true}); err != nil {
+		return nil, nil, err
 	}
 
-	if err := collectFields(t, s.Properties, &s.Required, 0, map[reflect.Type]bool{t: true}); err != nil {
-		return InputSchema{}, err
-	}
-
-	slices.Sort(s.Required)
-	return s, nil
+	slices.Sort(required)
+	return props, required, nil
 }
 
 // collectFields iterates struct fields, promoting anonymous embedded structs
