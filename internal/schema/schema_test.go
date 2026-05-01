@@ -473,3 +473,38 @@ func Test_DeriveOutputSchema_With_UnsupportedField_Should_ReturnError(t *testing
 		t.Fatal("expected error for chan field, got nil")
 	}
 }
+
+func Test_DeriveInputSchema_With_NilTypedT_Should_ReturnError(t *testing.T) {
+	t.Parallel()
+
+	// `any` (interface{}) has a nil zero value; reflect.TypeOf on a
+	// typed-nil interface returns nil. Covers the t==nil guard in
+	// deriveStructSchema, which surfaces as a "cannot derive from untyped
+	// nil" error rather than a panic deeper in collectFields.
+	_, err := schema.DeriveInputSchema[any]()
+
+	if err == nil {
+		t.Fatal("expected error for any/interface T, got nil")
+	}
+}
+
+// EmbeddedBadInner is exported (anonymous-promotable) and carries an
+// unsupported chan field; embedding it into another struct exercises the
+// embedded-recursion error path in collectFields.
+type EmbeddedBadInner struct {
+	Ch chan int `json:"ch" description:"unsupported channel"`
+}
+
+type EmbeddedBadOuter struct {
+	EmbeddedBadInner
+	Name string `json:"name" description:"normal field"`
+}
+
+func Test_DeriveInputSchema_With_EmbeddedUnsupportedField_Should_PropagateError(t *testing.T) {
+	t.Parallel()
+
+	_, err := schema.DeriveInputSchema[EmbeddedBadOuter]()
+	if err == nil {
+		t.Fatal("expected error for embedded bad inner struct, got nil")
+	}
+}

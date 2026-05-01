@@ -448,3 +448,56 @@ func Test_Register_With_PointerOut_NonNilNonZero_Should_Marshal(t *testing.T) {
 	assert.That(t, "structuredContent emitted",
 		string(result.StructuredContent), `{"echoed":"x"}`)
 }
+
+// unsupportedOut has a chan field — DeriveOutputSchema fails at registration,
+// covering the err-return branch at registry.go's outputSchema derivation.
+type unsupportedOut struct {
+	Ch chan int `json:"ch" description:"unsupported channel"`
+}
+
+func Test_Register_With_UnsupportedOutType_Should_ReturnDeriveError(t *testing.T) {
+	t.Parallel()
+
+	r := tools.NewRegistry()
+	err := tools.Register(r, "bad-out", "out type rejected by schema engine",
+		func(_ context.Context, _ structuredOutInput) (unsupportedOut, tools.Result) {
+			return unsupportedOut{}, tools.Result{}
+		},
+	)
+	if err == nil {
+		t.Fatal("expected error for unsupported Out type, got nil")
+	}
+	if !strings.Contains(err.Error(), "derive output schema") {
+		t.Errorf("error should mention output schema derivation, got: %s", err.Error())
+	}
+}
+
+// outWithInterface has an interface{} field — schema derivation accepts it
+// (open schema), but at runtime json.Marshal fails when the interface holds
+// an unmarshalable value (chan, func, cyclic). Covers the marshal-error
+// branch of the dispatch wrapper.
+type outWithInterface struct {
+	Value any `json:"value" description:"any value"`
+}
+
+func Test_Register_With_UnmarshalableOutAtRuntime_Should_ReturnInternalError(t *testing.T) {
+	t.Parallel()
+
+	r := tools.NewRegistry()
+	if err := tools.Register(r, "marshal-err", "marshalable schema, unmarshalable runtime",
+		func(_ context.Context, _ structuredOutInput) (outWithInterface, tools.Result) {
+			return outWithInterface{Value: make(chan int)}, tools.Result{}
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
+	tool, _ := r.Lookup("marshal-err")
+
+	_, err := tool.Handler(context.Background(), json.RawMessage(`{"echo":"x"}`))
+	if err == nil {
+		t.Fatal("expected internal error from json.Marshal on chan, got nil")
+	}
+	if !strings.Contains(err.Error(), "marshal structured output") {
+		t.Errorf("error should mention marshal failure, got: %s", err.Error())
+	}
+}
