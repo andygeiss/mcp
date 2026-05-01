@@ -484,12 +484,20 @@ func Test_Server_Started_Should_LogPidAndGoVersion(t *testing.T) {
 }
 
 // Test_Server_With_OversizedString_DuringInFlight_Should_RejectNonFatallyAndContinue
-// drives a structural-limit rejection while a tool handler is in flight. Per
-// handleDecodeErrorDuringInFlight: the error response is emitted FIRST
-// (id=null), the in-flight handler is awaited and its response emitted SECOND
-// (original id), then the connection survives for a third message. Without
-// this test, the only structural-limit integration coverage runs against an
-// idle server.
+// drives a structural-limit rejection while a tool handler is in flight and
+// pins the wire-level invariants:
+//
+//   - The structural rejection (id=null, names maxStringLength) is emitted.
+//   - The in-flight handler's timeout response (id=2, names the tool) is emitted.
+//   - The connection survives for a subsequent ping (id=4).
+//
+// The order between the structural rejection and the in-flight timeout is
+// intentionally not pinned: at the wire level the dispatch loop has a benign
+// race between the decoder delivering the structural error and the in-flight
+// handler completing its timeout. Both orderings are semantically correct.
+// `Test_handleDecodeErrorDuringInFlight_With_StructuralLimit_AndHandlerStuck_Should_LogAbandon`
+// pins the specific handleDecodeErrorDuringInFlight path deterministically via
+// synctest.
 func Test_Server_With_OversizedString_DuringInFlight_Should_RejectNonFatallyAndContinue(t *testing.T) {
 	t.Parallel()
 
@@ -521,10 +529,7 @@ func Test_Server_With_OversizedString_DuringInFlight_Should_RejectNonFatallyAndC
 	// structural-limit message races the decode loop.
 	time.Sleep(50 * time.Millisecond)
 
-	// Push the oversized-string ping mid-flight. Per
-	// handleDecodeErrorDuringInFlight: structural error written first, then
-	// the function blocks on inFlightCh until the slow handler's safety timer
-	// fires and the handler response is encoded.
+	// Push the oversized-string ping mid-flight.
 	bigValue := strings.Repeat("a", protocol.MaxJSONStringLen+1)
 	_, _ = pw.Write([]byte(`{"jsonrpc":"2.0","method":"ping","id":3,"params":{"data":"` + bigValue + `"}}` + "\n"))
 
@@ -541,25 +546,38 @@ func Test_Server_With_OversizedString_DuringInFlight_Should_RejectNonFatallyAndC
 	assert.That(t, "run error", err, nil)
 
 	responses := parseResponses(t, &stdout)
-	// Expected order: init, structural error (id=null), slow timeout (id=2), final ping (id=4).
+	// 4 responses: init first, final ping last, with the structural error
+	// and slow-timeout in either order in the middle.
 	assert.That(t, "response count", len(responses), 4)
-
 	assert.That(t, "init id", string(responses[0].ID), "1")
-
-	assert.That(t, "structural error id", string(responses[1].ID), "null")
-	assert.That(t, "structural error code", responses[1].Error.Code, protocol.ServerTimeout)
-	if !strings.Contains(responses[1].Error.Message, "maxStringLength") {
-		t.Errorf("expected maxStringLength in structural error, got: %s", responses[1].Error.Message)
-	}
-
-	assert.That(t, "slow timeout id", string(responses[2].ID), "2")
-	assert.That(t, "slow timeout code", responses[2].Error.Code, protocol.ServerTimeout)
-	if !strings.Contains(responses[2].Error.Message, "slow") {
-		t.Errorf("expected tool name in slow timeout, got: %s", responses[2].Error.Message)
-	}
-
 	assert.That(t, "final ping id", string(responses[3].ID), "4")
 	assert.That(t, "final ping result", string(responses[3].Result), "{}")
+
+	var structural, slowTimeout *protocol.Response
+	for i := 1; i <= 2; i++ {
+		switch string(responses[i].ID) {
+		case "null":
+			structural = &responses[i]
+		case "2":
+			slowTimeout = &responses[i]
+		}
+	}
+	if structural == nil {
+		t.Fatalf("expected structural error response (id=null) among responses[1:3], got: %+v", responses[1:3])
+	}
+	if slowTimeout == nil {
+		t.Fatalf("expected slow-timeout response (id=2) among responses[1:3], got: %+v", responses[1:3])
+	}
+
+	assert.That(t, "structural error code", structural.Error.Code, protocol.ServerTimeout)
+	if !strings.Contains(structural.Error.Message, "maxStringLength") {
+		t.Errorf("expected maxStringLength in structural error, got: %s", structural.Error.Message)
+	}
+
+	assert.That(t, "slow timeout code", slowTimeout.Error.Code, protocol.ServerTimeout)
+	if !strings.Contains(slowTimeout.Error.Message, "slow") {
+		t.Errorf("expected tool name in slow timeout, got: %s", slowTimeout.Error.Message)
+	}
 }
 
 // Test_Server_With_ToolTimeoutAndStructuralLimit_Should_BeDistinguishable
