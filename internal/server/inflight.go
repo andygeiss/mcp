@@ -54,9 +54,14 @@ type toolError struct {
 }
 
 // extractProgressToken extracts the _meta.progressToken from raw tool call
-// params. Returns nil if absent. The _meta field uses a leading underscore per
-// the MCP spec, so it is extracted via map access rather than struct tags to
-// satisfy the camelCase linter rule.
+// params. Returns nil if absent OR if the token is the JSON literal `null`
+// (which a map decode would otherwise plumb through as the 4-byte RawMessage
+// `null`, causing Report to emit `"progressToken":null` on the wire — a spec
+// violation since the client did not actually opt in to progress).
+//
+// The _meta field uses a leading underscore per the MCP spec, so it is
+// extracted via map access rather than struct tags to satisfy the camelCase
+// linter rule.
 func extractProgressToken(raw json.RawMessage) json.RawMessage {
 	var m map[string]json.RawMessage
 	if json.Unmarshal(raw, &m) != nil {
@@ -70,7 +75,11 @@ func extractProgressToken(raw json.RawMessage) json.RawMessage {
 	if json.Unmarshal(meta, &metaObj) != nil {
 		return nil
 	}
-	return metaObj["progressToken"]
+	tok := metaObj["progressToken"]
+	if bytes.Equal(tok, []byte("null")) {
+		return nil
+	}
+	return tok
 }
 
 // startToolCallAsync validates tool call params and, if valid, spawns the
@@ -112,8 +121,15 @@ func (s *Server) startToolCallAsync(ctx context.Context, msg protocol.Request) (
 	// cannot suppress this handler's response.
 	s.inFlightCancelled.Store(false)
 
-	// Inject progress notifier into handler context.
-	prog := &Progress{server: s, token: extractProgressToken(msg.Params)}
+	// Inject progress notifier into handler context. The request-scoped
+	// logger (already attached to callCtx via withRequestLogger above) is
+	// captured on the Progress so AI10 drop warnings carry request_id
+	// without the handler having to plumb context to the warn site.
+	prog := &Progress{
+		server: s,
+		logger: loggerFromContext(callCtx, s.logger),
+		token:  extractProgressToken(msg.Params),
+	}
 	callCtx = withProgress(callCtx, prog)
 	// Inject the server as the outbound Peer so handlers reach the bidi path
 	// via protocol.SendRequest without importing internal/server (Invariant I1).

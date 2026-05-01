@@ -190,7 +190,13 @@ func LongRunning(ctx context.Context, input MyInput) Result {
 }
 ```
 
-`Report` and `Log` are nil-safe and no-op without a client-supplied `_meta.progressToken` on the originating request. **AI10 invariant:** handlers must not invoke `Report` while parked in `protocol.SendRequest` / outbound-awaiting; the slow-client recovery path is `-32001` (`ServerTimeout`).
+`Report` is nil-safe AND token-safe — it no-ops without a client-supplied `_meta.progressToken` on the originating request. `Log` is nil-safe but does NOT depend on the progress token (`notifications/message` is governed by the server's `logging` capability and `logging/setLevel`, not per-request progress opt-in).
+
+**AI10 invariant (enforced):** `Report` is automatically dropped while a handler is parked in `protocol.SendRequest`. `(*Server).SendRequest` brackets its outbound await with `suspendForOutbound`, so calling `Report` from a goroutine that fires during the await is safe — the call returns a no-op. Handlers do not need to track outbound state themselves. The slow-client recovery path remains `-32001` (`ServerTimeout`).
+
+**AI10 telemetry:** every dropped `Report` emits a `progress_dropped_during_outbound` warn line on stderr (request-scoped logger, carries `request_id`, `reason=ai10_invariant`, plus the `progress` and `total` of the dropped call). This is operator visibility into a contract violation — the gate silently corrects the wire shape, but the warn lets you see when handler code is interleaving `Report` with `SendRequest` so the handler can be fixed. The no-token no-op path stays silent (no opt-in is normal, not anomalous).
+
+**Token type preservation:** the original JSON type of `progressToken` (string, number) is preserved byte-for-byte on the emitted notification — `json.RawMessage` is used end-to-end, never re-marshaled. A request with `_meta.progressToken: "task-42"` produces `progressToken: "task-42"` on the wire (string), and `_meta.progressToken: 42` produces `progressToken: 42` (number). This matches the request `id` precedent in JSON-RPC 2.0.
 
 ## Fuzzing
 

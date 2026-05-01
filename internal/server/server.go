@@ -253,6 +253,10 @@ func (s *Server) SendRequest(ctx context.Context, method string, params any) (*p
 		}
 	}
 
+	// AI10: suspend Progress.Report emission for the duration of the outbound
+	// await. Nil-safe when no Progress is in ctx (non-tool callers).
+	defer ProgressFromContext(ctx).suspendForOutbound()()
+
 	id := s.outboundIDCounter.Add(1)
 	idJSON := strconv.AppendInt(nil, id, 10)
 
