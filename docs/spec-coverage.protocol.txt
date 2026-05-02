@@ -1,0 +1,4 @@
+ID	Level	Section	Tests
+MCP-2025-11-25/decode/MUST-reject-deep-nesting	MUST	M1a decode-time structural limits	github.com/andygeiss/mcp/internal/protocol_test.Test_Decode_With_DeeplyNestedJSON_Should_ReturnError
+MCP-2025-11-25/initialize/MUST-version-negotiation	MUST	R5 initialize protocol-version negotiation	github.com/andygeiss/mcp/internal/protocol_test.Test_NegotiateVersion_With_UnsupportedVersion_Should_ReturnNewest
+MCP-2025-11-25/jsonrpc/MUST-echo-id	MUST	JSON-RPC 2.0 §5 Response object	github.com/andygeiss/mcp/internal/protocol_test.Test_Decode_With_StringID_Should_PreserveExactly, github.com/andygeiss/mcp/internal/protocol_test.Test_Decode_With_NumberID_Should_PreserveExactly

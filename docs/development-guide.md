@@ -145,7 +145,20 @@ func init() {
 }
 ```
 
-After adding a clause, run `make spec-coverage` to regenerate `docs/spec-coverage.txt` and commit the file alongside the test change. Reviewers should see the audit grow on every PR that lands a new MUST-bearing test. The renderer at `cmd/spec-coverage/main.go` is the compile-checked entry point; the committed audit artifact is produced by the `Test_RenderSpecCoverage_Should_WriteCommittedReport` test (bootstrap `init()` blocks live in `_test.go` files, so plain `go run ./cmd/spec-coverage` sees an empty registry — that's expected).
+After adding a clause, run `make spec-coverage` to regenerate the per-package fragment your clause lives in and the canonical aggregate. Commit the changed files alongside the test. Reviewers should see the audit grow on every PR that lands a new MUST-bearing test.
+
+### Cross-package clause registration
+
+Each package whose `_test.go` files register clauses owns a per-package committed fragment under `docs/`:
+
+- `docs/spec-coverage.protocol.txt` — clauses from `internal/protocol/*_test.go`
+- `docs/spec-coverage.server.txt` — clauses from `internal/server/*_test.go`
+
+The fragments exist because Go test binaries do not propagate `_test.go` symbols across package boundaries — each test binary sees only its own package's `init()` blocks, even though they all share the global `protocol.Clauses` map. The aggregator at `cmd/spec-coverage/main.go` reads the committed fragments, deduplicates by clause ID, sorts ascending, and writes the canonical `docs/spec-coverage.txt`.
+
+`make spec-coverage` runs the per-package fragment tests (each enforces drift detection on its own fragment), then runs the aggregator and drift-checks the aggregate. The server fragment requires `-tags=integration` because Q5 clause registrations live in `internal/server/integration_test.go`; the Makefile target handles this — local developers do not need to set the tag manually.
+
+To register clauses in a package that does **not yet** have a fragment: (1) add a `Test_RenderSpecCoverage_Should_Match{Pkg}Fragment` test colocated with the registration, mirroring the protocol or server fragment tests; (2) run `make spec-coverage` to produce the new `docs/spec-coverage.{pkg}.txt` fragment; (3) append the fragment path to `cmd/spec-coverage/main.go`'s `fragmentPaths`. The three-step friction is intentional: it forces deliberate growth of the audit surface and prevents accidental coverage explosion from unrelated packages picking up the registry.
 
 ## Adding a new resource or prompt
 
