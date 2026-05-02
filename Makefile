@@ -86,16 +86,38 @@ smoke:
 	   rm -f $$STDERR; exit 1; \
 	 fi
 
-## Regenerate the spec-coverage audit at docs/spec-coverage.txt
+## Regenerate the spec-coverage audit fragments and the canonical aggregate at docs/spec-coverage.txt
 spec-coverage:
-	@TEST=Test_RenderSpecCoverage_Should_MatchCommittedReport; \
-	 OUT=$$(go test -race -run "^$$TEST$$" -count=1 -v ./internal/protocol/ 2>&1); \
+	@PROTO=Test_RenderSpecCoverage_Should_MatchProtocolFragment; \
+	 OUT=$$(go test -race -run "^$$PROTO$$" -count=1 -v ./internal/protocol/ 2>&1); \
 	 STATUS=$$?; \
-	 if ! echo "$$OUT" | grep -qE "^(--- PASS|--- FAIL): $$TEST"; then \
-	   echo "spec-coverage: $$TEST did not run (renamed?)"; \
+	 if ! echo "$$OUT" | grep -qE "^(--- PASS|--- FAIL): $$PROTO"; then \
+	   echo "spec-coverage: $$PROTO did not run (renamed?)"; \
 	   echo "$$OUT"; exit 1; \
 	 fi; \
-	 echo "$$OUT"; exit $$STATUS
+	 echo "$$OUT"; \
+	 if [ $$STATUS -ne 0 ]; then exit $$STATUS; fi
+	@SRV=Test_RenderSpecCoverage_Should_MatchServerFragment; \
+	 OUT=$$(go test -race -tags=integration -run "^$$SRV$$" -count=1 -v ./internal/server/ 2>&1); \
+	 STATUS=$$?; \
+	 if ! echo "$$OUT" | grep -qE "^(--- PASS|--- FAIL): $$SRV"; then \
+	   echo "spec-coverage: $$SRV did not run (renamed?)"; \
+	   echo "$$OUT"; exit 1; \
+	 fi; \
+	 echo "$$OUT"; \
+	 if [ $$STATUS -ne 0 ]; then exit $$STATUS; fi
+	@TMP=$$(mktemp); \
+	 if ! go run ./cmd/spec-coverage/ > $$TMP 2>&1; then \
+	   echo "spec-coverage: aggregator failed:"; cat $$TMP; rm -f $$TMP; exit 1; \
+	 fi; \
+	 if cmp -s $$TMP docs/spec-coverage.txt; then \
+	   rm -f $$TMP; \
+	   echo "OK: docs/spec-coverage.txt matches the aggregated registry"; \
+	 else \
+	   mv $$TMP docs/spec-coverage.txt; \
+	   echo "docs/spec-coverage.txt drifted — file regenerated, please review and commit (run \`make spec-coverage\`)"; \
+	   exit 1; \
+	 fi
 
 ## Run all tests with race detector
 test:

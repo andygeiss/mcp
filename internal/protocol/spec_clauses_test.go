@@ -289,27 +289,31 @@ func Test_Render_With_PopulatedRegistry_Should_WriteHeaderAndSortedRows(t *testi
 	}
 }
 
-// Test_RenderSpecCoverage_Should_MatchCommittedReport regenerates the
-// audit artifact at docs/spec-coverage.txt and verifies it matches what is
-// currently committed. The test is the authoritative producer of that file:
-// cmd/spec-coverage cannot populate Clauses by itself because bootstrap
-// init() blocks live in _test.go files and only fire under `go test`.
+// Test_RenderSpecCoverage_Should_MatchProtocolFragment regenerates the
+// per-package audit fragment at docs/spec-coverage.protocol.txt and
+// verifies it matches what is currently committed. The test is the
+// authoritative producer of that fragment: bootstrap init() blocks live
+// in _test.go files and only fire under `go test`, so each test binary
+// sees only its own package's registrations. The aggregator at
+// cmd/spec-coverage merges this fragment with the per-package fragments
+// produced by sibling tests in other packages into the canonical
+// docs/spec-coverage.txt audit.
 //
 // On match: passes silently (no disk write).
-// On drift: regenerates the file and fails with explicit guidance, so a
-// developer who forgot to run `make spec-coverage` sees the failure and a
-// ready-to-commit diff. CI runs this through `make check` and surfaces the
-// drift, closing the loophole where stale audits could land unnoticed.
+// On drift: regenerates the fragment and fails with explicit guidance, so
+// a developer who forgot to run `make spec-coverage` sees the failure and
+// a ready-to-commit diff. CI runs this through `make check` and surfaces
+// the drift, closing the loophole where stale audits could land unnoticed.
 //
 // No t.Parallel(): the test may write to a tracked file path and must not
 // race other invocations under -count>1 or shared workspaces.
 //
-//nolint:paralleltest // intentionally sequential — mutates docs/spec-coverage.txt on drift
-func Test_RenderSpecCoverage_Should_MatchCommittedReport(t *testing.T) {
+//nolint:paralleltest // intentionally sequential — mutates docs/spec-coverage.protocol.txt on drift
+func Test_RenderSpecCoverage_Should_MatchProtocolFragment(t *testing.T) {
 	// Arrange — locate repo root by walking up from this file until go.mod.
 	repoRoot, err := findRepoRoot()
 	assert.That(t, "find repo root", err, nil)
-	target := filepath.Join(repoRoot, "docs", "spec-coverage.txt")
+	target := filepath.Join(repoRoot, "docs", "spec-coverage.protocol.txt")
 
 	// Act
 	var buf bytes.Buffer
@@ -323,7 +327,7 @@ func Test_RenderSpecCoverage_Should_MatchCommittedReport(t *testing.T) {
 	if err := os.WriteFile(target, buf.Bytes(), 0o600); err != nil {
 		t.Fatalf("write %s: %v", target, err)
 	}
-	t.Fatalf("docs/spec-coverage.txt drifted from the in-memory registry — the file has been regenerated, please review and commit it (run `make spec-coverage`)")
+	t.Fatalf("docs/spec-coverage.protocol.txt drifted from the in-memory registry — the file has been regenerated, please review and commit it (run `make spec-coverage`)")
 }
 
 func findRepoRoot() (string, error) {

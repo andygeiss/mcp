@@ -227,6 +227,13 @@ func Test_Server_With_CapabilityGate_Should_RejectSamplingWithoutAdvertisement(t
 		if bytes.Contains(stdout.Bytes(), []byte(`"sampling/createMessage"`)) {
 			t.Fatalf("AI9 violation: outbound emitted despite missing capability; stdout=%s", stdout.String())
 		}
+
+		// Total-message count: exactly the initialize response + the tool-call
+		// response should appear on stdout. A regression that emits a side
+		// effect via a different method name would add a third message and
+		// fail this assertion — substring-only checks would miss it.
+		assert.That(t, "exactly initialize+tool-call response (no outbound side effect)",
+			strings.Count(stdout.String(), `"jsonrpc":"2.0"`), 2)
 	})
 }
 
@@ -280,6 +287,13 @@ func Test_SendRequest_With_ElicitationCreate_AndCapabilityNotAdvertised_Should_R
 		if bytes.Contains(stdout.Bytes(), []byte(`"elicitation/create"`)) {
 			t.Fatalf("AI9 violation: outbound emitted despite missing capability; stdout=%s", stdout.String())
 		}
+
+		// Total-message count: exactly the initialize response + the tool-call
+		// response should appear on stdout. A regression that emits a side
+		// effect via a different method name would add a third message and
+		// fail this assertion — substring-only checks would miss it.
+		assert.That(t, "exactly initialize+tool-call response (no outbound side effect)",
+			strings.Count(stdout.String(), `"jsonrpc":"2.0"`), 2)
 	})
 }
 

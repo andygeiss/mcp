@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/andygeiss/mcp/internal/assert"
 	"github.com/andygeiss/mcp/internal/protocol"
@@ -202,14 +204,29 @@ func Test_ProgressReport_DuringOutboundBidi_Should_NotInterleave(t *testing.T) {
 
 	stdinR, stdinW := io.Pipe()
 	stdoutR, stdoutW := io.Pipe()
+	t.Cleanup(func() { _ = stdoutW.Close() })
 	var stderr bytes.Buffer
 	srv := server.NewServer("mcp", "test", r, stdinR, stdoutW, &stderr)
 
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- srv.Run(context.Background()) }()
+	go func() {
+		defer func() {
+			if rec := recover(); rec != nil {
+				done <- fmt.Errorf("server panic: %v", rec)
+			}
+		}()
+		done <- srv.Run(ctx)
+	}()
+	// AI10 telemetry assertions below need stderr — but they assert on a
+	// specific count, not WARN/ERROR cleanliness. Drain via the bidi helper
+	// would also call assertCleanStderr, which would conflict with the
+	// expected single warn record. So this test owns its drainage inline:
+	// stdinW.Close + stdoutR.Close + <-done at end of body.
 
 	// Handshake advertising sampling capability so AI9 lets the outbound through.
-	bidirHandshake := `{"jsonrpc":"2.0","method":"initialize","id":1,"params":{"capabilities":{"sampling":{}}}}` + "\n" + initializedNotification
+	bidirHandshake := `{"jsonrpc":"2.0","method":"initialize","id":1,"params":{"protocolVersion":"` + protocol.MCPVersion + `","capabilities":{"sampling":{}}}}` + "\n" + initializedNotification
 	if _, werr := stdinW.Write([]byte(bidirHandshake)); werr != nil {
 		t.Fatalf("write handshake: %v", werr)
 	}
@@ -275,7 +292,12 @@ func Test_ProgressReport_DuringOutboundBidi_Should_NotInterleave(t *testing.T) {
 		post = append(post, raw)
 	}
 
+	// Drain the server before reading stderr for the AI10 telemetry
+	// assertions. Closing both pipe ends unblocks Run if it's parked
+	// writing to stdoutW for any reason; the receive picks up the run
+	// error (or panic).
 	_ = stdinW.Close()
+	_ = stdoutR.Close()
 	if rerr := <-done; rerr != nil {
 		t.Fatalf("server run: %v", rerr)
 	}

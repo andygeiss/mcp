@@ -1,9 +1,6 @@
 ID	Level	Section	Tests
-MCP-2025-11-25/decode/MUST-reject-deep-nesting	MUST	M1a decode-time structural limits	github.com/andygeiss/mcp/internal/protocol_test.Test_Decode_With_DeeplyNestedJSON_Should_ReturnError
 MCP-2025-11-25/elicitation/MUST-gate-on-capability	MUST	Q18 elicitation/create outbound	github.com/andygeiss/mcp/internal/server_test.Test_SendRequest_With_ElicitationCreate_AndCapabilityNotAdvertised_Should_ReturnCapabilityError
 MCP-2025-11-25/elicitation/MUST-roundtrip-when-advertised	MUST	Q18 elicitation/create outbound	github.com/andygeiss/mcp/internal/server_test.Test_SendRequest_With_ElicitationCreate_AndCapabilityAdvertised_Should_RoundTrip
-MCP-2025-11-25/initialize/MUST-version-negotiation	MUST	R5 initialize protocol-version negotiation	github.com/andygeiss/mcp/internal/protocol_test.Test_NegotiateVersion_With_UnsupportedVersion_Should_ReturnNewest
-MCP-2025-11-25/jsonrpc/MUST-echo-id	MUST	JSON-RPC 2.0 §5 Response object	github.com/andygeiss/mcp/internal/protocol_test.Test_Decode_With_StringID_Should_PreserveExactly, github.com/andygeiss/mcp/internal/protocol_test.Test_Decode_With_NumberID_Should_PreserveExactly
 MCP-2025-11-25/progress/MUST-extract-progressToken	MUST	Q6 progress-token passthrough discipline	github.com/andygeiss/mcp/internal/server.Test_Dispatch_With_ProgressToken_Should_PlumbToContext
 MCP-2025-11-25/progress/MUST-not-emit-during-outbound	MUST	AI10 — no progress notifications during outbound bidi requests	github.com/andygeiss/mcp/internal/server.Test_Progress_Report_With_OutboundActive_Should_Drop
 MCP-2025-11-25/progress/MUST-not-emit-without-token	MUST	Q6 progress-token passthrough discipline	github.com/andygeiss/mcp/internal/server_test.Test_ProgressReport_Without_Token_Should_NotEmit

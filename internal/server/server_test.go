@@ -64,6 +64,52 @@ func handshake() string {
 	return initRequest + initializedNotification
 }
 
+// assertCleanStderr fails the test if any WARN or ERROR slog record appears
+// on stderr. Bidi happy-path tests use this as a regression guard against a
+// future logger leak emitting on a path that should stay silent. Parses
+// line-by-line and inspects the top-level "level" JSON field rather than
+// matching a raw substring — a payload mentioning "level":"WARN" inside a
+// log message attribute would not false-trigger this check.
+func assertCleanStderr(t *testing.T, stderr *bytes.Buffer) {
+	t.Helper()
+	for line := range strings.SplitSeq(strings.TrimRight(stderr.String(), "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		var rec struct {
+			Level string `json:"level"`
+		}
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			// Non-JSON stderr lines are out of scope for this check; the
+			// project uses slog.JSONHandler exclusively, so this branch
+			// would only fire on a future plain-stderr regression.
+			continue
+		}
+		if rec.Level == "WARN" || rec.Level == "ERROR" {
+			t.Errorf("stderr carries unexpected %s record: %s", rec.Level, line)
+		}
+	}
+}
+
+// drainBidi closes the bidi pipes and drains the server goroutine. Called
+// from t.Cleanup so a t.Fatalf earlier in the test still terminates the
+// goroutine and surfaces any non-nil run error or stderr regression.
+//
+// stdoutR is closed alongside stdinW: if srv.Run is parked in a
+// stdoutW.Write because the test stopped reading mid-flight, only a
+// reader-side close unblocks the writer (closing stdinW alone would leave
+// the goroutine stuck and the cleanup deadlocked on <-done). The 5s ctx
+// timeout backstop applies regardless.
+func drainBidi(t *testing.T, stdinW *io.PipeWriter, stdoutR *io.PipeReader, done <-chan error, stderr *bytes.Buffer) {
+	t.Helper()
+	_ = stdinW.Close()
+	_ = stdoutR.Close()
+	if err := <-done; err != nil {
+		t.Errorf("server run: %v", err)
+	}
+	assertCleanStderr(t, stderr)
+}
+
 func Test_Server_With_InitializeHandshake_Should_ReturnCapabilities(t *testing.T) {
 	t.Parallel()
 
@@ -3642,53 +3688,70 @@ func Test_Server_With_SendRequest_Should_CorrelateResponse(t *testing.T) {
 	// Use pipes for bidirectional communication (both stdin and stdout)
 	stdinR, stdinW := io.Pipe()
 	stdoutR, stdoutW := io.Pipe()
+	t.Cleanup(func() { _ = stdoutW.Close() })
 	var stderr bytes.Buffer
 	srv := server.NewServer("mcp", "test", r, stdinR, stdoutW, &stderr)
 
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		done <- srv.Run(context.Background())
+		defer func() {
+			if r := recover(); r != nil {
+				done <- fmt.Errorf("server panic: %v", r)
+			}
+		}()
+		done <- srv.Run(ctx)
 	}()
+	t.Cleanup(func() { drainBidi(t, stdinW, stdoutR, done, &stderr) })
 
 	// Act — write handshake advertising sampling capability so the AI9
 	// capability gate in (*Server).SendRequest does not reject the outbound.
-	bidirHandshake := `{"jsonrpc":"2.0","method":"initialize","id":1,"params":{"capabilities":{"sampling":{}}}}` + "\n" + initializedNotification
-	_, _ = stdinW.Write([]byte(bidirHandshake))
+	bidirHandshake := `{"jsonrpc":"2.0","method":"initialize","id":1,"params":{"protocolVersion":"` + protocol.MCPVersion + `","capabilities":{"sampling":{}}}}` + "\n" + initializedNotification
+	if _, werr := stdinW.Write([]byte(bidirHandshake)); werr != nil {
+		t.Fatalf("write handshake: %v", werr)
+	}
 
 	// Read stdout with a decoder (thread-safe via pipe)
 	dec := json.NewDecoder(stdoutR)
 
 	// First message: initialize response
 	var initResp json.RawMessage
-	_ = dec.Decode(&initResp)
+	if derr := dec.Decode(&initResp); derr != nil {
+		t.Fatalf("decode init response: %v", derr)
+	}
 
 	// Write tool call
-	_, _ = stdinW.Write([]byte(`{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"bidir","arguments":{"message":"test"}}}` + "\n"))
+	if _, werr := stdinW.Write([]byte(`{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"bidir","arguments":{"message":"test"}}}` + "\n")); werr != nil {
+		t.Fatalf("write tool call: %v", werr)
+	}
 
 	// Second message: the server's sampling/createMessage request
 	var srvReq struct {
 		ID     json.RawMessage `json:"id"`
 		Method string          `json:"method"`
 	}
-	_ = dec.Decode(&srvReq)
+	if derr := dec.Decode(&srvReq); derr != nil {
+		t.Fatalf("decode outbound: %v", derr)
+	}
 
 	// Write the response back to stdin
 	response := fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":"world"}`, string(srvReq.ID))
-	_, _ = stdinW.Write([]byte(response + "\n"))
+	if _, werr := stdinW.Write([]byte(response + "\n")); werr != nil {
+		t.Fatalf("write response: %v", werr)
+	}
 
 	// Third message: the tool call result
 	var toolResp protocol.Response
-	_ = dec.Decode(&toolResp)
-
-	// Close stdin to trigger shutdown
-	_ = stdinW.Close()
-	err := <-done
+	if derr := dec.Decode(&toolResp); derr != nil {
+		t.Fatalf("decode tool result: %v", derr)
+	}
 
 	// Assert — the end-to-end correlation pipeline must deliver the client
 	// response back into the tool handler, so the tool's text result must
 	// contain the echoed payload. Asserting only the method name (as the
-	// prior version did) leaves the correlation path untested.
-	assert.That(t, "error", err, nil)
+	// prior version did) leaves the correlation path untested. The clean-
+	// stderr assertion and run-error check fire from drainBidi (cleanup).
 	assert.That(t, "method", srvReq.Method, "sampling/createMessage")
 
 	var result struct {
@@ -3728,14 +3791,25 @@ func Test_SendRequest_With_ElicitationCreate_AndCapabilityAdvertised_Should_Roun
 
 	stdinR, stdinW := io.Pipe()
 	stdoutR, stdoutW := io.Pipe()
+	t.Cleanup(func() { _ = stdoutW.Close() })
 	var stderr bytes.Buffer
 	srv := server.NewServer("mcp", "test", r, stdinR, stdoutW, &stderr)
 
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- srv.Run(context.Background()) }()
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				done <- fmt.Errorf("server panic: %v", r)
+			}
+		}()
+		done <- srv.Run(ctx)
+	}()
+	t.Cleanup(func() { drainBidi(t, stdinW, stdoutR, done, &stderr) })
 
 	// Act — handshake advertising elicitation so AI9 lets the outbound through.
-	bidirHandshake := `{"jsonrpc":"2.0","method":"initialize","id":1,"params":{"capabilities":{"elicitation":{}}}}` + "\n" + initializedNotification
+	bidirHandshake := `{"jsonrpc":"2.0","method":"initialize","id":1,"params":{"protocolVersion":"` + protocol.MCPVersion + `","capabilities":{"elicitation":{}}}}` + "\n" + initializedNotification
 	if _, werr := stdinW.Write([]byte(bidirHandshake)); werr != nil {
 		t.Fatalf("write handshake: %v", werr)
 	}
@@ -3771,12 +3845,9 @@ func Test_SendRequest_With_ElicitationCreate_AndCapabilityAdvertised_Should_Roun
 		t.Fatalf("decode tool result: %v", derr)
 	}
 
-	_ = stdinW.Close()
-	err := <-done
-
 	// Assert — round-trip correlation: tool result must contain the echoed
-	// payload from the elicitation response.
-	assert.That(t, "error", err, nil)
+	// payload from the elicitation response. The clean-stderr assertion
+	// and run-error check fire from drainBidi (cleanup).
 	assert.That(t, "method", srvReq.Method, "elicitation/create")
 
 	var result struct {
