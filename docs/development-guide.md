@@ -149,12 +149,14 @@ After adding a clause, run `make spec-coverage` to regenerate the per-package fr
 
 ### Cross-package clause registration
 
+This is the project's design pattern for spanning a global registry across multiple test binaries. It exists because of a structural Go invariant: test binaries do not propagate `_test.go` symbols across package boundaries. Each test binary sees only its own package's `init()` blocks, even though they all share the global `protocol.Clauses` map. There is no runtime workaround — any future audit-story extension that spans packages must plan for this from the outset, by adopting the same per-package fragment + aggregator shape.
+
 Each package whose `_test.go` files register clauses owns a per-package committed fragment under `docs/`:
 
 - `docs/spec-coverage.protocol.txt` — clauses from `internal/protocol/*_test.go`
 - `docs/spec-coverage.server.txt` — clauses from `internal/server/*_test.go`
 
-The fragments exist because Go test binaries do not propagate `_test.go` symbols across package boundaries — each test binary sees only its own package's `init()` blocks, even though they all share the global `protocol.Clauses` map. The aggregator at `cmd/spec-coverage/main.go` reads the committed fragments, deduplicates by clause ID, sorts ascending, and writes the canonical `docs/spec-coverage.txt`.
+The aggregator at `cmd/spec-coverage/main.go` reads the committed fragments, deduplicates by clause ID, sorts ascending, and writes the canonical `docs/spec-coverage.txt`.
 
 `make spec-coverage` runs the per-package fragment tests (each enforces drift detection on its own fragment), then runs the aggregator and drift-checks the aggregate. The server fragment requires `-tags=integration` because Q5 clause registrations live in `internal/server/integration_test.go`; the Makefile target handles this — local developers do not need to set the tag manually.
 
