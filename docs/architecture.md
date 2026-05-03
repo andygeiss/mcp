@@ -209,7 +209,7 @@ This means adding a tool is: define an input struct → write `func(ctx, T) Resu
 | `-32600` | Invalid request | bad structure, wrong `jsonrpc` version, `params` not an object |
 | `-32601` | Method not found | unknown method, `rpc.*` reserved |
 | `-32602` | Invalid params | wrong types, missing required fields, unknown tool name |
-| `-32603` | Internal error | should not occur in normal operation |
+| `-32603` | Internal error | should not occur in normal operation; when triggered by tool-output marshaling failure, `error.data` carries `{"field": "<name>"}` naming the offending struct field (FR4) |
 | `-32002` | Resource not found | `resources/read` URI does not match any registered resource or template |
 | `-32001` | Server timeout | tool handler timed out or was cancelled |
 | `-32000` | Server error | state prevents processing — not initialized, already initialized, busy |

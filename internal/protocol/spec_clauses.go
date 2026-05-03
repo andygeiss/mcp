@@ -42,15 +42,29 @@ type Clause struct {
 // in production binaries and only populates under `go test`.
 var Clauses = map[string]Clause{}
 
+// clauseSites maps a registered Clause.ID to the "file:line" string of the
+// site that called Register. Captured via runtime.Caller(1) so the panic on
+// duplicate registration can name BOTH offending sites — the original and
+// the duplicate — without forcing the operator to grep. Kept parallel to
+// Clauses (rather than embedded in the Clause value) so the exported map's
+// read shape stays stable for any future external iterator.
+var clauseSites = map[string]string{}
+
 // Register adds c to the registry. Panics on duplicate ID, missing fields,
 // invalid Level, or nil entries in Tests — registration time is the right
-// moment to fail loudly.
+// moment to fail loudly. On duplicate ID the panic names BOTH the first
+// registration site and the duplicate site so the conflict is mechanical
+// to resolve.
 func Register(c Clause) {
+	site := callerSite()
 	if c.ID == "" {
 		panic("protocol.Register: empty Clause.ID")
 	}
-	if _, ok := Clauses[c.ID]; ok {
-		panic("protocol.Register: duplicate clause ID: " + c.ID)
+	if existingSite, ok := clauseSites[c.ID]; ok {
+		panic(fmt.Sprintf(
+			"protocol.Register: duplicate clause ID %q (first registered at %s, duplicate at %s)",
+			c.ID, existingSite, site,
+		))
 	}
 	switch c.Level {
 	case LevelMAY, LevelMUST, LevelSHOULD:
@@ -72,6 +86,18 @@ func Register(c Clause) {
 		}
 	}
 	Clauses[c.ID] = c
+	clauseSites[c.ID] = site
+}
+
+// callerSite returns the "file:line" of the caller of Register, or "unknown"
+// when the runtime cannot resolve the frame. Skip level 2: callerSite +
+// Register + caller-of-Register.
+func callerSite() string {
+	_, file, line, ok := runtime.Caller(2)
+	if !ok {
+		return "unknown"
+	}
+	return fmt.Sprintf("%s:%d", file, line)
 }
 
 // Render writes a tab-separated coverage report (header + one row per

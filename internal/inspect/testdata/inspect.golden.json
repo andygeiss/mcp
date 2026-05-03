@@ -1,0 +1,58 @@
+{
+  "server": {
+    "name": "mcp",
+    "version": "test"
+  },
+  "protocolVersion": "2025-11-25",
+  "tools": [
+    {
+      "description": "echoes greeting",
+      "inputSchema": {
+        "properties": {
+          "greeting": {
+            "description": "the greeting to echo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "greeting"
+        ],
+        "type": "object"
+      },
+      "name": "sample",
+      "outputSchema": {
+        "properties": {
+          "echoed": {
+            "description": "the echoed greeting",
+            "type": "string"
+          }
+        },
+        "required": [
+          "echoed"
+        ],
+        "type": "object"
+      }
+    }
+  ],
+  "resources": [
+    {
+      "description": "static fixture",
+      "name": "fixture",
+      "uri": "file:///fixture"
+    }
+  ],
+  "resourceTemplates": [],
+  "prompts": [
+    {
+      "arguments": [
+        {
+          "description": "topic for the prompt",
+          "name": "topic",
+          "required": true
+        }
+      ],
+      "description": "fixture prompt",
+      "name": "sample-prompt"
+    }
+  ]
+}
