@@ -11,15 +11,22 @@ import (
 )
 
 //nolint:paralleltest // t.Chdir touches process-global cwd; cannot share with parallel siblings
-func Test_run_With_TwoFragments_Should_EmitSortedUnionWithHeader(t *testing.T) {
-	// Arrange — two synthetic fragments under a tempdir disguised as a
-	// repo root (a go.mod sentinel triggers findRepoRoot).
+func Test_run_With_PerPackageFragments_Should_EmitSortedUnionWithHeader(t *testing.T) {
+	// Arrange — three synthetic fragments under a tempdir disguised as a
+	// repo root (a go.mod sentinel triggers findRepoRoot). One per package
+	// listed in fragmentPaths; the union is sorted by clause ID.
 	root := t.TempDir()
 	mustWrite(t, filepath.Join(root, "go.mod"), "module example.test\n")
+	mustWrite(t, filepath.Join(root, "docs", "spec-coverage.inspect.txt"),
+		"ID\tLevel\tSection\tTests\n"+
+			"E/clause\tMUST\tInspect\tTestE\n")
 	mustWrite(t, filepath.Join(root, "docs", "spec-coverage.protocol.txt"),
 		"ID\tLevel\tSection\tTests\n"+
 			"B/clause\tMUST\tProto\tTestB\n"+
 			"A/clause\tMUST\tProto\tTestA\n")
+	mustWrite(t, filepath.Join(root, "docs", "spec-coverage.schema.txt"),
+		"ID\tLevel\tSection\tTests\n"+
+			"D/clause\tMUST\tSchema\tTestD\n")
 	mustWrite(t, filepath.Join(root, "docs", "spec-coverage.server.txt"),
 		"ID\tLevel\tSection\tTests\n"+
 			"C/clause\tSHOULD\tServer\tTestC\n")
@@ -37,7 +44,9 @@ func Test_run_With_TwoFragments_Should_EmitSortedUnionWithHeader(t *testing.T) {
 	want := "ID\tLevel\tSection\tTests\n" +
 		"A/clause\tMUST\tProto\tTestA\n" +
 		"B/clause\tMUST\tProto\tTestB\n" +
-		"C/clause\tSHOULD\tServer\tTestC\n"
+		"C/clause\tSHOULD\tServer\tTestC\n" +
+		"D/clause\tMUST\tSchema\tTestD\n" +
+		"E/clause\tMUST\tInspect\tTestE\n"
 	assert.That(t, "sorted union output", got, want)
 }
 

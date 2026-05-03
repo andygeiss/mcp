@@ -89,6 +89,25 @@ func deriveStructSchema[T any]() (map[string]Property, []string, error) {
 		t = t.Elem()
 	}
 
+	// Top-level special cases: time.Time and json.RawMessage are accepted as
+	// documented top-level types and produce an empty object schema. Field-
+	// level handling lives in deriveSpecial; this branch keeps top-level use
+	// (rare but legal) from falling into collectFields, which would either
+	// panic (RawMessage is a slice, not a struct) or silently iterate the
+	// struct's unexported fields and emit an empty schema.
+	if t == timeType || t == rawMessageType {
+		return map[string]Property{}, nil, nil
+	}
+
+	// Top-level guard: reject any non-struct kind with a typed error naming
+	// the offending type. The single Elem unwrap above turns *Struct into
+	// Struct but leaves **Struct as *Struct (still pointer kind), so this
+	// guard catches the double-pointer footgun without recursing through
+	// arbitrary pointer levels.
+	if t.Kind() != reflect.Struct {
+		return nil, nil, fmt.Errorf("schema: top-level type %s is not a struct (allowed: struct, *struct, time.Time, json.RawMessage)", t)
+	}
+
 	props := make(map[string]Property)
 	var required []string
 	if err := collectFields(t, props, &required, 0, map[reflect.Type]bool{t: true}); err != nil {

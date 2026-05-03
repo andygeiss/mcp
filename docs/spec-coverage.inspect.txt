@@ -1,0 +1,2 @@
+ID	Level	Section	Tests
+MCP-2025-11-25/inspect/MUST-emit-deterministic-shape	MUST	FR7 inspection-mode contract	github.com/andygeiss/mcp/internal/inspect_test.Test_Inspect_With_PopulatedRegistries_Should_EmitDeterministicShape, github.com/andygeiss/mcp/internal/inspect_test.Test_Inspect_With_NilRegistries_Should_EmitEmptyArrays, github.com/andygeiss/mcp/internal/inspect_test.Test_Inspect_With_FixtureRegistries_Should_MatchGolden

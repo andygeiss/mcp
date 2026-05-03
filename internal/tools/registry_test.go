@@ -3,10 +3,12 @@ package tools_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/andygeiss/mcp/internal/assert"
+	"github.com/andygeiss/mcp/internal/protocol"
 	"github.com/andygeiss/mcp/internal/tools"
 )
 
@@ -480,7 +482,7 @@ type outWithInterface struct {
 	Value any `json:"value" description:"any value"`
 }
 
-func Test_Register_With_UnmarshalableOutAtRuntime_Should_ReturnInternalError(t *testing.T) {
+func Test_Register_With_UnmarshalableOutAtRuntime_Should_ReturnInternalErrorWithFieldData(t *testing.T) {
 	t.Parallel()
 
 	r := tools.NewRegistry()
@@ -497,8 +499,22 @@ func Test_Register_With_UnmarshalableOutAtRuntime_Should_ReturnInternalError(t *
 	if err == nil {
 		t.Fatal("expected internal error from json.Marshal on chan, got nil")
 	}
-	if !strings.Contains(err.Error(), "marshal structured output") {
-		t.Errorf("error should mention marshal failure, got: %s", err.Error())
+	var ce *protocol.CodeError
+	if !errors.As(err, &ce) {
+		t.Fatalf("error should be *protocol.CodeError, got %T", err)
+	}
+	if ce.Code != protocol.InternalError {
+		t.Errorf("expected code %d, got %d", protocol.InternalError, ce.Code)
+	}
+	if !strings.Contains(ce.Message, "output marshaling failed: field") {
+		t.Errorf("message should name the failure mode and field, got: %s", ce.Message)
+	}
+	var data map[string]string
+	if err := json.Unmarshal(ce.Data, &data); err != nil {
+		t.Fatalf("error.data should be JSON object {field: <name>}, got %q: %v", ce.Data, err)
+	}
+	if data["field"] != "value" {
+		t.Errorf("error.data.field should name the offending field (json tag), got %q", data["field"])
 	}
 }
 

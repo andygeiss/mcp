@@ -191,10 +191,7 @@ func finalizeResult(toolName string, out any, result Result) (Result, error) {
 	if isStructuredOutputPresent(out) {
 		raw, err := json.Marshal(out)
 		if err != nil {
-			return Result{}, &protocol.CodeError{
-				Code:    protocol.InternalError,
-				Message: fmt.Sprintf("marshal structured output for tool %q: %v", toolName, err),
-			}
+			return Result{}, marshalFailureError(toolName, out)
 		}
 		result.StructuredContent = raw
 	}
@@ -202,6 +199,29 @@ func finalizeResult(toolName string, out any, result Result) (Result, error) {
 		result.Content = []ContentBlock{}
 	}
 	return result, nil
+}
+
+// marshalFailureError constructs the -32603 response for a tool whose Out
+// value failed json.Marshal. Uses the schema-aware introspection helper to
+// name the offending field in error.data so tool authors can locate the
+// runtime issue without grepping the dispatch layer (FR4 / Story 1.4).
+func marshalFailureError(toolName string, out any) error {
+	field, ok := schema.FindUnmarshalable(out)
+	if !ok {
+		field = "unknown"
+	}
+	data, mErr := json.Marshal(map[string]string{"field": field})
+	if mErr != nil {
+		// Defensive: a JSON-marshal failure on a {string:string} map is
+		// effectively impossible; fall back to nil Data so dispatch still
+		// emits a structured -32603 response.
+		data = nil
+	}
+	return &protocol.CodeError{
+		Code:    protocol.InternalError,
+		Message: fmt.Sprintf("tool %q output marshaling failed: field %s", toolName, field),
+		Data:    data,
+	}
 }
 
 // isStructuredOutputPresent reports whether out should be marshaled into

@@ -30,7 +30,9 @@ import (
 // repo root. Order is insignificant — rows are merged and sorted by
 // clause ID before emission.
 var fragmentPaths = []string{
+	"docs/spec-coverage.inspect.txt",
 	"docs/spec-coverage.protocol.txt",
+	"docs/spec-coverage.schema.txt",
 	"docs/spec-coverage.server.txt",
 }
 

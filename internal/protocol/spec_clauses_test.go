@@ -2,6 +2,7 @@ package protocol_test
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -83,11 +84,12 @@ func Test_Clauses_Should_ResolveAllFunctionNames(t *testing.T) {
 	}
 }
 
-func Test_Register_With_DuplicateID_Should_Panic(t *testing.T) {
+func Test_Register_With_DuplicateID_Should_PanicWithBothSites(t *testing.T) {
 	t.Parallel()
 
 	// Arrange — capture an arbitrary already-registered ID. Re-registering
-	// it must panic to prevent silent overwrite.
+	// it must panic with a message naming BOTH the first registration site
+	// and the duplicate site so the conflict is mechanical to resolve (FR5).
 	var existingID string
 	for id := range protocol.Clauses {
 		existingID = id
@@ -107,12 +109,20 @@ func Test_Register_With_DuplicateID_Should_Panic(t *testing.T) {
 
 	// Act + Assert
 	defer func() {
-		// If a panic guard regresses, the dup clause may have been written
-		// over the original. Restore the original entry on panic-recovery
-		// failure so we don't pollute the global registry for other tests.
-		if r := recover(); r == nil {
-			t.Error("expected panic on duplicate Register, got none")
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic on duplicate Register, got none")
 		}
+		msg := fmt.Sprint(r)
+		// The panic must name the conflicting ID (quoted), the words
+		// "first registered at" and "duplicate at", and contain a Go source
+		// path with a line number for at least one site (the originating
+		// init() block lives in *_test.go, so ".go:" is the load-bearing
+		// substring).
+		assert.That(t, "names ID quoted", strings.Contains(msg, `"`+existingID+`"`), true)
+		assert.That(t, "names first-site phrase", strings.Contains(msg, "first registered at"), true)
+		assert.That(t, "names duplicate-site phrase", strings.Contains(msg, "duplicate at"), true)
+		assert.That(t, "contains a source-location marker", strings.Contains(msg, ".go:"), true)
 	}()
 	protocol.Register(dup)
 }

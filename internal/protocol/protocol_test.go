@@ -35,6 +35,15 @@ func init() {
 			Test_Decode_With_DeeplyNestedJSON_Should_ReturnError,
 		},
 	})
+	protocol.Register(protocol.Clause{
+		ID:      "MCP-2025-11-25/registry/MUST-name-both-sites-on-duplicate",
+		Level:   protocol.LevelMUST,
+		Section: "FR5 Clause registry duplicate detection",
+		Summary: "Register panics with a message naming the conflicting ID and BOTH source registration sites (file:line) so the duplicate is mechanical to resolve rather than archaeological.",
+		Tests: []func(*testing.T){
+			Test_Register_With_DuplicateID_Should_PanicWithBothSites,
+		},
+	})
 }
 
 // --- Decode tests ---
