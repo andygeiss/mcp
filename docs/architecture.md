@@ -15,7 +15,17 @@ A single Go binary that implements the Model Context Protocol over stdin/stdout.
 - **Layered monolith.** No bounded contexts, no hexagonal layering, no service boundaries inside the binary.
 - **Strict dependency direction:** `cmd/mcp/ → internal/server/ → internal/protocol/`; `internal/server/` may import `internal/tools/`, `internal/resources/`, `internal/prompts/`. The `protocol/` and `schema/` packages have **zero internal dependencies**.
 - **Reflection-driven schema derivation.** Tool/prompt input schemas are computed once per `reflect.Type` (cached) from struct tags (`json`, `description`).
-- **Sequential dispatch.** The server advertises `experimental.concurrency.maxInFlight: 1` to clients and enforces single-threaded handler execution in the dispatch loop.
+- **Sequential dispatch as the load-bearing constraint** — see [Load-bearing constraints](#load-bearing-constraints).
+
+## Load-bearing constraints
+
+Two constraints hold without exception across every wave of Q1. They are the architectural footing every other decision rests on; treat both as preconditions, not preferences.
+
+**Sequential dispatch.** The server advertises `experimental.concurrency.maxInFlight: 1` and enforces single-threaded handler execution in the dispatch loop. This is the constraint that lets the codec, the three-state lifecycle, the bidi `Peer`, and the conformance goldens stay small enough to audit. Every "would this need a lock?" question collapses to "no, dispatch serializes it." It held under `Register[In, Out]` generics, the AI9/AI10 invariants, and bidi-test concurrency tightening without modification. **Concurrency proposals (parallel handlers, request pipelining, in-flight notifications) must be evaluated against this constraint before any code change** — lifting `maxInFlight` re-derives the codec, the state machine, the bidi correlation map, and every golden simultaneously.
+
+**Stdlib-only.** Zero `go.mod` deltas across thirteen Q1 stories touching protocol envelope, dispatch, schema reflection, generics, capability enum, AI9/AI10 enforcement, bidi tests, goldens, and version negotiation. Forces first-principles solutions (counting reader vs `io.LimitReader`, `slices.Contains` vs a set library, `sync.Once` vs DI frameworks) that compound into the audit story.
+
+Stdlib-only is the visible moat; sequential dispatch is the architectural one. Both must hold.
 
 ## Component map
 
